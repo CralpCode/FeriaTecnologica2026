@@ -1,0 +1,12 @@
+{
+  "name": "max30102",
+  "author": "Feria Tecnologica",
+  "pins": [
+    "VIN",
+    "GND",
+    "SCL",
+    "SDA",
+    "INT"
+  ],
+  "controls": []
+}

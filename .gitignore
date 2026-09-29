@@ -1,0 +1,66 @@
+# ==========================================
+# Videos y Grabaciones Multimedia
+# ==========================================
+Videos/
+videos/
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.wmv
+*.flv
+*.webm
+*.m4v
+Grabación*.*
+Grabacion*.*
+
+# ==========================================
+# Archivos de Instalación y Binarios
+# ==========================================
+*.apk
+*.aab
+*.exe
+*.elf
+*.map
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Compilación y builds de firmware / apps
+build/
+.pio/
+dist/
+web-build/
+
+# ==========================================
+# Bases de Datos Locales
+# ==========================================
+*.db
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ==========================================
+# Dependencias y Caché (Node / Python / Expo)
+# ==========================================
+node_modules/
+__pycache__/
+*.py[cod]
+.env
+.env*.local
+.expo/
+dist/
+web-build/
+*.tsbuildinfo
+.metro-health-check*
+
+# ==========================================
+# Archivos del Sistema / IDE
+# ==========================================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "author": "Feria Tecnologica",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "u4",
+      "top": 80,
+      "left": 140,
+      "attrs": {}
+    },
+    {
+      "type": "chip-inmp441",
+      "id": "u2",
+      "top": 140,
+      "left": -120,
+      "attrs": {}
+    },
+    {
+      "type": "chip-max30102",
+      "id": "u1",
+      "top": 40,
+      "left": 480,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-neopixel",
+      "id": "led1",
+      "top": 180,
+      "left": 480,
+      "attrs": {
+        "color": "red"
+      }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "j1",
+      "top": 280,
+      "left": 480,
+      "attrs": {
+        "color": "blue",
+        "label": "J1 - Modo"
+      }
+    },
+    {
+      "type": "wokwi-slide-switch",
+      "id": "b1",
+      "top": -60,
+      "left": 160,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    [ "u4:TX", "$serialMonitor:RX", "", [] ],
+    [ "u4:RX", "$serialMonitor:TX", "", [] ],
+    
+    [ "b1:2", "u4:5V", "red", [ "v30", "h-50", "v90" ] ],
+
+    [ "u4:3V3", "u2:VDD", "red", [ "v-30", "h-280", "v90" ] ],
+    [ "u4:GND.1", "u2:GND", "black", [ "v-20", "h-260", "v90" ] ],
+    [ "u4:GND.1", "u2:L/R", "black", [ "v-20", "h-260", "v120" ] ],
+    [ "u4:14", "u2:SCK", "green", [ "v0", "h-80", "v-20" ] ],
+    [ "u4:15", "u2:WS", "green", [ "v0", "h-100", "v10" ] ],
+    [ "u4:32", "u2:SD", "green", [ "v0", "h-120", "v40" ] ],
+
+    [ "u4:3V3", "u1:VIN", "red", [ "v-30", "h240", "v10" ] ],
+    [ "u4:GND.2", "u1:GND", "black", [ "v-20", "h220", "v20" ] ],
+    [ "u4:22", "u1:SCL", "green", [ "v0", "h140", "v-40" ] ],
+    [ "u4:21", "u1:SDA", "green", [ "v0", "h160", "v-30" ] ],
+
+    [ "u4:3V3", "led1:VDD", "red", [ "v-30", "h260", "v160" ] ],
+    [ "u4:GND.2", "led1:VSS", "black", [ "v-20", "h240", "v160" ] ],
+    [ "u4:25", "led1:DIN", "green", [ "v0", "h150", "v10" ] ],
+
+    [ "u4:17", "j1:1.l", "green", [ "v0", "h120", "v90" ] ],
+    [ "u4:GND.2", "j1:2.l", "black", [ "v-20", "h220", "v260" ] ]
+  ],
+  "dependencies": {}
+}

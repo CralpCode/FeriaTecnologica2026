@@ -1,0 +1,12 @@
+[wokwi]
+version = 1
+firmware = "sketch.bin"
+elf = "sketch.elf"
+
+[[chip]]
+name = "inmp441"
+binary = "chips/inmp441.chip.wasm"
+
+[[chip]]
+name = "max30102"
+binary = "chips/max30102.chip.wasm"

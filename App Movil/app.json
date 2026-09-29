@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "SpiroScan AI",
+    "slug": "vitalsync-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.spiroscan.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ],
+      "usesCleartextTraffic": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "d3331c26-9ca5-4d8e-bc90-19c6500766ab"
+      }
+    },
+    "plugins": [
+      "expo-sharing",
+      "expo-status-bar",
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "modes": ["peripheral", "central"],
+          "bluetoothAlwaysPermission": "Permite a SpiroScan sincronizar con la pulsera biomédica ESP32 por Bluetooth."
+        }
+      ]
+    ]
+  }
+}

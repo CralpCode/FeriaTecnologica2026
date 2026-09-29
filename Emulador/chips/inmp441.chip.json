@@ -1,0 +1,13 @@
+{
+  "name": "inmp441",
+  "author": "Feria Tecnologica",
+  "pins": [
+    "L/R",
+    "WS",
+    "SCK",
+    "SD",
+    "VDD",
+    "GND"
+  ],
+  "controls": []
+}
