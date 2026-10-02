@@ -6,7 +6,7 @@ import { VitalsHistoryPoint } from '../types/vitals';
 
 interface TrendChartProps {
   data: VitalsHistoryPoint[];
-  metricKey: 'heartRate' | 'bloodOxygen' | 'systolicPressure' | 'stressLevel';
+  metricKey: 'heartRate' | 'bloodOxygen' | 'hrv' | 'stressLevel';
   title: string;
   unit: string;
   color: string;

@@ -64,3 +64,10 @@ web-build/
 Thumbs.db
 .vscode/
 .idea/
+
+# ==========================================
+# Datos generados por el servidor (audios de pacientes e informes)
+# ==========================================
+Backend/recordings/
+Backend/reports/
+Esp32/spiroscan_config.h

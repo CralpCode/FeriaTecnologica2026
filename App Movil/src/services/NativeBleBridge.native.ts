@@ -261,20 +261,14 @@ class NativeBleServiceImpl implements NativeBleService {
                         : raw.charCodeAt(1);
 
                       if (bpm > 0) {
-                        const nowMs = Date.now();
-                        const breathOffset = Math.sin(nowMs / 2400) * 0.45;
-                        const dynamicSpo2 = Number((98.2 + breathOffset).toFixed(1));
-
+                        // El canal estándar solo trae el pulso: el resto queda en 0 (sin dato), nunca inventado.
                         onData({
                           bpm,
-                          spo2: dynamicSpo2,
-                          systolic: 118,
-                          diastolic: 76,
-                          temperature: 36.6,
-                          stress: Math.round(Math.max(10, Math.min(95, (bpm - 50) * 1.2))),
-                          hrv: 65,
-                          audio_rms: 20.0,
-                          audio_peak: 26.0,
+                          spo2: 0,
+                          systolic: 0,
+                          diastolic: 0,
+                          audio_rms: 0,
+                          audio_peak: 0,
                           finger: true,
                           device_id: 'SpiroScan-Band',
                         });

@@ -9,13 +9,17 @@
  *   - LED1: LED RGB Direccionable WS2812B (Indicador Clinico de Pulso y Estado: IO25)
  *   - K1: Boton Pulsador de Activacion / Reactivacion (IO17)
  * COMUNICACION:
- *   - Bluetooth Serial (SPP) Primario: "SpiroScan-Band"
+ *   - BLE "SpiroScan-Band": telemetria de pulso y SpO2 hacia la app
+ *   - WiFi: telemetria (1 Hz) y audio de 15 s hacia el servidor en la Mac, que se
+ *     encuentra solo por mDNS (ver auscultacion.h)
  *   - Consola Serial USB (115200 baud): Telemetria 100% Real
  *   - CERO SIMULACION: Todos los valores provienen exclusivamente del hardware fisico.
  * GESTION ENERGETICA:
  *   - Ventana Activa: 2 minutos de transmision continua.
  *   - Reposo / Suspension: Apaga perifericos y entra en reposo durante 2 horas.
  *   - Reactivacion: Presionar el boton K1 (IO17) o enviar 'WAKE'.
+ * AUSCULTACION:
+ *   - Mantener K1 presionado 1 s (o enviar 'REC') graba 15 s y los envia a la CNN.
  * ==============================================================================
  */
 
@@ -71,6 +75,8 @@ int active_i2c_scl = I2C_SCL_PIN;
 Adafruit_NeoPixel strip(NUM_LEDS, WS2812_PIN, NEO_GRB + NEO_KHZ800);
 MAX30105 particleSensor;
 
+#include "auscultacion.h"
+
 // ------------------------------------------------------------------------------
 // 3. VARIABLES GLOBALES BIOMEDICAS Y ACUSTICAS (100% FISICAS)
 // ------------------------------------------------------------------------------
@@ -85,8 +91,7 @@ long lastBeat = 0;
 float beatsPerMinute = 0;
 int beat_avg = 0;
 float spo2_val = 0.0f;
-int systolic_bp = 0;
-int diastolic_bp = 0;
+// Temperatura del CHIP MAX30102 (no es temperatura corporal); solo diagnostico por serial.
 float body_temp = 0.0f;
 
 // Variables de Acustica Medica y Estres (INMP441 Real)
@@ -124,8 +129,9 @@ void setup_i2s() {
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
     .communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_STAND_I2S),
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 4,
-    .dma_buf_len = 128,
+    // 8 x 256 muestras = 128 ms de margen: evita perder audio mientras el loop atiende BLE/I2C
+    .dma_buf_count = 8,
+    .dma_buf_len = 256,
     .use_apll = false,
     .tx_desc_auto_clear = false,
     .fixed_mclk = 0
@@ -320,8 +326,6 @@ void update_biometric_signals() {
         float read_t = particleSensor.readTemperature();
         if (read_t >= 25.0f && read_t <= 45.0f) {
           body_temp = read_t;
-        } else if (body_temp < 25.0f) {
-          body_temp = 36.5f;
         }
       }
 
@@ -409,11 +413,9 @@ void update_biometric_signals() {
       }
       last_ac_signal = ac_signal;
 
-      // Estimacion hemodinamica basada en el pulso real y acustica
+      // Indice de estres EXPERIMENTAL (no validado). El MAX30102 no mide presion arterial,
+      // por eso ya no se estima: un valor calculado solo a partir del pulso seria inventado.
       if (beat_avg > 0) {
-        int hr_delta = beat_avg - 72;
-        systolic_bp = constrain(118 + (int)(hr_delta * 0.42f + (stress_score * 0.1f)), 95, 175);
-        diastolic_bp = constrain(76 + (int)(hr_delta * 0.20f + (stress_score * 0.05f)), 60, 110);
         stress_score = constrain((int)((beat_avg - 50) * 1.25f + (audio_rms * 0.35f)), 10, 98);
       }
     } else {
@@ -421,8 +423,6 @@ void update_biometric_signals() {
       finger_detected = false;
       beat_avg = 0;
       spo2_val = 0.0f;
-      systolic_bp = 0;
-      diastolic_bp = 0;
       body_temp = 0.0f;
       stress_score = 0;
       hrv_ms = 0;
@@ -440,8 +440,6 @@ void update_biometric_signals() {
     finger_detected = false;
     beat_avg = 0;
     spo2_val = 0.0f;
-    systolic_bp = 0;
-    diastolic_bp = 0;
     body_temp = 0.0f;
     stress_score = 0;
     hrv_ms = 0;
@@ -492,8 +490,11 @@ void check_button() {
     btn_press_time = millis();
   } else if (last_btn_state == LOW && current_state == HIGH) {
     unsigned long duration = millis() - btn_press_time;
-    if (duration > 50) {
-      // Cualquier pulsacion del boton K1 reactiva la transmision de 2 minutos
+    if (duration >= 1000) {
+      // Pulsacion larga: grabar 15 s de auscultacion y enviarlos a la CNN
+      ausc_start();
+    } else if (duration > 50) {
+      // Pulsacion corta: reactiva la transmision
       activate_transmission();
     }
   }
@@ -508,7 +509,9 @@ void handle_incoming_commands(String cmd) {
   cmd.trim();
   cmd.toUpperCase();
 
-  if (cmd == "WAKE" || cmd == "W" || cmd == "ACTIVE") {
+  if (cmd == "REC" || cmd == "GRABAR") {
+    ausc_start();
+  } else if (cmd == "WAKE" || cmd == "W" || cmd == "ACTIVE") {
     activate_transmission();
   } else if (cmd == "SLEEP" || cmd == "S") {
     enter_standby();
@@ -533,8 +536,8 @@ void handle_incoming_commands(String cmd) {
 void broadcast_telemetry() {
   char json_payload[280];
   snprintf(json_payload, sizeof(json_payload),
-           "{\"bpm\":%d,\"spo2\":%.1f,\"systolic\":%d,\"diastolic\":%d,\"temperature\":%.1f,\"stress\":%d,\"hrv\":%d,\"audio_rms\":%.2f,\"audio_peak\":%.2f,\"finger\":%s,\"test\":false,\"device_id\":\"ESP32-BIO-01\"}",
-           beat_avg, spo2_val, systolic_bp, diastolic_bp, body_temp, stress_score, hrv_ms,
+           "{\"bpm\":%d,\"spo2\":%.1f,\"stress\":%d,\"hrv\":%d,\"audio_rms\":%.2f,\"audio_peak\":%.2f,\"finger\":%s,\"test\":false,\"device_id\":\"" DEVICE_ID "\"}",
+           beat_avg, spo2_val, stress_score, hrv_ms,
            audio_rms, audio_peak, finger_detected ? "true" : "false");
 
   // 1. Envio por BLE (Directo a Google Chrome / Edge en Celular y PC sin cables)
@@ -550,10 +553,14 @@ void broadcast_telemetry() {
   }
 
   // 2. Envio a Consola Serial USB (115200 baud)
-  Serial.printf("[TELEMETRIA] FC: %3d BPM | SpO2: %4.1f%% | PA: %3d/%2d mmHg | Temp: %4.1f C | Estres: %2d/100 | Audio: %4.1f dB | Dedo: %s | BLE: %s\r\n",
-                beat_avg, spo2_val, systolic_bp, diastolic_bp, body_temp, stress_score, audio_rms,
-                finger_detected ? "SI" : "NO", ble_connected ? "CONECTADO" : "ESPERANDO");
+  Serial.printf("[TELEMETRIA] FC: %3d BPM | SpO2: %4.1f%% | HRV: %2d ms | Estres(exp): %2d/100 | Audio: %4.1f dB | T.chip: %4.1f C | Dedo: %s | BLE: %s | WiFi: %s\r\n",
+                beat_avg, spo2_val, hrv_ms, stress_score, audio_rms, body_temp,
+                finger_detected ? "SI" : "NO", ble_connected ? "CONECTADO" : "ESPERANDO",
+                ausc_wifi_ready() ? (ausc_server_known() ? "OK+SERVIDOR" : "OK, buscando servidor") : "--");
   Serial.println(json_payload);
+
+  // 3. Envio por WiFi al servidor (1 Hz): la app lee estos datos desde la Mac
+  ausc_send_telemetry(json_payload);
 }
 
 // ------------------------------------------------------------------------------
@@ -566,6 +573,9 @@ void update_led_effects() {
   // Controlar refresco a ~30 FPS para no saturar el periférico RMT ni las interrupciones del BLE
   if (now - last_led_update < 33) return;
   last_led_update = now;
+
+  // El modo auscultacion tiene prioridad sobre los LEDs mientras graba o muestra el resultado
+  if (ausc_update_leds(NUM_LEDS)) return;
 
   if (power_state == STATE_STANDBY_SAVER) {
     for (int i = 0; i < NUM_LEDS; i++) {
@@ -727,6 +737,9 @@ void setup() {
   setup_i2s();
   setup_max30102();
 
+  // WiFi para el modo auscultacion (no bloquea: conecta en segundo plano)
+  ausc_wifi_begin();
+
   Serial.println(F("[OK] Firmware inicializado con exito."));
   Serial.println(F("=========================================================================\r\n"));
 
@@ -743,6 +756,16 @@ void loop() {
   if (Serial.available()) {
     String ser_cmd = Serial.readStringUntil('\n');
     handle_incoming_commands(ser_cmd);
+  }
+
+  // 2a. Mantener WiFi y localizar el servidor por mDNS
+  ausc_net_maintain();
+
+  // 2b. Modo auscultacion: mientras graba, el I2S es exclusivo de la captura
+  if (ausc_busy()) {
+    ausc_capture_step();
+    update_led_effects();
+    return;
   }
 
   // 3. Procesamiento de Senales Biologicas y Acusticas 100% Reales

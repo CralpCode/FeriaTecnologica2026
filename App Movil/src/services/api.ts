@@ -1,5 +1,8 @@
 import { API_CONFIG, getSessionId } from '../config/api';
-import { VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange } from '../types/vitals';
+import {
+  VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange,
+  HeartFocus, RecordingResult, ClinicalAlert, FocusGuide, HeartModelInfo, SessionReport,
+} from '../types/vitals';
 
 const ZERO_VITALS: VitalSigns = {
   heartRate: 0,
@@ -122,27 +125,19 @@ class ApiService {
       const data = await response.json();
       return {
         id: data.id || `ai-${Date.now()}`,
-        healthScore: data.healthScore || 85,
+        healthScore: data.healthScore ?? 0,
         status: data.status || 'normal',
-        title: data.title || 'Análisis Clínico',
-        summary: data.summary || 'Monitoreo activo.',
-        recommendations: data.recommendations || ['Parámetros dentro de rango.'],
+        title: data.title || 'Evaluación por reglas',
+        summary: data.summary || '',
+        recommendations: data.recommendations || [],
         anomaliesDetected: data.anomaliesDetected || [],
-        confidence: data.confidence || 95,
+        confidence: data.confidence ?? 0,
+        method: data.method,
         timestamp: data.timestamp || new Date().toISOString(),
       };
     } catch (error) {
-      return {
-        id: `err-${Date.now()}`,
-        healthScore: 85,
-        status: 'normal',
-        title: 'Análisis Local',
-        summary: 'Monitoreo activo.',
-        recommendations: ['Parámetros en rango.'],
-        anomaliesDetected: [],
-        confidence: 90,
-        timestamp: new Date().toISOString(),
-      };
+      // Sin servidor no hay evaluación: se lanza el error para que el contexto use las reglas locales.
+      throw error;
     }
   }
 
@@ -160,6 +155,75 @@ class ApiService {
     } catch (error) {
       return 'No se pudo conectar con el servicio de IA en el backend.';
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Auscultación, alertas e informes
+  // -------------------------------------------------------------------------
+
+  get liveSocketUrl(): string {
+    return `${this.baseUrl.replace(/^http/, 'ws')}/ws/live`;
+  }
+
+  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers: this.defaultHeaders });
+    if (!response.ok) {
+      const detail = await response.json().then((d) => d.detail).catch(() => response.statusText);
+      throw new Error(detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  }
+
+  /** Indica al servidor que la próxima grabación del ESP32 pertenece a esta sesión y foco. */
+  armRecording(location: HeartFocus) {
+    return this.request('/api/audio/arm', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: getSessionId(), location }),
+    });
+  }
+
+  /** Indica al servidor que los datos que lleguen del ESP32 por WiFi pertenecen a esta sesión. */
+  linkDevice() {
+    return this.request(API_CONFIG.ENDPOINTS.DEVICE_LINK, {
+      method: 'POST',
+      body: JSON.stringify({ session_id: getSessionId() }),
+    });
+  }
+
+  getRecordings(): Promise<RecordingResult[]> {
+    return this.request(`/api/recordings?session_id=${encodeURIComponent(getSessionId())}`);
+  }
+
+  getAlerts(): Promise<ClinicalAlert[]> {
+    return this.request(`/api/alerts?session_id=${encodeURIComponent(getSessionId())}`);
+  }
+
+  ackAlert(id: number): Promise<ClinicalAlert> {
+    return this.request(`/api/alerts/${id}/ack`, { method: 'POST' });
+  }
+
+  createSessionReport(): Promise<SessionReport> {
+    return this.request(`/api/reports/session/${encodeURIComponent(getSessionId())}`, { method: 'POST' });
+  }
+
+  reportPdfUrl(report: SessionReport): string {
+    return `${this.baseUrl}${report.pdf_url}`;
+  }
+
+  getGuide(location: HeartFocus): Promise<FocusGuide> {
+    return this.request(`/api/guide/${location}`);
+  }
+
+  async askGuide(question: string, location: HeartFocus): Promise<string> {
+    const data = await this.request<{ answer: string }>('/api/guide/ask', {
+      method: 'POST',
+      body: JSON.stringify({ question, location, session_id: getSessionId() }),
+    });
+    return data.answer;
+  }
+
+  getHeartModelInfo(): Promise<HeartModelInfo> {
+    return this.request('/api/model/heart');
   }
 
   async getDeviceStatus(): Promise<DeviceInfo> {

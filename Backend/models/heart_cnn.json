@@ -1,0 +1,51 @@
+{
+  "modelo": "HeartCNN",
+  "tarea": "audio cardíaco normal (0) vs anormal/soplo (1)",
+  "dataset": "both",
+  "correccion_acustica": "sin_correccion",
+  "entrenado": "2026-09-29T14:54:07",
+  "umbral": 0.8214197158813477,
+  "criterio_umbral": "sensibilidad >= 0.85 en validación",
+  "features": {
+    "TARGET_SR": 2000,
+    "BAND_HZ": [
+      20.0,
+      600.0
+    ],
+    "WINDOW_S": 5.0,
+    "HOP_S": 2.5,
+    "N_FFT": 256,
+    "HOP_LENGTH": 64,
+    "N_MELS": 48,
+    "FMIN": 20.0,
+    "FMAX": 1000.0
+  },
+  "particiones": {
+    "train": 3923,
+    "val": 981,
+    "test": 1226
+  },
+  "metricas_prueba": {
+    "n": 1226,
+    "positivos": 233,
+    "umbral": 0.8214197158813477,
+    "sensibilidad": 0.8969957081545065,
+    "especificidad": 0.9164149043303121,
+    "score_medio": 0.9067053062424093,
+    "auc": 0.9707609921813208,
+    "f1_macro": 0.8703318753552277,
+    "exactitud": 0.9127243066884176,
+    "matriz_confusion": {
+      "VN": 910,
+      "FP": 83,
+      "FN": 24,
+      "VP": 209
+    }
+  },
+  "advertencia": null,
+  "limitaciones": [
+    "Tamizaje: no diagnostica; sugiere referir a ecocardiograma.",
+    "CirCor se separa por paciente; PhysioNet 2016 no publica ID de paciente, así que su parte se separa por grabación.",
+    "Validado solo con datasets públicos, no con pacientes ni con el dispositivo propio (falta la corrección acústica con el fantoma)."
+  ]
+}

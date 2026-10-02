@@ -3,19 +3,21 @@ import { View, StyleSheet, Platform, StatusBar as RNStatusBar } from 'react-nati
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from './src/theme/colors';
-import { VitalsProvider, useVitals } from './src/context/VitalsContext';
+import { VitalsProvider } from './src/context/VitalsContext';
+import { ClinicalProvider, useClinical } from './src/context/ClinicalContext';
 import { Header } from './src/components/Header';
 import { BottomNavBar, TabScreen } from './src/components/BottomNavBar';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { ChartsScreen } from './src/screens/ChartsScreen';
 import { AIAssistantScreen } from './src/screens/AIAssistantScreen';
+import { AuscultationScreen } from './src/screens/AuscultationScreen';
+import { AlertsScreen } from './src/screens/AlertsScreen';
 
 const MainAppContent: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<TabScreen>('dashboard');
-  const { aiReport } = useVitals();
+  const { hasCriticalAlert, activeAlertsCount } = useClinical();
   const insets = useSafeAreaInsets();
 
-  const hasCriticalAlert = aiReport?.status === 'critical';
   const paddingTop = Platform.OS === 'android' ? (RNStatusBar.currentHeight || 0) : (insets?.top || 0);
 
   return (
@@ -33,6 +35,8 @@ const MainAppContent: React.FC = () => {
             onNavigateToCharts={() => setCurrentTab('charts')}
           />
         )}
+        {currentTab === 'auscultation' && <AuscultationScreen />}
+        {currentTab === 'alerts' && <AlertsScreen />}
         {currentTab === 'charts' && <ChartsScreen />}
         {currentTab === 'ai' && <AIAssistantScreen />}
       </View>
@@ -42,6 +46,7 @@ const MainAppContent: React.FC = () => {
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
         hasAlert={hasCriticalAlert}
+        alertsCount={activeAlertsCount}
       />
     </View>
   );
@@ -51,7 +56,9 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <VitalsProvider>
-        <MainAppContent />
+        <ClinicalProvider>
+          <MainAppContent />
+        </ClinicalProvider>
       </VitalsProvider>
     </SafeAreaProvider>
   );

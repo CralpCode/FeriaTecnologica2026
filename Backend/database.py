@@ -32,6 +32,51 @@ def init_db():
         );
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON vitals_log(timestamp);")
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS recordings (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            location TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            finished_at TEXT,
+            sample_rate INTEGER NOT NULL,
+            duration_s REAL DEFAULT 0,
+            wav_path TEXT,
+            status TEXT DEFAULT 'recording',
+            probability REAL,
+            threshold REAL,
+            result TEXT,
+            quality TEXT,
+            model TEXT
+        );
+        """)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            action TEXT DEFAULT '',
+            llm_generated INTEGER DEFAULT 0,
+            data TEXT DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            acknowledged INTEGER DEFAULT 0
+        );
+        """)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            content TEXT NOT NULL,
+            llm_generated INTEGER DEFAULT 0,
+            pdf_path TEXT
+        );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_rec_session ON recordings(session_id);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_session ON alerts(session_id);")
     conn.close()
 
 def save_reading(data: dict):
@@ -44,11 +89,14 @@ def save_reading(data: dict):
     audio_peak = float(data.get("audio_peak", 0.0))
     device_id = str(data.get("session_id", data.get("device_id", "default")))
     
-    systolic = int(data.get("systolic", int(115 + (bpm - 70) * 0.45) if bpm > 0 else 0))
-    diastolic = int(data.get("diastolic", int(75 + (bpm - 70) * 0.25) if bpm > 0 else 0))
-    stress = int(min(100, max(10, (bpm - 55) * 1.3 + (audio_rms * 0.4)))) if bpm > 0 else 0
-    hrv = int(max(20, 65 - (bpm - 70) * 0.5)) if bpm > 0 else 0
-    temp = round(36.5 + (bpm - 70) * 0.008, 1) if bpm > 0 else 0.0
+    # Solo se guarda lo que el hardware mide. El MAX30102 no mide presión arterial ni
+    # temperatura corporal (su termómetro es el del propio chip), así que quedan en 0.
+    systolic = 0
+    diastolic = 0
+    temp = 0.0
+    hrv = int(data.get("hrv", 0) or 0) if bpm > 0 else 0
+    # Índice experimental calculado en el firmware; no es una medición validada.
+    stress = int(data.get("stress", data.get("stressLevel", 0)) or 0) if bpm > 0 else 0
 
     with conn:
         conn.execute("""
@@ -68,8 +116,8 @@ def save_reading(data: dict):
         "stressLevel": stress,
         "audio_rms": audio_rms,
         "audio_peak": audio_peak,
-        "steps": 5420,
-        "calories": 380,
+        "steps": 0,
+        "calories": 0,
         "timestamp": now_iso,
         "session_id": device_id,
         "device_id": device_id
@@ -101,8 +149,8 @@ def get_latest_reading(session_id: str = None):
                     "stressLevel": row["stressLevel"],
                     "audio_rms": row["audio_rms"],
                     "audio_peak": row["audio_peak"],
-                    "steps": 5420,
-                    "calories": 380,
+                    "steps": 0,
+                    "calories": 0,
                     "timestamp": row["timestamp"],
                     "session_id": row["device_id"]
                 }
@@ -174,3 +222,160 @@ def get_distinct_sessions():
     """).fetchall()
     conn.close()
     return [{"session_id": r["session_id"], "records_count": r["count"], "last_seen": r["last_seen"]} for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Grabaciones de auscultación
+# ---------------------------------------------------------------------------
+
+def create_recording(rec_id: str, session_id: str, location: str, sample_rate: int):
+    conn = get_db_connection()
+    with conn:
+        conn.execute(
+            "INSERT INTO recordings (id, session_id, location, created_at, sample_rate) VALUES (?, ?, ?, ?, ?)",
+            (rec_id, session_id, location, datetime.now().isoformat(), sample_rate),
+        )
+    conn.close()
+
+
+def update_recording(rec_id: str, **fields):
+    if not fields:
+        return
+    for k in ("quality",):
+        if k in fields and not isinstance(fields[k], str):
+            fields[k] = json.dumps(fields[k])
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    conn = get_db_connection()
+    with conn:
+        conn.execute(f"UPDATE recordings SET {cols} WHERE id = ?", (*fields.values(), rec_id))
+    conn.close()
+
+
+def _recording_dict(row) -> dict:
+    d = dict(row)
+    d["quality"] = json.loads(d["quality"]) if d.get("quality") else None
+    d.pop("wav_path", None)
+    return d
+
+
+def get_recording(rec_id: str):
+    conn = get_db_connection()
+    row = conn.execute("SELECT * FROM recordings WHERE id = ?", (rec_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_recordings(session_id: str = None, limit: int = 50):
+    conn = get_db_connection()
+    if session_id:
+        rows = conn.execute("SELECT * FROM recordings WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
+                            (session_id, limit)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM recordings ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    conn.close()
+    return [_recording_dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Alertas
+# ---------------------------------------------------------------------------
+
+def _alert_dict(row) -> dict:
+    d = dict(row)
+    d["data"] = json.loads(d["data"] or "{}")
+    d["acknowledged"] = bool(d["acknowledged"])
+    d["llm_generated"] = bool(d["llm_generated"])
+    return d
+
+
+def create_alert(session_id: str, type_: str, severity: str, title: str, message: str, action: str, data: dict) -> dict:
+    conn = get_db_connection()
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO alerts (session_id, type, severity, title, message, action, data, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, type_, severity, title, message, action, json.dumps(data), datetime.now().isoformat()),
+        )
+        row = conn.execute("SELECT * FROM alerts WHERE id = ?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    return _alert_dict(row)
+
+
+def update_alert_text(alert_id: int, message: str, action: str) -> dict | None:
+    conn = get_db_connection()
+    with conn:
+        conn.execute("UPDATE alerts SET message = ?, action = ?, llm_generated = 1 WHERE id = ?",
+                     (message, action, alert_id))
+        row = conn.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+    conn.close()
+    return _alert_dict(row) if row else None
+
+
+def acknowledge_alert(alert_id: int) -> dict | None:
+    conn = get_db_connection()
+    with conn:
+        conn.execute("UPDATE alerts SET acknowledged = 1 WHERE id = ?", (alert_id,))
+        row = conn.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+    conn.close()
+    return _alert_dict(row) if row else None
+
+
+def list_alerts(session_id: str = None, only_active: bool = False, limit: int = 100):
+    q = "SELECT * FROM alerts WHERE 1=1"
+    params = []
+    if session_id:
+        q += " AND session_id = ?"
+        params.append(session_id)
+    if only_active:
+        q += " AND acknowledged = 0"
+    q += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    conn = get_db_connection()
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    return [_alert_dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Informes y resumen de sesión
+# ---------------------------------------------------------------------------
+
+def save_report(session_id: str, content: dict, llm_generated: bool, pdf_path: str | None) -> int:
+    conn = get_db_connection()
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO reports (session_id, created_at, content, llm_generated, pdf_path) VALUES (?, ?, ?, ?, ?)",
+            (session_id, datetime.now().isoformat(), json.dumps(content, ensure_ascii=False), int(llm_generated), pdf_path),
+        )
+        rid = cur.lastrowid
+    conn.close()
+    return rid
+
+
+def get_report(report_id: int):
+    conn = get_db_connection()
+    row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    d["content"] = json.loads(d["content"])
+    return d
+
+
+def get_vitals_summary(session_id: str) -> dict:
+    """Estadísticas de las lecturas válidas (con dedo en el sensor) de una sesión."""
+    conn = get_db_connection()
+    row = conn.execute("""
+        SELECT COUNT(*) AS n, MIN(timestamp) AS inicio, MAX(timestamp) AS fin,
+               AVG(heartRate) AS hr_prom, MIN(heartRate) AS hr_min, MAX(heartRate) AS hr_max,
+               AVG(bloodOxygen) AS spo2_prom, MIN(bloodOxygen) AS spo2_min, MAX(bloodOxygen) AS spo2_max,
+               AVG(NULLIF(hrv, 0)) AS hrv_prom
+        FROM vitals_log WHERE device_id = ? AND heartRate > 0 AND bloodOxygen > 0
+    """, (session_id,)).fetchone()
+    conn.close()
+    d = dict(row)
+    for k, v in d.items():
+        if isinstance(v, float):
+            d[k] = round(v, 1)
+    return d
