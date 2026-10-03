@@ -3,7 +3,8 @@ import time
 import asyncio
 from typing import List, Optional, Union, Dict, Any
 from datetime import datetime
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Request, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -15,6 +16,13 @@ except ImportError:
 
 import database
 import ai_engine
+import discovery
+import alerts
+import audio_service
+import llm_tasks
+import reports
+import triage
+from ml import classifier, lung, lung_baseline
 
 app = FastAPI(
     title="SpiroScan IoT - API Backend",
@@ -39,6 +47,28 @@ app.add_middleware(
 )
 
 database.init_db()
+
+PORT = int(os.getenv("PORT", 8000))
+APP_DIST = os.getenv("APP_DIST", os.path.join(os.path.dirname(__file__), "..", "App Movil", "dist"))
+server_info: dict = {}
+
+
+@app.on_event("startup")
+async def _announce_on_network():
+    server_info.update(await discovery.start(PORT))
+
+
+@app.on_event("shutdown")
+async def _stop_announcing():
+    await discovery.stop()
+
+# El ESP32 no sabe qué sesión está abierta en la app: la app "vincula" su sesión y el backend
+# asigna a esa sesión la telemetría y el audio que lleguen del dispositivo sin session_id.
+_device_link: dict = {}
+
+
+def _linked_session() -> Optional[str]:
+    return _device_link.get("session_id")
 
 class ConnectionManager:
     def __init__(self):
@@ -66,11 +96,13 @@ class TelemetryInput(BaseModel):
     spo2: float
     audio_rms: Optional[float] = 18.5
     audio_peak: Optional[float] = 28.0
-    systolic: Optional[int] = 120
-    diastolic: Optional[int] = 80
-    temperature: Optional[float] = 36.5
-    hrv: Optional[int] = 45
-    stress: Optional[int] = 25
+    # El firmware aún envía systolic/diastolic/temperature; se aceptan pero NO se guardan
+    # (el MAX30102 no mide presión arterial ni temperatura corporal).
+    systolic: Optional[int] = None
+    diastolic: Optional[int] = None
+    temperature: Optional[float] = None
+    hrv: Optional[int] = 0
+    stress: Optional[int] = 0
     device_id: Optional[str] = "default"
     session_id: Optional[str] = None
     session_name: Optional[str] = None
@@ -92,12 +124,28 @@ class AudioClassifyInput(BaseModel):
     features: Optional[Union[dict, list]] = None
     session_id: Optional[str] = "default"
 
+class AudioStartInput(BaseModel):
+    session_id: Optional[str] = None
+    device_id: Optional[str] = None
+    location: Optional[str] = ""
+    sample_rate: int = 16000
+
+class AudioArmInput(BaseModel):
+    session_id: str
+    location: Optional[str] = ""
+    mode: Optional[str] = None   # "corazon" | "pulmon" (si falta, se deduce del foco)
+
+class GuideQuestionInput(BaseModel):
+    question: str
+    location: Optional[str] = None
+    session_id: Optional[str] = None
+
 _sessions_cache: dict[str, dict] = {}
 
 def _get_effective_session(session_id: Optional[str] = None) -> str:
     return str(session_id or "default").strip()
 
-@app.get("/")
+@app.get("/api/status")
 def read_root():
     return {
         "status": "online",
@@ -105,8 +153,14 @@ def read_root():
         "version": "1.5.0",
         "phone_connected": session_state["is_phone_connected"],
         "active_sessions_count": len(_sessions_cache),
-        "llm_model": ai_engine.OLLAMA_MODEL,
-        "acoustic_model": ai_engine.get_acoustic_model_info()
+        "llm_model": ai_engine.LLM_MODEL,
+        "llm_url": ai_engine.LLM_BASE_URL,
+        "llm_online": ai_engine.llm_available(),
+        "heart_model": classifier.model_info(),
+        "server": server_info,
+        "linked_session": _linked_session(),
+        "app_url": f"http://{server_info.get('hostname', 'localhost')}:{PORT}",
+        "acoustic_model": lung_baseline.model_info(),
     }
 
 @app.get("/api/sessions")
@@ -191,7 +245,7 @@ async def disconnect_device():
 @app.post("/api/telemetry")
 async def receive_telemetry(payload: TelemetryInput):
     data_dict = payload.model_dump()
-    sid = _get_effective_session(data_dict.get("session_id") or data_dict.get("device_id"))
+    sid = _get_effective_session(data_dict.get("session_id") or _linked_session() or data_dict.get("device_id"))
     data_dict["session_id"] = sid
     saved = database.save_reading(data_dict)
     saved["device_connected"] = True
@@ -208,6 +262,9 @@ async def receive_telemetry(payload: TelemetryInput):
         "session_id": sid,
         "data": saved
     })
+    for alert in alerts.evaluate_vitals(sid, saved):
+        await _publish_alert(alert)
+    await _publish_triage_if_changed(sid)
     
     return {"status": "ok", "saved": saved, "session_id": sid}
 
@@ -341,34 +398,28 @@ def generate_pdf_report(points: list, time_range: str) -> bytes:
 
     hr_vals = [p.get("heartRate", 0) for p in points if p.get("heartRate", 0) > 0]
     spo2_vals = [p.get("bloodOxygen", 0) for p in points if p.get("bloodOxygen", 0) > 0]
-    sys_vals = [p.get("systolicPressure", 0) for p in points if p.get("systolicPressure", 0) > 0]
-    dia_vals = [p.get("diastolicPressure", 0) for p in points if p.get("diastolicPressure", 0) > 0]
+    hrv_vals = [p.get("hrv", 0) for p in points if p.get("hrv", 0) > 0]
     stress_vals = [p.get("stressLevel", 0) for p in points if p.get("stressLevel", 0) > 0]
 
-    avg_hr = round(sum(hr_vals) / len(hr_vals)) if hr_vals else 75
-    min_hr = min(hr_vals) if hr_vals else 60
-    max_hr = max(hr_vals) if hr_vals else 100
+    avg_hr = round(sum(hr_vals) / len(hr_vals)) if hr_vals else 0
+    min_hr = min(hr_vals) if hr_vals else 0
+    max_hr = max(hr_vals) if hr_vals else 0
 
-    avg_spo2 = f"{(sum(spo2_vals) / len(spo2_vals)):.1f}" if spo2_vals else "98.5"
-    min_spo2 = f"{min(spo2_vals):.1f}" if spo2_vals else "97.0"
-    avg_sys = round(sum(sys_vals) / len(sys_vals)) if sys_vals else 120
-    avg_dia = round(sum(dia_vals) / len(dia_vals)) if dia_vals else 80
-    avg_stress = round(sum(stress_vals) / len(stress_vals)) if stress_vals else 25
+    avg_spo2 = f"{(sum(spo2_vals) / len(spo2_vals)):.1f}" if spo2_vals else "0.0"
+    min_spo2 = f"{min(spo2_vals):.1f}" if spo2_vals else "0.0"
+    avg_hrv = round(sum(hrv_vals) / len(hrv_vals)) if hrv_vals else 0
+    avg_stress = round(sum(stress_vals) / len(stress_vals)) if stress_vals else 0
 
     sample_vitals = {
         "heartRate": avg_hr,
         "bloodOxygen": float(avg_spo2),
-        "systolicPressure": avg_sys,
-        "diastolicPressure": avg_dia,
-        "stressLevel": avg_stress,
-        "temperature": 36.5
     }
     ai_diag = ai_engine.analyze_vitals_report(sample_vitals)
     health_score = ai_diag.get("healthScore", 95)
     diag_status = ai_diag.get("status", "normal")
     diag_title = ai_diag.get("title", "Monitoreo Clínico")
-    diag_summary = ai_diag.get("summary", "Parámetros hemodinámicos dentro de límites normales.")
-    recommendations = ai_diag.get("recommendations", ["Mantener hidratación y reposo habitual."])
+    diag_summary = ai_diag.get("summary", "")
+    recommendations = ai_diag.get("recommendations", [])
 
     range_label = "Últimas 24 Horas" if time_range == "24h" else ("Últimos 7 Días" if time_range == "7d" else "Últimos 30 Días")
     report_date = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -392,10 +443,10 @@ def generate_pdf_report(points: list, time_range: str) -> bytes:
 
     stat_hr = Paragraph(f"<font size=7 color='#E11D48'><b>RITMO CARDÍACO</b></font><br/><font size=13 color='#E11D48'><b>{avg_hr}</b></font> <font size=7.5>BPM</font><br/><font size=6.5 color='#64748B'>Mín: {min_hr} • Máx: {max_hr}</font>", body_style)
     stat_spo2 = Paragraph(f"<font size=7 color='#0284C7'><b>OXÍGENO (SpO2)</b></font><br/><font size=13 color='#0284C7'><b>{avg_spo2}%</b></font><br/><font size=6.5 color='#64748B'>Mín: {min_spo2}%</font>", body_style)
-    stat_bp = Paragraph(f"<font size=7 color='#D97706'><b>PRESIÓN ARTERIAL</b></font><br/><font size=13 color='#D97706'><b>{avg_sys}/{avg_dia}</b></font><br/><font size=6.5 color='#64748B'>Normotensión</font>", body_style)
+    stat_bp = Paragraph(f"<font size=7 color='#D97706'><b>VARIABILIDAD (HRV)</b></font><br/><font size=13 color='#D97706'><b>{avg_hrv}</b></font> <font size=7.5>ms</font><br/><font size=6.5 color='#64748B'>Promedio del periodo</font>", body_style)
     status_hex = '#059669' if diag_status == 'normal' else ('#D97706' if diag_status == 'caution' else '#DC2626')
     status_label = 'Estable' if diag_status == 'normal' else ('Precaución' if diag_status == 'caution' else 'Crítico')
-    stat_score = Paragraph(f"<font size=7 color='{status_hex}'><b>ESTADO FISIOLÓGICO</b></font><br/><font size=13 color='{status_hex}'><b>{health_score}/100</b></font><br/><font size=6.5 color='#64748B'>{status_label}</font>", body_style)
+    stat_score = Paragraph(f"<font size=7 color='{status_hex}'><b>EVALUACIÓN POR REGLAS</b></font><br/><font size=13 color='{status_hex}'><b>{health_score}/100</b></font><br/><font size=6.5 color='#64748B'>{status_label}</font>", body_style)
 
     stats_table = Table([[stat_hr, stat_spo2, stat_bp, stat_score]], colWidths=[135, 135, 135, 135])
     stats_table.setStyle(TableStyle([
@@ -411,9 +462,9 @@ def generate_pdf_report(points: list, time_range: str) -> bytes:
 
     recs_text = "<br/>".join([f"• {r}" for r in recommendations])
     ai_content = Paragraph(
-        f"<b><font size=9.5 color='#6D28D9'>🧠 Diagnóstico Asistido por SpiroScan AI: {diag_title}</font></b><br/>"
+        f"<b><font size=9.5 color='#6D28D9'>Evaluación por reglas (no es un diagnóstico): {diag_title}</font></b><br/>"
         f"<font size=8 color='#334155'>{diag_summary}</font><br/><br/>"
-        f"<b><font size=7.5 color='#475569'>Recomendaciones Clínicas:</font></b><br/>"
+        f"<b><font size=7.5 color='#475569'>Recomendaciones:</font></b><br/>"
         f"<font size=7.5 color='#475569'>{recs_text}</font>",
         body_style
     )
@@ -433,8 +484,8 @@ def generate_pdf_report(points: list, time_range: str) -> bytes:
             Paragraph("<b>Hora</b>", th_style),
             Paragraph("<b>Pulsaciones</b>", th_style),
             Paragraph("<b>SpO2</b>", th_style),
-            Paragraph("<b>Presión</b>", th_style),
-            Paragraph("<b>Estrés</b>", th_style),
+            Paragraph("<b>HRV</b>", th_style),
+            Paragraph("<b>Estrés (exp.)</b>", th_style),
             Paragraph("<b>Acústica</b>", th_style),
         ]
     ]
@@ -444,8 +495,8 @@ def generate_pdf_report(points: list, time_range: str) -> bytes:
             Paragraph(p.get("timeLabel", ""), td_style),
             Paragraph(f"{p.get('heartRate', '--')} BPM", td_style),
             Paragraph(f"{float(p.get('bloodOxygen', 0)):.1f}%", td_style),
-            Paragraph(f"{p.get('systolicPressure', 120)}/{p.get('diastolicPressure', 80)}", td_style),
-            Paragraph(f"{p.get('stressLevel', 25)}/100", td_style),
+            Paragraph(f"{p.get('hrv', 0)} ms", td_style),
+            Paragraph(f"{p.get('stressLevel', 0)}/100", td_style),
             Paragraph(f"{float(p.get('audio_rms', 0)):.1f} dB", td_style),
         ])
 
@@ -464,7 +515,7 @@ def generate_pdf_report(points: list, time_range: str) -> bytes:
 
     story.append(Spacer(1, 10))
     story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#CBD5E1'), spaceBefore=4, spaceAfter=4))
-    story.append(Paragraph("<font size=7 color='#94A3B8'>SpiroScan Medical Platform • Telemetría Criptográficamente Verificada en SQLite • Formato PDF Certificado</font>", body_style))
+    story.append(Paragraph("<font size=7 color='#94A3B8'>SpiroScan • Prototipo universitario de tamizaje • No sustituye la evaluación médica</font>", body_style))
 
     doc.build(story)
     return buf.getvalue()
@@ -484,10 +535,7 @@ def generate_excel_workbook(points: list, time_range: str) -> bytes:
         "Hora Local",
         "Ritmo Cardíaco (BPM)",
         "Oxígeno (% SpO2)",
-        "Presión Sistólica (mmHg)",
-        "Presión Diastólica (mmHg)",
-        "Temperatura (°C)",
-        "Estrés (/100)",
+        "Estrés experimental (/100)",
         "Acústica RMS (dB)",
         "Acústica Pico (dB)",
         "Variabilidad HRV (ms)",
@@ -517,13 +565,10 @@ def generate_excel_workbook(points: list, time_range: str) -> bytes:
             p.get("timeLabel", ""),
             p.get("heartRate", 0),
             round(float(p.get("bloodOxygen", 0.0)), 1),
-            p.get("systolicPressure", 120),
-            p.get("diastolicPressure", 80),
-            round(float(p.get("temperature", 36.5)), 1),
-            p.get("stressLevel", 25),
+            p.get("stressLevel", 0),
             round(float(p.get("audio_rms", 0.0)), 1),
             round(float(p.get("audio_peak", 0.0)), 1),
-            p.get("hrv", 45),
+            p.get("hrv", 0),
             p.get("device_id", "ESP32-BIO-01")
         ]
         ws.append(row)
@@ -579,10 +624,7 @@ def export_csv(time_range: str = Query("24h", alias="range")):
         "Hora Local",
         "Ritmo Cardíaco (BPM)",
         "Oxígeno en Sangre (% SpO2)",
-        "Presión Sistólica (mmHg)",
-        "Presión Diastólica (mmHg)",
-        "Temperatura (°C)",
-        "Estrés (/100)",
+        "Estrés experimental (/100)",
         "Acústica RMS (dB)",
         "Acústica Pico (dB)",
         "Variabilidad HRV (ms)",
@@ -597,13 +639,10 @@ def export_csv(time_range: str = Query("24h", alias="range")):
             f'"{p.get("timeLabel", "")}"',
             str(p.get("heartRate", 0)),
             f'{float(p.get("bloodOxygen", 0.0)):.1f}',
-            str(p.get("systolicPressure", 120)),
-            str(p.get("diastolicPressure", 80)),
-            f'{float(p.get("temperature", 36.5)):.1f}',
-            str(p.get("stressLevel", 25)),
+            str(p.get("stressLevel", 0)),
             f'{float(p.get("audio_rms", 0.0)):.1f}',
             f'{float(p.get("audio_peak", 0.0)):.1f}',
-            str(p.get("hrv", 45)),
+            str(p.get("hrv", 0)),
             f'"{p.get("device_id", "ESP32-BIO-01")}"'
         ]
         lines.append(",".join(row))
@@ -627,23 +666,18 @@ def export_png(metric: str = Query("heartRate"), time_range: str = Query("24h", 
     
     points = database.get_history_points(time_range=time_range, limit=500)
     if not points:
-        points = [{
-            "timeLabel": "12:00",
-            "heartRate": 75,
-            "bloodOxygen": 98.5,
-            "systolicPressure": 120,
-            "stressLevel": 25
-        }]
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="No hay lecturas registradas en este periodo")
         
     metric_map = {
         "heartRate": ("Ritmo Cardíaco", "BPM", "#E11D48"),
         "bloodOxygen": ("Oxígeno en Sangre", "% SpO2", "#0284C7"),
-        "systolicPressure": ("Presión Sistólica", "mmHg", "#D97706"),
-        "stressLevel": ("Estrés Autonómico", "/100", "#7C3AED")
+        "hrv": ("Variabilidad HRV", "ms", "#D97706"),
+        "stressLevel": ("Estrés (experimental)", "/100", "#7C3AED")
     }
     label, unit, color = metric_map.get(metric, ("Ritmo Cardíaco", "BPM", "#E11D48"))
     
-    y_vals = [float(p.get(metric, 75)) for p in points]
+    y_vals = [float(p.get(metric, 0)) for p in points]
     x_labels = [p.get("timeLabel", str(i)) for i, p in enumerate(points)]
     
     fig, ax = plt.subplots(figsize=(11, 5.5), dpi=160, facecolor='#0F172A')
@@ -694,34 +728,28 @@ def export_report(time_range: str = Query("24h", alias="range")):
     
     hr_vals = [p.get("heartRate", 0) for p in points if p.get("heartRate", 0) > 0]
     spo2_vals = [p.get("bloodOxygen", 0) for p in points if p.get("bloodOxygen", 0) > 0]
-    sys_vals = [p.get("systolicPressure", 0) for p in points if p.get("systolicPressure", 0) > 0]
-    dia_vals = [p.get("diastolicPressure", 0) for p in points if p.get("diastolicPressure", 0) > 0]
+    hrv_vals = [p.get("hrv", 0) for p in points if p.get("hrv", 0) > 0]
     stress_vals = [p.get("stressLevel", 0) for p in points if p.get("stressLevel", 0) > 0]
     
-    avg_hr = round(sum(hr_vals) / len(hr_vals)) if hr_vals else 75
-    min_hr = min(hr_vals) if hr_vals else 60
-    max_hr = max(hr_vals) if hr_vals else 100
+    avg_hr = round(sum(hr_vals) / len(hr_vals)) if hr_vals else 0
+    min_hr = min(hr_vals) if hr_vals else 0
+    max_hr = max(hr_vals) if hr_vals else 0
     
-    avg_spo2 = f"{(sum(spo2_vals) / len(spo2_vals)):.1f}" if spo2_vals else "98.5"
-    min_spo2 = f"{min(spo2_vals):.1f}" if spo2_vals else "97.0"
-    avg_sys = round(sum(sys_vals) / len(sys_vals)) if sys_vals else 120
-    avg_dia = round(sum(dia_vals) / len(dia_vals)) if dia_vals else 80
-    avg_stress = round(sum(stress_vals) / len(stress_vals)) if stress_vals else 25
+    avg_spo2 = f"{(sum(spo2_vals) / len(spo2_vals)):.1f}" if spo2_vals else "0.0"
+    min_spo2 = f"{min(spo2_vals):.1f}" if spo2_vals else "0.0"
+    avg_hrv = round(sum(hrv_vals) / len(hrv_vals)) if hrv_vals else 0
+    avg_stress = round(sum(stress_vals) / len(stress_vals)) if stress_vals else 0
     
     sample_vitals = {
         "heartRate": avg_hr,
         "bloodOxygen": float(avg_spo2),
-        "systolicPressure": avg_sys,
-        "diastolicPressure": avg_dia,
-        "stressLevel": avg_stress,
-        "temperature": 36.5
     }
     ai_diag = ai_engine.analyze_vitals_report(sample_vitals)
     health_score = ai_diag.get("healthScore", 95)
     diag_status = ai_diag.get("status", "normal")
     diag_title = ai_diag.get("title", "Monitoreo Clínico")
-    diag_summary = ai_diag.get("summary", "Parámetros hemodinámicos dentro de límites normales.")
-    recommendations = ai_diag.get("recommendations", ["Mantener hidratación y reposo habitual."])
+    diag_summary = ai_diag.get("summary", "")
+    recommendations = ai_diag.get("recommendations", [])
     
     status_label = "Estable" if diag_status == "normal" else ("Precaución" if diag_status == "caution" else "Crítico")
     status_color = "#059669" if diag_status == "normal" else ("#D97706" if diag_status == "caution" else "#DC2626")
@@ -737,8 +765,8 @@ def export_report(time_range: str = Query("24h", alias="range")):
             <td style="padding: 8px; font-weight: 600;">{p.get('timeLabel', p.get('timestamp', ''))}</td>
             <td style="padding: 8px; color: #E11D48; font-weight: 700;">{p.get('heartRate', '--')} BPM</td>
             <td style="padding: 8px; color: #0284C7; font-weight: 700;">{float(p.get('bloodOxygen', 0)):.1f}%</td>
-            <td style="padding: 8px; color: #D97706;">{p.get('systolicPressure', 120)}/{p.get('diastolicPressure', 80)}</td>
-            <td style="padding: 8px; color: #7C3AED;">{p.get('stressLevel', 25)}/100</td>
+            <td style="padding: 8px; color: #D97706;">{p.get('hrv', 0)} ms</td>
+            <td style="padding: 8px; color: #7C3AED;">{p.get('stressLevel', 0)}/100</td>
             <td style="padding: 8px; color: #0891B2;">{float(p.get('audio_rms', 0)):.1f} dB</td>
         </tr>""" for i, p in enumerate(points[:50])
     ])
@@ -747,7 +775,7 @@ def export_report(time_range: str = Query("24h", alias="range")):
     <html lang="es">
     <head>
         <meta charset="utf-8">
-        <title>SpiroScan AI - Reporte Clínico Oficial ({range_label})</title>
+        <title>SpiroScan - Reporte de Telemetría ({range_label})</title>
         <style>
             @media print {{
                 .no-print {{ display: none !important; }}
@@ -893,19 +921,19 @@ def export_report(time_range: str = Query("24h", alias="range")):
                     <div style="font-size: 10px; color: #64748B;">Mín: {min_spo2}%</div>
                 </div>
                 <div class="stat-card" style="border-left: 4px solid #D97706;">
-                    <div class="meta-label">Presión Arterial</div>
-                    <div class="stat-num" style="color: #D97706;">{avg_sys}/{avg_dia}</div>
-                    <div style="font-size: 10px; color: #64748B;">Normotensión</div>
+                    <div class="meta-label">Variabilidad (HRV)</div>
+                    <div class="stat-num" style="color: #D97706;">{avg_hrv} ms</div>
+                    <div style="font-size: 10px; color: #64748B;">Promedio del periodo</div>
                 </div>
                 <div class="stat-card" style="border-left: 4px solid {status_color};">
-                    <div class="meta-label">Estado Fisiológico</div>
+                    <div class="meta-label">Evaluación por reglas</div>
                     <div class="stat-num" style="color: {status_color};">{health_score}/100</div>
                     <div style="font-size: 10px; color: #64748B;">{status_label}</div>
                 </div>
             </div>
 
             <div class="ai-box">
-                <div style="font-size: 13px; font-weight: 800; color: #6D28D9; margin-bottom: 6px;">🧠 Diagnóstico Asistido por SpiroScan AI: {diag_title}</div>
+                <div style="font-size: 13px; font-weight: 800; color: #6D28D9; margin-bottom: 6px;">Evaluación por reglas (no es un diagnóstico): {diag_title}</div>
                 <div style="font-size: 12px; color: #334155; line-height: 1.5; margin-bottom: 8px;">
                     {diag_summary}
                 </div>
@@ -922,8 +950,8 @@ def export_report(time_range: str = Query("24h", alias="range")):
                         <th>Hora</th>
                         <th>Pulsaciones</th>
                         <th>SpO2</th>
-                        <th>Presión</th>
-                        <th>Estrés</th>
+                        <th>HRV</th>
+                        <th>Estrés (exp.)</th>
                         <th>Acústica</th>
                     </tr>
                 </thead>
@@ -933,7 +961,7 @@ def export_report(time_range: str = Query("24h", alias="range")):
             </table>
 
             <div style="margin-top: 32px; padding-top: 12px; border-top: 1px solid #E2E8F0; font-size: 10px; color: #94A3B8; display: flex; justify-content: space-between;">
-                <span>SpiroScan Medical Platform • Telemetría Criptográficamente Verificada en SQLite</span>
+                <span>SpiroScan • Prototipo universitario de tamizaje • No sustituye la evaluación médica</span>
                 <span>Página 1 de 1</span>
             </div>
         </div>
@@ -955,21 +983,242 @@ def analyze_vitals(payload: AnalyzeInput):
 @app.post("/api/ai/audio/classify")
 def classify_audio_telemetry(payload: AudioClassifyInput):
     """Clasifica características acústicas del micrófono INMP441 mediante el modelo ICBHI (61 features)."""
-    return ai_engine.classify_respiratory_features(payload.features or {})
+    return lung_baseline.classify_features(payload.features or {})
 
 @app.post("/api/ai/chat")
-def chat_ai(payload: ChatInput):
+async def chat_ai(payload: ChatInput):
     sid = _get_effective_session(payload.session_id)
-    vitals = payload.vitals if payload.vitals else database.get_latest_reading(session_id=sid)
-    reply = ai_engine.generate_chat_reply(payload.message, vitals, session_id=sid)
+    reply = await asyncio.to_thread(llm_tasks.chat, sid, payload.message)
     return {"reply": reply, "message": reply, "session_id": sid}
 
 @app.post("/api/ai/llm/generate")
 def direct_llm_generate(payload: LLMDirectInput):
-    """Permite a la aplicación consultar directamente el LLM Llama en Docker desde el exterior."""
-    system = payload.system or "Eres un asistente médico inteligente para la plataforma SpiroScan."
-    reply = ai_engine.query_ollama_docker(payload.prompt, system)
-    return {"response": reply, "model": ai_engine.OLLAMA_MODEL}
+    """Consulta directa al LLM local, siempre con las reglas de seguridad de SpiroScan."""
+    system = llm_tasks.BASE_RULES + (payload.system or "")
+    try:
+        reply = ai_engine.llm_chat([{"role": "system", "content": system}, {"role": "user", "content": payload.prompt}])
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"LLM no disponible: {e}")
+    return {"response": reply, "model": ai_engine.LLM_MODEL}
+
+# ---------------------------------------------------------------------------
+# Alertas (reglas fijas; el LLM solo reescribe el texto en segundo plano)
+# ---------------------------------------------------------------------------
+
+async def _publish_alert(alert: dict):
+    await manager.broadcast({"type": "ALERT", "session_id": alert["session_id"], "data": alert})
+    asyncio.create_task(_rewrite_alert(alert))
+
+
+async def _rewrite_alert(alert: dict):
+    text = await asyncio.to_thread(llm_tasks.alert_text, alert)
+    if text:
+        updated = database.update_alert_text(alert["id"], text["message"], text["action"])
+        if updated:
+            await manager.broadcast({"type": "ALERT_UPDATED", "session_id": alert["session_id"], "data": updated})
+
+
+@app.get("/api/alerts")
+def list_alerts(session_id: Optional[str] = Query(None), active: bool = Query(False), limit: int = Query(100)):
+    return database.list_alerts(session_id=session_id, only_active=active, limit=limit)
+
+
+@app.post("/api/alerts/{alert_id}/ack")
+async def ack_alert(alert_id: int):
+    alert = database.acknowledge_alert(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alerta no encontrada")
+    await manager.broadcast({"type": "ALERT_UPDATED", "session_id": alert["session_id"], "data": alert})
+    return alert
+
+
+# ---------------------------------------------------------------------------
+# Auscultación: audio del estetoscopio -> CNN
+# ---------------------------------------------------------------------------
+
+# El ESP32 no sabe qué foco eligió la app: la app "arma" la próxima grabación (y vincula su sesión).
+ARM_TTL_S = 600
+_armed: dict = {}
+
+
+class DeviceLinkInput(BaseModel):
+    session_id: str
+
+
+@app.post("/api/device/link")
+async def link_device(payload: DeviceLinkInput):
+    """La app indica que el ESP32 (por WiFi) debe registrar sus datos en esta sesión."""
+    sid = _get_effective_session(payload.session_id)
+    _device_link.update({"session_id": sid, "at": time.time()})
+    await manager.broadcast({"type": "DEVICE_LINKED", "session_id": sid})
+    return {"status": "linked", "session_id": sid}
+
+
+@app.post("/api/audio/arm")
+async def audio_arm(payload: AudioArmInput):
+    try:
+        loc = audio_service._check_location(payload.location)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    mode = audio_service.resolve_mode(loc, payload.mode)
+    _armed.update({"session_id": _get_effective_session(payload.session_id), "location": loc, "mode": mode,
+                   "at": time.time()})
+    _device_link.update({"session_id": _armed["session_id"], "at": time.time()})
+    await manager.broadcast({"type": "RECORDING_ARMED", "session_id": _armed["session_id"],
+                             "data": {"location": loc, "mode": mode}})
+    return {"status": "armed", **_armed}
+
+
+def _consume_armed() -> dict | None:
+    if _armed and time.time() - _armed["at"] <= ARM_TTL_S:
+        return dict(_armed)
+    return None
+
+
+async def _after_classification(result: dict):
+    await manager.broadcast({"type": "RECORDING_RESULT", "session_id": result["session_id"], "data": result})
+    for alert in alerts.evaluate_recording(result):
+        await _publish_alert(alert)
+    await _publish_triage_if_changed(result["session_id"])
+
+
+@app.post("/api/audio/start")
+async def audio_start(payload: AudioStartInput):
+    armed = None if payload.session_id else _consume_armed()
+    sid = armed["session_id"] if armed else _get_effective_session(
+        payload.session_id or _linked_session() or payload.device_id)
+    location = payload.location or (armed["location"] if armed else "")
+    try:
+        rec_id = audio_service.start(sid, location, payload.sample_rate, armed.get("mode") if armed else None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await manager.broadcast({"type": "RECORDING_STARTED", "session_id": sid,
+                             "data": {"recording_id": rec_id, "location": location}})
+    return {"recording_id": rec_id, "session_id": sid}
+
+
+@app.post("/api/audio/chunk")
+async def audio_chunk(request: Request, recording_id: str = Query(...)):
+    data = await request.body()
+    try:
+        total = audio_service.append_chunk(recording_id, data)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"recording_id": recording_id, "bytes": total}
+
+
+@app.post("/api/audio/finish")
+async def audio_finish(recording_id: str = Query(...)):
+    try:
+        result = await asyncio.to_thread(audio_service.finish, recording_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al clasificar: {e}")
+    await _after_classification(result)
+    return result
+
+
+@app.post("/api/audio/upload")
+async def audio_upload(file: UploadFile = File(...), session_id: str = Form("default"), location: str = Form(""),
+                       mode: Optional[str] = Form(None)):
+    data = await file.read()
+    try:
+        result = await asyncio.to_thread(audio_service.save_upload, _get_effective_session(session_id),
+                                         location, data, mode)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al clasificar: {e}")
+    await _after_classification(result)
+    return result
+
+
+@app.get("/api/recordings")
+def list_recordings(session_id: Optional[str] = Query(None), limit: int = Query(50)):
+    return database.list_recordings(session_id=session_id, limit=limit)
+
+
+@app.get("/api/recordings/{recording_id}/audio")
+def get_recording_audio(recording_id: str):
+    rec = database.get_recording(recording_id)
+    if not rec or not rec.get("wav_path") or not os.path.exists(rec["wav_path"]):
+        raise HTTPException(status_code=404, detail="Audio no disponible")
+    return FileResponse(rec["wav_path"], media_type="audio/wav", filename=f"{recording_id}.wav")
+
+
+@app.get("/api/model/heart")
+def heart_model_info():
+    return classifier.model_info()
+
+
+@app.get("/api/models")
+def all_models_info():
+    return {"corazon": classifier.model_info(), "pulmon": lung.model_info()}
+
+
+# ---------------------------------------------------------------------------
+# Triaje combinado (semáforo): SpO2 + pulso + corazón + pulmón, por reglas fijas
+# ---------------------------------------------------------------------------
+_last_triage: dict[str, str] = {}
+
+
+@app.get("/api/triage/{session_id}")
+def get_triage(session_id: str):
+    return triage.evaluate(_get_effective_session(session_id))
+
+
+async def _publish_triage_if_changed(sid: str):
+    t = triage.evaluate(sid)
+    key = t["nivel"] + "|" + "|".join(t["motivos"])
+    if _last_triage.get(sid) != key:
+        _last_triage[sid] = key
+        await manager.broadcast({"type": "TRIAGE_UPDATE", "session_id": sid, "data": t})
+
+
+# ---------------------------------------------------------------------------
+# Informe de sesión y guía de uso
+# ---------------------------------------------------------------------------
+
+@app.post("/api/reports/session/{session_id}")
+async def create_session_report(session_id: str):
+    sid = _get_effective_session(session_id)
+    content, llm = await asyncio.to_thread(llm_tasks.session_report, sid)
+    report_id = database.save_report(sid, content, llm, None)
+    pdf = await asyncio.to_thread(reports.build_session_pdf, report_id, sid, content, llm)
+    conn = database.get_db_connection()
+    with conn:
+        conn.execute("UPDATE reports SET pdf_path = ? WHERE id = ?", (str(pdf), report_id))
+    conn.close()
+    return {"report_id": report_id, "session_id": sid, "llm_generated": llm,
+            "pdf_url": f"/api/reports/{report_id}/pdf", "content": content}
+
+
+@app.get("/api/reports/{report_id}/pdf")
+def get_report_pdf(report_id: int):
+    rep = database.get_report(report_id)
+    if not rep or not rep.get("pdf_path") or not os.path.exists(rep["pdf_path"]):
+        raise HTTPException(status_code=404, detail="Informe no encontrado")
+    return FileResponse(rep["pdf_path"], media_type="application/pdf", filename=os.path.basename(rep["pdf_path"]))
+
+
+@app.get("/api/guide/{location}")
+def get_guide(location: str):
+    try:
+        return llm_tasks.guide(location)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Foco inválido. Usa AV, PV, TV o MV.")
+
+
+@app.post("/api/guide/ask")
+async def ask_guide(payload: GuideQuestionInput):
+    last = database.list_recordings(session_id=payload.session_id, limit=1) if payload.session_id else []
+    quality = last[0]["quality"] if last else None
+    answer = await asyncio.to_thread(llm_tasks.guide_answer, payload.question, payload.location, quality)
+    return {"answer": answer}
+
 
 @app.get("/api/device/status")
 def get_device_status():
@@ -996,6 +1245,19 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
     except Exception:
         manager.disconnect(websocket)
+
+# ---------------------------------------------------------------------------
+# App web servida por esta misma Mac (npx expo export --platform web -> App Movil/dist)
+# Se monta al final para que las rutas /api y /ws tengan prioridad.
+# ---------------------------------------------------------------------------
+if os.path.isdir(APP_DIST):
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=APP_DIST, html=True), name="app")
+else:
+    @app.get("/")
+    def app_not_built():
+        return {"status": "online", "detail": "App web no compilada. Ejecuta ./start_server.sh --build", "api": "/api/status"}
+
 
 if __name__ == "__main__":
     import uvicorn

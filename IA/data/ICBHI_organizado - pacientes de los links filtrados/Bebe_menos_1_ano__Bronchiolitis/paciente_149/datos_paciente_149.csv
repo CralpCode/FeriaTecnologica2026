@@ -1,0 +1,10 @@
+Campo,Valor
+ID Paciente,149
+Edad (anos),0.67
+Grupo de edad,Bebe (<1 ano)
+Sexo,M
+Diagnostico,Bronchiolitis
+BMI adulto (kg/m2),
+Peso nino (kg),9.5
+Altura nino (cm),70
+Particion sugerida (train/validation),Validacion

@@ -1,0 +1,10 @@
+Campo,Valor
+ID Paciente,126
+Edad (anos),1
+Grupo de edad,Nino/Adolescente (1-17)
+Sexo,F
+Diagnostico,Healthy
+BMI adulto (kg/m2),
+Peso nino (kg),10.18
+Altura nino (cm),80
+Particion sugerida (train/validation),Entrenamiento

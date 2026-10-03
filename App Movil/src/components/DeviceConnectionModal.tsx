@@ -14,7 +14,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useVitals } from '../context/VitalsContext';
 import { deviceBridge } from '../services/DeviceBridgeService';
-import { DEFAULT_CLOUD_BACKEND, DEFAULT_LOCAL_LAN } from '../config/api';
+import { DEFAULT_LOCAL_LAN } from '../config/api';
 
 interface DeviceConnectionModalProps {
   visible: boolean;
@@ -26,6 +26,7 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
     connectedType,
     device,
     connectDirectBluetooth,
+    connectViaServer,
     disconnectAllDevices,
     isBackendOnline,
     backendUrl,
@@ -57,6 +58,15 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
     }
   };
 
+  const handleWifiConnect = async () => {
+    setErrorMessage(null);
+    setIsConnecting(true);
+    const res = await connectViaServer();
+    setIsConnecting(false);
+    if (res.success) onClose();
+    else setErrorMessage(res.message);
+  };
+
   const isWebBleSupported = deviceBridge.isWebBluetoothSupported();
 
   return (
@@ -79,7 +89,7 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
                 />
               </View>
               <View>
-                <Text style={styles.headerTitle}>Gestor Bluetooth Directo</Text>
+                <Text style={styles.headerTitle}>Conexión del dispositivo</Text>
                 <Text style={styles.headerSubtitle}>
                   {connectedType !== 'none'
                     ? `● Enlazado a: ${device?.name || 'SpiroScan-Band'}`
@@ -151,7 +161,34 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
           )}
 
           <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
-            <Text style={styles.sectionHeading}>DISPOSITIVO FÍSICO (BLE)</Text>
+            <Text style={styles.sectionHeading}>ESP32 POR WIFI (RECOMENDADO)</Text>
+
+            <View style={[styles.deviceCard, connectedType === 'wokwi_wifi' && styles.deviceCardActive]}>
+              <View style={styles.deviceCardHeader}>
+                <View style={[styles.deviceIconWrapper, { backgroundColor: connectedType === 'wokwi_wifi' ? '#DCFCE7' : '#EFF6FF' }]}>
+                  <MaterialCommunityIcons name="wifi" size={22} color={connectedType === 'wokwi_wifi' ? '#16A34A' : Colors.primary} />
+                </View>
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={styles.deviceCardTitle}>SpiroScan por WiFi</Text>
+                  <Text style={styles.deviceCardSub}>El ESP32 envía pulso, SpO2 y audio a la Mac</Text>
+                  <Text style={styles.deviceCardBadgeText}>Funciona en cualquier celular con el navegador</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={[styles.actionBtnFull, styles.actionBtnConnect, isConnecting && { opacity: 0.7 }]}
+                disabled={isConnecting || connectedType === 'wokwi_wifi'}
+                onPress={handleWifiConnect}
+              >
+                <View style={styles.actionBtnContent}>
+                  <MaterialCommunityIcons name="wifi-check" size={18} color="#FFFFFF" />
+                  <Text style={[styles.actionBtnTextFull, styles.actionTextConnect]}>
+                    {connectedType === 'wokwi_wifi' ? 'Recibiendo datos del servidor' : 'Recibir datos en esta sesión'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.sectionHeading, { marginTop: 18 }]}>DISPOSITIVO FÍSICO (BLE)</Text>
 
             {/* Opción SpiroScan BLE Físico */}
             <View
@@ -255,13 +292,13 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
               <View style={styles.guideRow}>
                 <Ionicons name="shield-checkmark" size={14} color="#2563EB" />
                 <Text style={styles.guideStep}>
-                  Cero cables ni servidores intermedios: conexión directa por radio BLE.
+                  Bluetooth web solo funciona en Chrome con https o localhost; en la feria usa la opción WiFi.
                 </Text>
               </View>
             </View>
 
             {/* Sección de Servidor Backend y Nube */}
-            <Text style={[styles.sectionHeading, { marginTop: 18 }]}>NUBE & BACKEND (DOCKER / MODO HÍBRIDO)</Text>
+            <Text style={[styles.sectionHeading, { marginTop: 18 }]}>SERVIDOR SPIROSCAN (MAC)</Text>
 
             <View style={styles.cloudConfigCard}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -272,7 +309,7 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
                     color={isBackendOnline ? '#16A34A' : '#64748B'}
                   />
                   <Text style={styles.cloudCardTitle}>
-                    {isBackendOnline ? 'Servidor Docker: EN LÍNEA' : 'Modo Autónomo (Sin Nube)'}
+                    {isBackendOnline ? 'Servidor: EN LÍNEA' : 'Servidor no disponible'}
                   </Text>
                 </View>
                 <View style={[styles.cloudPill, isBackendOnline ? styles.cloudPillOnline : styles.cloudPillOffline]}>
@@ -284,8 +321,8 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
 
               <Text style={styles.cloudCardDesc}>
                 {isBackendOnline
-                  ? 'Sincronizando telemetría médica en base de datos persistente y diagnóstico con IA médica.'
-                  : 'Sin conexión a internet o backend inactivo. Consulta tus signos vitales en tiempo real directamente por Bluetooth.'}
+                  ? 'Sincronizando la telemetría con el servidor SpiroScan (base de datos, alertas e IA).'
+                  : 'No se encuentra la Mac. Revisa que start_server.sh esté corriendo y que estés en la misma red WiFi.'}
               </Text>
 
               {/* Selector Rápido de Backend */}
@@ -293,17 +330,17 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
                 <TouchableOpacity
                   style={[
                     styles.presetBtn,
-                    backendUrl === DEFAULT_CLOUD_BACKEND && styles.presetBtnActive,
+                    backendUrl === DEFAULT_LOCAL_LAN && styles.presetBtnActive,
                   ]}
-                  onPress={() => updateBackendUrl(DEFAULT_CLOUD_BACKEND)}
+                  onPress={() => updateBackendUrl(DEFAULT_LOCAL_LAN)}
                 >
                   <MaterialCommunityIcons
-                    name="cloud-outline"
+                    name="server-network"
                     size={14}
-                    color={backendUrl === DEFAULT_CLOUD_BACKEND ? '#FFFFFF' : '#334155'}
+                    color={backendUrl === DEFAULT_LOCAL_LAN ? '#FFFFFF' : '#334155'}
                   />
-                  <Text style={[styles.presetBtnText, backendUrl === DEFAULT_CLOUD_BACKEND && styles.presetBtnTextActive]}>
-                    Túnel Cloudflare
+                  <Text style={[styles.presetBtnText, backendUrl === DEFAULT_LOCAL_LAN && styles.presetBtnTextActive]}>
+                    spiroscan.local
                   </Text>
                 </TouchableOpacity>
 
@@ -325,7 +362,7 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
                       (backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) && styles.presetBtnTextActive,
                     ]}
                   >
-                    Docker Local
+                    Este equipo
                   </Text>
                 </TouchableOpacity>
               </View>

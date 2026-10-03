@@ -69,7 +69,7 @@ export const AIInsightCard: React.FC<AIInsightCardProps> = ({ report, onAskAI })
           </View>
         </View>
         <Text style={styles.summaryText}>
-          Inicia el emulador en Wokwi para ver el análisis clínico y diagnóstico de tus signos vitales.
+          Conecta el dispositivo para ver la evaluación por reglas de tus signos vitales.
         </Text>
       </View>
     );
@@ -100,9 +100,9 @@ export const AIInsightCard: React.FC<AIInsightCardProps> = ({ report, onAskAI })
           </Animated.View>
           <View>
             <View style={styles.tagRow}>
-              <Text style={styles.headerTitle}>Diagnóstico IA en Vivo</Text>
+              <Text style={styles.headerTitle}>Evaluación en Vivo (reglas)</Text>
               <View style={styles.liveBadge}>
-                <Text style={styles.liveText}>99.4% FIABLE</Text>
+                <Text style={styles.liveText}>REGLAS FIJAS</Text>
               </View>
             </View>
             <Text style={styles.timestampText}>Evaluado en tiempo real</Text>
@@ -139,7 +139,7 @@ export const AIInsightCard: React.FC<AIInsightCardProps> = ({ report, onAskAI })
       {/* Recomendaciones médicas preventivas */}
       {recommendations.length > 0 && (
         <View style={styles.recommendationsBox}>
-          <Text style={styles.recTitle}>Recomendaciones Inteligentes:</Text>
+          <Text style={styles.recTitle}>Recomendaciones:</Text>
           {recommendations.slice(0, 2).map((rec, idx) => (
             <View key={idx} style={styles.bulletRow}>
               <Ionicons name="checkmark-circle-outline" size={14} color={Colors.success} style={{ marginRight: 6 }} />
@@ -160,7 +160,7 @@ export const AIInsightCard: React.FC<AIInsightCardProps> = ({ report, onAskAI })
             onPressOut={() => Animated.spring(btnScale, { toValue: 1.0, useNativeDriver: true }).start()}
           >
             <Ionicons name="chatbubbles-outline" size={16} color="#FFF" style={{ marginRight: 8 }} />
-            <Text style={styles.chatButtonText}>Consultar a la IA sobre mis síntomas</Text>
+            <Text style={styles.chatButtonText}>Preguntar al asistente sobre estos datos</Text>
             <Ionicons name="chevron-forward" size={16} color="#FFF" />
           </TouchableOpacity>
         </Animated.View>

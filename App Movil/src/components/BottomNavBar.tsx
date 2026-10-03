@@ -3,21 +3,35 @@ import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 
-export type TabScreen = 'dashboard' | 'charts' | 'ai';
+export type TabScreen = 'dashboard' | 'auscultation' | 'alerts' | 'charts' | 'ai';
 
 interface BottomNavBarProps {
   currentTab: TabScreen;
   onSelectTab: (tab: TabScreen) => void;
   hasAlert?: boolean;
+  alertsCount?: number;
 }
 
-export const BottomNavBar: React.FC<BottomNavBarProps> = ({ currentTab, onSelectTab, hasAlert = false }) => {
+export const BottomNavBar: React.FC<BottomNavBarProps> = ({ currentTab, onSelectTab, hasAlert = false, alertsCount = 0 }) => {
   const tabs = [
     {
       id: 'dashboard' as TabScreen,
       label: 'Monitoreo',
       iconFamily: 'MaterialCommunityIcons',
       iconName: 'heart-pulse',
+    },
+    {
+      id: 'auscultation' as TabScreen,
+      label: 'Auscultar',
+      iconFamily: 'MaterialCommunityIcons',
+      iconName: 'stethoscope',
+    },
+    {
+      id: 'alerts' as TabScreen,
+      label: 'Alertas',
+      iconFamily: 'MaterialCommunityIcons',
+      iconName: 'bell-outline',
+      badge: alertsCount > 0,
     },
     {
       id: 'charts' as TabScreen,
@@ -27,10 +41,9 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({ currentTab, onSelect
     },
     {
       id: 'ai' as TabScreen,
-      label: 'Asistente IA',
+      label: 'Asistente',
       iconFamily: 'MaterialCommunityIcons',
       iconName: 'robot-outline',
-      badge: hasAlert,
     },
   ];
 
@@ -63,7 +76,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({ currentTab, onSelect
                   />
                 )}
 
-                {tab.badge && <View style={styles.alertBadge} />}
+                {tab.badge && <View style={[styles.alertBadge, hasAlert && styles.alertBadgeCritical]} />}
               </View>
 
               <Text
@@ -128,8 +141,13 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: '#DC2626',
   },
+  alertBadgeCritical: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
   tabLabel: {
-    fontSize: 12,
+    fontSize: 11,
   },
   activeIndicator: {
     position: 'absolute',

@@ -40,6 +40,7 @@ interface VitalsContextProps {
   sendChatMessage: (text: string) => Promise<void>;
   refreshAllData: () => Promise<void>;
   connectToWokwiEmulator: () => void;
+  connectViaServer: () => Promise<{ success: boolean; message: string }>;
   connectDirectBluetooth: () => Promise<{ success: boolean; message: string; deviceName?: string }>;
   disconnectAllDevices: () => void;
 }
@@ -67,29 +68,23 @@ const generateLocalMedicalReport = (v: VitalSigns): AIAnalysisReport => {
   let score = 96;
 
   if (v.bloodOxygen > 0 && v.bloodOxygen < 90) {
-    anomalies.push(`Hipoxia Severa (SpO2 ${v.bloodOxygen.toFixed(1)}%)`);
+    anomalies.push(`Saturación muy baja (SpO2 ${v.bloodOxygen.toFixed(1)}%)`);
     status = 'critical';
     score -= 40;
-  } else if (v.bloodOxygen > 0 && v.bloodOxygen < 95) {
-    anomalies.push(`SpO2 Límite (${v.bloodOxygen.toFixed(1)}%)`);
+  } else if (v.bloodOxygen > 0 && v.bloodOxygen < 94) {
+    anomalies.push(`Saturación reducida (${v.bloodOxygen.toFixed(1)}%)`);
     status = 'caution';
     score -= 15;
   }
 
-  if (v.heartRate > 100) {
-    anomalies.push(`Taquicardia (${v.heartRate} LPM)`);
+  if (v.heartRate > 120) {
+    anomalies.push(`Frecuencia cardíaca elevada (${v.heartRate} BPM)`);
     if (status !== 'critical') status = 'caution';
     score -= 15;
-  } else if (v.heartRate > 0 && v.heartRate < 50) {
-    anomalies.push(`Bradicardia (${v.heartRate} LPM)`);
+  } else if (v.heartRate > 0 && v.heartRate < 45) {
+    anomalies.push(`Frecuencia cardíaca baja (${v.heartRate} BPM)`);
     if (status !== 'critical') status = 'caution';
     score -= 15;
-  }
-
-  if (v.temperature > 38.0) {
-    anomalies.push(`Fiebre (${v.temperature.toFixed(1)}°C)`);
-    if (status !== 'critical') status = 'caution';
-    score -= 20;
   }
 
   return {
@@ -97,15 +92,16 @@ const generateLocalMedicalReport = (v: VitalSigns): AIAnalysisReport => {
     timestamp: new Date().toISOString(),
     healthScore: Math.max(20, Math.min(100, score)),
     status,
-    title: anomalies.length > 0 ? 'Alerta Clínica (Modo Local Offline)' : 'Signos Vitales Normales (Modo Local)',
+    title: anomalies.length > 0 ? 'Valores Fuera de Rango (Sin Servidor)' : 'Valores en Rango (Sin Servidor)',
     summary: anomalies.length > 0
-      ? `Diagnóstico Local Autónomo: Se han detectado anomalías: ${anomalies.join(', ')}.`
-      : 'Diagnóstico Local Autónomo: Parámetros cardiopulmonares y acústicos dentro de rangos normales de seguridad.',
+      ? `Evaluación local por reglas (no es un diagnóstico): ${anomalies.join(', ')}.`
+      : 'Evaluación local por reglas: pulso y SpO2 dentro de los rangos esperados. No es un diagnóstico.',
     recommendations: anomalies.length > 0
       ? ['Guarde reposo y respire pausadamente', 'Verifique la colocación del oxímetro', 'Consulte a un especialista si los valores persisten']
       : ['Frecuencia y saturación estables', 'Monitoreo preventivo continuo activo'],
     anomaliesDetected: anomalies,
-    confidence: 92,
+    confidence: 0,
+    method: 'reglas',
   };
 };
 
@@ -189,7 +185,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     {
       id: 'init-msg',
       sender: 'ai',
-      text: `¡Hola! Soy tu asistente médico inteligente SpiroScan. Sesión activa: ${currentSessionId}. Monitoreando telemetría biomédica del ESP32.`,
+      text: `¡Hola! Soy el asistente de SpiroScan. Puedo explicarte los datos de esta sesión (${currentSessionId}); no doy diagnósticos.`,
       timestamp: 'Ahora',
     },
   ]);
@@ -240,6 +236,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           diastolicPressure: incomingVitals.diastolicPressure,
           temperature: incomingVitals.temperature,
           stressLevel: incomingVitals.stressLevel,
+          hrv: incomingVitals.hrv,
         };
         setHistory((prev) => {
           const updated = [...prev, newPoint];
@@ -313,13 +310,13 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         if (isDeviceActive && connectedTypeRef.current === 'wokwi_wifi') {
           setVitals(current);
           setDevice({
-            name: 'SpiroScan-Band (ESP32 WiFi/Sim)',
-            model: 'ESP32 Bio-Acústico (MAX30102 PPG)',
+            name: 'SpiroScan-Band (ESP32 por WiFi)',
+            model: 'ESP32 (MAX30102 + INMP441)',
             connected: true,
-            battery: 100,
+            battery: 0,
             lastSync: new Date().toISOString(),
-            firmwareVersion: 'v1.5.0 (Hardware Real)',
-            signalStrength: 'excellent',
+            firmwareVersion: 'WiFi vía servidor',
+            signalStrength: 'good',
           });
 
           const now = Date.now();
@@ -330,8 +327,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
               .catch(() => setAiReport(generateLocalMedicalReport(current)));
           }
         } else if (connectedTypeRef.current === 'wokwi_wifi' && !isDeviceActive) {
-          setConnectedType('none');
-          setDevice(null);
+          // Seguimos escuchando al servidor: el ESP32 puede estar sin dedo o encendiéndose.
           setVitals(ABSOLUTE_ZERO_VITALS);
         }
       } catch (err) {
@@ -366,6 +362,18 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     userManualDisconnectRef.current = false;
     setConnectedType('wokwi_wifi');
   };
+
+  // ESP32 por WiFi: los datos llegan al servidor (la Mac) y la app los lee de ahí.
+  const connectViaServer = useCallback(async () => {
+    try {
+      await apiService.linkDevice();
+      userManualDisconnectRef.current = false;
+      setConnectedType('wokwi_wifi');
+      return { success: true, message: 'Recibiendo datos del ESP32 a través del servidor.' };
+    } catch (e: any) {
+      return { success: false, message: `No se pudo contactar al servidor: ${e?.message || e}` };
+    }
+  }, []);
 
   const disconnectAllDevices = useCallback(() => {
     userManualDisconnectRef.current = true;
@@ -435,15 +443,14 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           `Operando directamente con el hardware ESP32 vía Bluetooth BLE:\n` +
           `• Frecuencia Cardíaca: ${vitals.heartRate > 0 ? `${vitals.heartRate} LPM` : 'En espera de contacto'}\n` +
           `• Saturación SpO2: ${vitals.bloodOxygen > 0 ? `${vitals.bloodOxygen.toFixed(1)}%` : 'En espera'}\n` +
-          `• Temperatura: ${vitals.temperature > 0 ? `${vitals.temperature.toFixed(1)}°C` : 'En espera'}\n` +
           `• Nivel Sonoro Acústico: ${vitals.audio_rms.toFixed(1)} dB\n\n`;
 
         if (vitals.heartRate === 0) {
           localReply += 'Coloca tu dedo firmemente en el sensor MAX30102 para iniciar la adquisición.';
         } else if (vitals.bloodOxygen < 90) {
-          localReply += '¡Atención!: Se detecta saturación baja (<90%). Respira pausadamente y solicita asistencia médica preventiva.';
+          localReply += 'Atención: saturación por debajo de 90 %. Verifica el sensor y, si se confirma, busca valoración médica.';
         } else {
-          localReply += 'Tus constantes biomédicas se encuentran estables.';
+          localReply += 'Los valores medidos están dentro de los rangos esperados.';
         }
 
         const aiMsg: ChatMessage = {
@@ -488,6 +495,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         sendChatMessage,
         refreshAllData: loadInitialData,
         connectToWokwiEmulator,
+        connectViaServer,
         connectDirectBluetooth,
         disconnectAllDevices,
       }}

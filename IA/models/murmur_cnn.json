@@ -1,0 +1,178 @@
+{
+  "modelo": "MultiHeadCNN",
+  "tarea": "caracterización de soplos sistólicos (CirCor 2022)",
+  "entrenado": "2026-10-03T02:03:55",
+  "base": "models/heart_cnn_both.pt",
+  "pacientes": 179,
+  "particiones": {
+    "train": 300,
+    "val": 99,
+    "test": 100
+  },
+  "caracteristicas": {
+    "momento": {
+      "columnas": [
+        0,
+        3
+      ],
+      "clases": [
+        "holosistólico (toda la sístole)",
+        "meso/telesistólico (mitad o final de la sístole)",
+        "protosistólico (inicio de la sístole)"
+      ],
+      "mostrar": false,
+      "metricas_prueba": {
+        "n": 100,
+        "exactitud_balanceada": 0.5608324625566005,
+        "f1_macro": 0.5424120048549045,
+        "azar": 0.3333333333333333,
+        "matriz_confusion": [
+          [
+            37,
+            4,
+            19
+          ],
+          [
+            4,
+            3,
+            4
+          ],
+          [
+            5,
+            1,
+            23
+          ]
+        ]
+      }
+    },
+    "intensidad": {
+      "columnas": [
+        3,
+        5
+      ],
+      "clases": [
+        "leve (grado I/VI)",
+        "moderado o mayor (grado II/VI o más)"
+      ],
+      "mostrar": true,
+      "metricas_prueba": {
+        "n": 100,
+        "exactitud_balanceada": 0.7594417077175698,
+        "f1_macro": 0.74,
+        "azar": 0.5,
+        "matriz_confusion": [
+          [
+            37,
+            5
+          ],
+          [
+            21,
+            37
+          ]
+        ]
+      }
+    },
+    "tono": {
+      "columnas": [
+        5,
+        8
+      ],
+      "clases": [
+        "agudo",
+        "grave",
+        "medio"
+      ],
+      "mostrar": false,
+      "metricas_prueba": {
+        "n": 100,
+        "exactitud_balanceada": 0.4794612794612794,
+        "f1_macro": 0.4833778396996788,
+        "azar": 0.3333333333333333,
+        "matriz_confusion": [
+          [
+            13,
+            1,
+            22
+          ],
+          [
+            3,
+            32,
+            9
+          ],
+          [
+            2,
+            11,
+            7
+          ]
+        ]
+      }
+    },
+    "calidad": {
+      "columnas": [
+        8,
+        10
+      ],
+      "clases": [
+        "soplante",
+        "áspero"
+      ],
+      "mostrar": false,
+      "metricas_prueba": {
+        "n": 98,
+        "exactitud_balanceada": 0.6207912457912459,
+        "f1_macro": 0.6120833333333333,
+        "azar": 0.5,
+        "matriz_confusion": [
+          [
+            31,
+            13
+          ],
+          [
+            25,
+            29
+          ]
+        ]
+      }
+    },
+    "forma": {
+      "columnas": [
+        10,
+        13
+      ],
+      "clases": [
+        "decreciente",
+        "en meseta (intensidad constante)",
+        "romboidal (crece y decrece)"
+      ],
+      "mostrar": true,
+      "metricas_prueba": {
+        "n": 100,
+        "exactitud_balanceada": 0.6115721997300945,
+        "f1_macro": 0.5706391173782478,
+        "azar": 0.3333333333333333,
+        "matriz_confusion": [
+          [
+            11,
+            7,
+            1
+          ],
+          [
+            14,
+            41,
+            10
+          ],
+          [
+            4,
+            2,
+            10
+          ]
+        ]
+      }
+    }
+  },
+  "limitaciones": [
+    "Describe el soplo (momento, intensidad, tono, calidad, forma); no identifica su causa.",
+    "Solo soplos sistólicos: CirCor tiene muy pocos diastólicos para entrenar.",
+    "Entrenado con 179 pacientes: resultados orientativos."
+  ]
+}

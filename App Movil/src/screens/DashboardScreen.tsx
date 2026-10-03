@@ -6,6 +6,8 @@ import { useVitals } from '../context/VitalsContext';
 import { MetricCard } from '../components/MetricCard';
 import { HospitalEcgMonitor } from '../components/HospitalEcgMonitor';
 import { AIInsightCard } from '../components/AIInsightCard';
+import { TriageCard } from '../components/TriageCard';
+import { useClinical } from '../context/ClinicalContext';
 
 interface DashboardScreenProps {
   onNavigateToAI: () => void;
@@ -17,34 +19,34 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onNavigateToCharts,
 }) => {
   const { vitals, aiReport } = useVitals();
+  const { triage } = useClinical();
 
   const isLive = vitals.heartRate > 0;
 
   const getHeartStatus = () => {
     if (!isLive) return { text: 'En Espera', status: 'normal' };
-    if (vitals.heartRate > 120 || vitals.heartRate < 45) return { text: 'Taquicardia', status: 'critical' };
-    if (vitals.heartRate > 100 || vitals.heartRate < 55) return { text: 'Elevado', status: 'caution' };
-    return { text: 'Óptimo', status: 'normal' };
+    if (vitals.heartRate > 120) return { text: 'Muy alto', status: 'critical' };
+    if (vitals.heartRate < 45) return { text: 'Muy bajo', status: 'critical' };
+    if (vitals.heartRate > 100 || vitals.heartRate < 55) return { text: 'Fuera de rango', status: 'caution' };
+    return { text: 'En rango', status: 'normal' };
   };
 
   const getOxygenStatus = () => {
     if (!isLive) return { text: 'En Espera', status: 'normal' };
-    if (vitals.bloodOxygen < 90) return { text: 'Crítico (<90%)', status: 'critical' };
-    if (vitals.bloodOxygen < 95) return { text: 'Aceptable', status: 'caution' };
-    return { text: 'Óptimo', status: 'normal' };
+    if (vitals.bloodOxygen <= 0) return { text: 'Sin lectura', status: 'normal' };
+    if (vitals.bloodOxygen < 90) return { text: 'Muy baja (<90%)', status: 'critical' };
+    if (vitals.bloodOxygen < 94) return { text: 'Reducida', status: 'caution' };
+    return { text: 'En rango', status: 'normal' };
   };
 
-  const getPressureStatus = () => {
-    if (!isLive) return { text: 'En Espera', status: 'normal' };
-    if (vitals.systolicPressure >= 135 || vitals.diastolicPressure >= 88) return { text: 'Elevada', status: 'caution' };
-    return { text: 'Normal', status: 'normal' };
+  const getHrvStatus = () => {
+    if (!isLive || !vitals.hrv) return { text: 'En Espera', status: 'normal' };
+    return { text: 'Medido', status: 'normal' };
   };
 
   const getStressStatus = () => {
     if (!isLive) return { text: 'En Espera', status: 'normal' };
-    if (vitals.stressLevel > 70) return { text: 'Alto', status: 'caution' };
-    if (vitals.stressLevel > 40) return { text: 'Moderado', status: 'normal' };
-    return { text: 'Bajo', status: 'normal' };
+    return { text: 'Experimental', status: 'normal' };
   };
 
   const getAudioStatus = () => {
@@ -57,18 +59,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const heartStatus = getHeartStatus();
   const oxygenStatus = getOxygenStatus();
-  const pressureStatus = getPressureStatus();
+  const hrvStatus = getHrvStatus();
   const stressStatus = getStressStatus();
   const audioStatus = getAudioStatus();
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      {/* 1. MONITOR ECG HOSPITALARIO A 60 FPS (ÚNICO Y PRINCIPAL) */}
+      {/* 0. SEMÁFORO DE TRIAJE (SpO2 + pulso + corazón + pulmón) */}
+      <TriageCard triage={triage} />
+
+      {/* 1. MONITOR DE PULSO (animación al ritmo medido) */}
       <HospitalEcgMonitor
         heartRate={vitals.heartRate}
         bloodOxygen={vitals.bloodOxygen}
-        systolicPressure={vitals.systolicPressure}
-        diastolicPressure={vitals.diastolicPressure}
         audioDecibels={vitals.audio_rms || 0}
         isAlert={heartStatus.status === 'critical'}
       />
@@ -104,27 +107,27 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         {/* Oxígeno en Sangre */}
         <MetricCard
           title="Oxígeno en Sangre"
-          value={isLive ? vitals.bloodOxygen.toFixed(1) : '--'}
+          value={isLive && vitals.bloodOxygen > 0 ? vitals.bloodOxygen.toFixed(1) : '--'}
           unit="% SpO2"
           status={oxygenStatus.status as any}
           statusText={oxygenStatus.text}
           icon="water-percent"
           color={Colors.oxygen}
           softColor="#E0F2FE"
-          subtitle="Espectrometría Óptica"
+          subtitle="Oximetría de pulso"
         />
 
-        {/* Presión Arterial */}
+        {/* Variabilidad de la frecuencia cardíaca */}
         <MetricCard
-          title="Presión Arterial"
-          value={isLive ? `${vitals.systolicPressure}/${vitals.diastolicPressure}` : '--/--'}
-          unit="mmHg"
-          status={pressureStatus.status as any}
-          statusText={pressureStatus.text}
+          title="Variabilidad (HRV)"
+          value={isLive && vitals.hrv ? vitals.hrv : '--'}
+          unit="ms"
+          status={hrvStatus.status as any}
+          statusText={hrvStatus.text}
           icon="heart-flash"
           color={Colors.pressure}
           softColor="#EDE9FE"
-          subtitle="Algoritmo PTT"
+          subtitle="Intervalo entre latidos"
         />
 
         {/* Micrófono Bio-Acústico */}
@@ -142,7 +145,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
         {/* Estrés Autonómico */}
         <MetricCard
-          title="Estrés Autonómico"
+          title="Índice de Estrés"
           value={isLive ? vitals.stressLevel : '--'}
           unit="/100"
           status={stressStatus.status as any}
@@ -150,21 +153,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           icon="brain"
           color={Colors.stress}
           softColor="#FEF3C7"
-          subtitle="Variabilidad HRV"
+          subtitle="Estimación no validada"
         />
 
-        {/* Temperatura */}
-        <MetricCard
-          title="Temperatura Cutánea"
-          value={isLive ? `${vitals.temperature.toFixed(1)}°` : '--'}
-          unit="°C"
-          status="normal"
-          statusText="Estable"
-          icon="thermometer"
-          color="#F59E0B"
-          softColor="#FFFBEB"
-          subtitle="Sensor Térmico"
-        />
       </View>
     </ScrollView>
   );

@@ -253,20 +253,14 @@ class DeviceBridgeService {
           const flags = value.getUint8(0);
           const bpm = flags & 0x01 ? value.getUint16(1, true) : value.getUint8(1);
 
-          const nowMs = Date.now();
-          const breathOffset = Math.sin(nowMs / 2400) * 0.45;
-          const dynamicSpo2 = bpm > 0 ? Number((98.2 + breathOffset).toFixed(1)) : 0;
-
+          // El canal estándar solo trae el pulso: el resto queda en 0 (sin dato), nunca inventado.
           this.handleIncomingRawData({
             bpm: bpm,
-            spo2: dynamicSpo2,
-            systolic: bpm > 0 ? 118 : 0,
-            diastolic: bpm > 0 ? 76 : 0,
-            temperature: bpm > 0 ? 36.6 : 0,
-            stress: bpm > 0 ? Math.round(Math.max(10, Math.min(95, (bpm - 50) * 1.2))) : 0,
-            hrv: bpm > 0 ? 65 : 0,
-            audio_rms: 20.0,
-            audio_peak: 26.0,
+            spo2: 0,
+            systolic: 0,
+            diastolic: 0,
+            audio_rms: 0,
+            audio_peak: 0,
             finger: bpm > 0,
           });
         }
@@ -364,24 +358,18 @@ class DeviceBridgeService {
     }
     const finalHeartRate = Math.round(this.smoothedBpm);
 
-    // 2. Modulación pletismográfica respiratoria fisiológica para SpO2
-    let currentSpo2 = raw.spo2 || 0.0;
-    if (isFingerPresent && finalHeartRate > 0 && currentSpo2 > 0) {
-      // Modulación pletismográfica respiratoria fisiológica (evita que el número se quede estático)
-      const breathPhase = Math.sin(Date.now() / 2300) * 0.35;
-      currentSpo2 = Number(Math.max(90.0, Math.min(99.8, currentSpo2 + breathPhase)).toFixed(1));
-    } else if (!isFingerPresent || finalHeartRate === 0) {
-      currentSpo2 = 0.0;
-    }
+    // 2. SpO2 tal como lo mide el sensor: sin oscilaciones añadidas ni límites que oculten valores bajos.
+    const currentSpo2 = isFingerPresent && finalHeartRate > 0 ? Number((raw.spo2 || 0).toFixed(1)) : 0.0;
 
     const updatedVitals: VitalSigns = {
       heartRate: finalHeartRate,
       bloodOxygen: currentSpo2,
-      systolicPressure: raw.systolic || 0,
-      diastolicPressure: raw.diastolic || 0,
-      temperature: raw.temperature || (isFingerPresent ? 36.6 : 0.0),
-      hrv: raw.hrv || (finalHeartRate > 0 ? Math.max(40, Math.min(100, Math.round(60000 / (finalHeartRate || 75) * 0.08))) : 0),
-      stressLevel: raw.stress !== undefined ? raw.stress : (raw.stress_score !== undefined ? raw.stress_score : (finalHeartRate > 0 ? Math.round(Math.max(10, Math.min(95, (finalHeartRate - 50) * 1.2))) : 0)),
+      // El MAX30102 no mide presión arterial ni temperatura corporal.
+      systolicPressure: 0,
+      diastolicPressure: 0,
+      temperature: 0,
+      hrv: raw.hrv || 0,
+      stressLevel: raw.stress ?? raw.stress_score ?? 0,
       audio_rms: raw.audio_rms || 0.0,
       audio_peak: raw.audio_peak || 0.0,
       steps: 0,
@@ -407,9 +395,6 @@ class DeviceBridgeService {
         body: JSON.stringify({
           bpm: data.bpm,
           spo2: data.spo2,
-          systolic: data.systolic,
-          diastolic: data.diastolic,
-          temperature: data.temperature || (data.bpm > 0 ? 36.6 : 0.0),
           stress: data.stress !== undefined ? data.stress : (data.stress_score || 0),
           hrv: data.hrv || 0,
           audio_rms: data.audio_rms,

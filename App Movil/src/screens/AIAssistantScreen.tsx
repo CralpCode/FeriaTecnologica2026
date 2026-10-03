@@ -22,8 +22,9 @@ export const AIAssistantScreen: React.FC = () => {
   const suggestions = [
     '¿Cómo están mis pulsaciones actuales?',
     '¿Mi oxigenación SpO2 es normal?',
-    '¿Qué significa mi presión arterial?',
-    'Dame una recomendación de bienestar completa',
+    '¿Qué resultado dio la auscultación?',
+    'Resume esta sesión en pocas palabras',
+    '¿Qué es SpiroScan y cómo funciona?',
   ];
 
   useEffect(() => {
@@ -93,15 +94,15 @@ export const AIAssistantScreen: React.FC = () => {
               </View>
             </View>
 
-            {/* Presión Arterial */}
+            {/* Variabilidad HRV */}
             <View style={styles.vitalGridCard}>
               <View style={[styles.vitalIconWrap, { backgroundColor: '#EDE9FE' }]}>
-                <Ionicons name="speedometer" size={14} color="#8B5CF6" />
+                <Ionicons name="pulse" size={14} color="#8B5CF6" />
               </View>
               <View style={styles.vitalCardContent}>
-                <Text style={styles.vitalCardLabel}>Presión Art.</Text>
+                <Text style={styles.vitalCardLabel}>HRV</Text>
                 <Text style={styles.vitalCardValue} numberOfLines={1}>
-                  {vitals.systolicPressure > 0 ? `${vitals.systolicPressure}/${vitals.diastolicPressure}` : 'En espera'}
+                  {vitals.hrv > 0 ? `${vitals.hrv} ms` : 'En espera'}
                 </Text>
               </View>
             </View>

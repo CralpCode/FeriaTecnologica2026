@@ -6,7 +6,7 @@ import { VitalsHistoryPoint, AIAnalysisReport } from '../types/vitals';
 import { API_CONFIG } from '../config/api';
 
 export interface ExportDataParams {
-  metricKey?: 'heartRate' | 'bloodOxygen' | 'systolicPressure' | 'stressLevel';
+  metricKey?: 'heartRate' | 'bloodOxygen' | 'hrv' | 'stressLevel';
   history?: VitalsHistoryPoint[];
   metricName?: string;
   metricUnit?: string;

@@ -1,0 +1,10 @@
+Campo,Valor
+ID Paciente,216
+Edad (anos),1
+Grupo de edad,Nino/Adolescente (1-17)
+Sexo,M
+Diagnostico,Bronchiolitis
+BMI adulto (kg/m2),
+Peso nino (kg),10.25
+Altura nino (cm),78
+Particion sugerida (train/validation),Entrenamiento
