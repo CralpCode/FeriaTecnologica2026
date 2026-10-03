@@ -8,8 +8,11 @@
 #define WIFI_SSID      "SpiroScan-Feria"
 #define WIFI_PASSWORD  "cambia-esta-clave"
 
-// Dirección del servidor. Déjala VACÍA: el ESP32 encuentra la Mac solo (mDNS),
-// en casa o en la feria. Solo pon una IP si la red bloquea mDNS, p. ej. "http://192.168.0.24:8000".
+// Dirección del servidor (la Mac):
+//   ""  (vacío)  -> el ESP32 busca la Mac solo, pero SOLO si están en el MISMO WiFi.
+//   "https://xxxx.trycloudflare.com"  -> envía por internet desde CUALQUIER red.
+//        Es el link público de la app (sin "/" al final). Si el link cambia, hay que
+//        actualizarlo aquí y volver a subir el firmware.
 #define SERVER_URL     ""
 
 // Identificador del dispositivo (el backend lo asocia a la sesión que la app "armó").

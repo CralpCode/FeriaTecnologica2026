@@ -10,14 +10,17 @@
 // La captura corre en el loop (nucleo 1) y el envio HTTP en una tarea del nucleo 0,
 // con un anillo de bufers: asi el I2S nunca se queda esperando a la red.
 //
-// El servidor se encuentra solo por mDNS (servicio _spiroscan._tcp que anuncia la Mac),
-// asi que no hace falta escribir su IP. SERVER_URL solo se usa si se quiere forzar una.
-// Ademas, por WiFi se envia la telemetria de pulso/SpO2 1 vez por segundo a /api/telemetry.
+// Servidor:
+//   - SERVER_URL vacio  -> busca la Mac en el MISMO WiFi por mDNS (servicio _spiroscan._tcp).
+//   - SERVER_URL "https://...trycloudflare.com" -> envia por internet desde CUALQUIER red.
+// La telemetria de pulso/SpO2 (1 vez por segundo) se envia desde una tarea aparte, para que
+// la conexion https (mas lenta) nunca frene la lectura de los sensores.
 // ==============================================================================
 #pragma once
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ESPmDNS.h>
 #include <driver/i2s.h>
 #include <Adafruit_NeoPixel.h>
@@ -58,9 +61,34 @@ static float ausc_dc = 0.0f;
 static unsigned long ausc_result_until = 0;
 static uint32_t ausc_result_color = 0;
 
-static String ausc_server_base = "";   // p. ej. "http://192.168.0.24:8000" (descubierto por mDNS)
+static String ausc_server_base = "";   // p. ej. "http://192.168.0.24:8000" (mDNS) o el link https
 static bool ausc_mdns_started = false;
-static int ausc_http_failures = 0;
+static volatile int ausc_http_failures = 0;
+
+// Ultima telemetria pendiente de enviar (la escribe el loop, la lee la tarea de envio)
+static char ausc_telem_json[320];
+static volatile bool ausc_telem_pending = false;
+static portMUX_TYPE ausc_telem_mux = portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t ausc_telem_task = nullptr;
+
+static bool ausc_is_https() {
+  return ausc_server_base.startsWith("https://");
+}
+
+// Abre la peticion con el cliente adecuado: TLS para https (link del tunel), normal para http (red local).
+// Nota: setInsecure() no verifica el certificado del servidor; suficiente para el prototipo.
+static void ausc_http_begin(HTTPClient& http, WiFiClientSecure& tls, WiFiClient& plain, const String& url) {
+  if (url.startsWith("https://")) {
+    tls.setInsecure();
+    http.begin(tls, url);
+    http.setConnectTimeout(8000);
+    http.setTimeout(10000);
+  } else {
+    http.begin(plain, url);
+    http.setConnectTimeout(1500);
+    http.setTimeout(3000);
+  }
+}
 
 // ------------------------------------------------------------------------------
 // WiFi
@@ -130,20 +158,54 @@ void ausc_net_maintain() {
   ausc_discover_server();
 }
 
-// Envia un JSON de telemetria al servidor (1 Hz). Timeouts cortos para no frenar el loop.
-void ausc_send_telemetry(const char* json) {
-  static unsigned long last_sent = 0;
-  if (!ausc_wifi_ready() || !ausc_server_known()) return;
-  if (millis() - last_sent < 1000) return;
-  last_sent = millis();
+bool ausc_busy();
+
+// Tarea (nucleo 0) que envia la telemetria pendiente 1 vez por segundo. Mantiene la conexion
+// abierta entre envios (importante con https: el saludo TLS es lo mas lento).
+static void ausc_telemetry_task(void*) {
+  WiFiClientSecure tls;
+  WiFiClient plain;
   HTTPClient http;
-  http.setConnectTimeout(400);
-  http.setTimeout(600);
-  http.begin(ausc_server() + "/api/telemetry");
-  http.addHeader("Content-Type", "application/json");
-  int code = http.POST((uint8_t*)json, strlen(json));
-  http.end();
-  ausc_note_http_result(code == 200);
+  http.setReuse(true);
+  bool open = false;
+  char json[sizeof(ausc_telem_json)];
+  while (true) {
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    if (ausc_busy()) {
+      // Durante la grabacion se libera la conexion: la memoria y la red son para el audio.
+      if (open) { http.end(); tls.stop(); plain.stop(); open = false; }
+      continue;
+    }
+    if (!ausc_wifi_ready() || !ausc_server_known() || !ausc_telem_pending) continue;
+    portENTER_CRITICAL(&ausc_telem_mux);
+    memcpy(json, ausc_telem_json, sizeof(json));
+    ausc_telem_pending = false;
+    portEXIT_CRITICAL(&ausc_telem_mux);
+
+    String url = ausc_server() + "/api/telemetry";
+    ausc_http_begin(http, tls, plain, url);
+    http.addHeader("Content-Type", "application/json");
+    int code = http.POST((uint8_t*)json, strlen(json));
+    http.getString();  // vaciar la respuesta para poder reutilizar la conexion
+    open = true;
+    if (code != 200) {
+      Serial.printf("[NET] Telemetria no enviada (HTTP %d)\r\n", code);
+      http.end(); tls.stop(); plain.stop(); open = false;
+    }
+    ausc_note_http_result(code == 200);
+  }
+}
+
+// Guarda la ultima telemetria; la tarea de envio la manda (no bloquea el loop).
+void ausc_send_telemetry(const char* json) {
+  if (!ausc_telem_task) {
+    xTaskCreatePinnedToCore(ausc_telemetry_task, "ausc_telem", 16384, nullptr, 1, &ausc_telem_task, 0);
+  }
+  portENTER_CRITICAL(&ausc_telem_mux);
+  strncpy(ausc_telem_json, json, sizeof(ausc_telem_json) - 1);
+  ausc_telem_json[sizeof(ausc_telem_json) - 1] = '\0';
+  ausc_telem_pending = true;
+  portEXIT_CRITICAL(&ausc_telem_mux);
 }
 
 static String ausc_json_field(const String& body, const char* key) {
@@ -159,6 +221,8 @@ static String ausc_json_field(const String& body, const char* key) {
 // Tarea de envio (nucleo 0)
 // ------------------------------------------------------------------------------
 static void ausc_upload_task(void*) {
+  WiFiClientSecure tls;
+  WiFiClient plain;
   HTTPClient http;
   http.setReuse(true);
   String url = ausc_server() + "/api/audio/chunk?recording_id=" + ausc_recording_id;
@@ -167,9 +231,10 @@ static void ausc_upload_task(void*) {
     if (xQueueReceive(ausc_full_queue, &idx, pdMS_TO_TICKS(200)) == pdTRUE) {
       if (idx < 0) break;  // marcador de fin
       if (!ausc_upload_error) {
-        http.begin(url);
+        ausc_http_begin(http, tls, plain, url);
         http.addHeader("Content-Type", "application/octet-stream");
         int code = http.POST((uint8_t*)ausc_buffers[idx], AUSC_CHUNK_SAMPLES * sizeof(int16_t));
+        http.getString();  // vaciar la respuesta para reutilizar la conexion
         if (code != 200) {
           Serial.printf("[AUSC] Error enviando bloque: HTTP %d\r\n", code);
           ausc_upload_error = true;
@@ -190,7 +255,7 @@ bool ausc_start() {
   if (ausc_state == AUSC_RECORDING || ausc_state == AUSC_PROCESSING) return false;
   if (!ausc_wifi_ready() || !ausc_server_known()) {
     Serial.println(ausc_wifi_ready()
-                   ? F("[AUSC] Servidor no encontrado: ¿esta encendido start_server.sh en la misma red?")
+                   ? F("[AUSC] Servidor no encontrado: revisa SERVER_URL o que la Mac este en la misma red")
                    : F("[AUSC] Sin WiFi: no se puede grabar. Revisa spiroscan_config.h"));
     ausc_result_color = strip.Color(255, 120, 0);
     ausc_result_until = millis() + 3000;
@@ -211,8 +276,11 @@ bool ausc_start() {
   xQueueReset(ausc_free_queue);
   for (int i = 0; i < AUSC_NUM_BUFFERS; i++) xQueueSend(ausc_free_queue, &i, 0);
 
+  Serial.printf("[AUSC] Memoria libre antes de grabar: %u bytes\r\n", (unsigned)ESP.getFreeHeap());
+  WiFiClientSecure tls;
+  WiFiClient plain;
   HTTPClient http;
-  http.begin(ausc_server() + "/api/audio/start");
+  ausc_http_begin(http, tls, plain, ausc_server() + "/api/audio/start");
   http.addHeader("Content-Type", "application/json");
   String body = String("{\"device_id\":\"") + DEVICE_ID + "\",\"sample_rate\":" + AUSC_SAMPLE_RATE + "}";
   int code = http.POST(body);
@@ -234,7 +302,8 @@ bool ausc_start() {
   ausc_samples_total = 0;
   ausc_dc = 0.0f;
   i2s_zero_dma_buffer(I2S_NUM_0);
-  xTaskCreatePinnedToCore(ausc_upload_task, "ausc_upload", 8192, nullptr, 1, &ausc_task, 0);
+  // 16 KB de pila: el saludo TLS (https) la necesita.
+  xTaskCreatePinnedToCore(ausc_upload_task, "ausc_upload", 16384, nullptr, 1, &ausc_task, 0);
 
   ausc_state = AUSC_RECORDING;
   Serial.printf("[AUSC] Grabando %d s -> %s\r\n", AUSC_DURATION_S, ausc_recording_id.c_str());
@@ -251,9 +320,11 @@ static void ausc_finish() {
   strip.show();
   String result = "error";
   if (!ausc_upload_error) {
+    WiFiClientSecure tls;
+    WiFiClient plain;
     HTTPClient http;
-    http.setTimeout(20000);
-    http.begin(ausc_server() + "/api/audio/finish?recording_id=" + ausc_recording_id);
+    ausc_http_begin(http, tls, plain, ausc_server() + "/api/audio/finish?recording_id=" + ausc_recording_id);
+    http.setTimeout(30000);  // la clasificacion + red por internet
     int code = http.POST((uint8_t*)nullptr, 0);
     String resp = http.getString();
     http.end();
