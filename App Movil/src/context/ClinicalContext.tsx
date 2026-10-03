@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { apiService } from '../services/api';
 import { useVitals } from './VitalsContext';
-import { ClinicalAlert, HeartFocus, RecordingResult } from '../types/vitals';
+import { AuscultationFocus, AuscultationMode, ClinicalAlert, RecordingResult, TriageResult } from '../types/vitals';
 
 export type RecordingPhase = 'idle' | 'armed' | 'recording' | 'done';
 
@@ -12,9 +12,10 @@ interface ClinicalContextProps {
   recordings: RecordingResult[];
   lastResult: RecordingResult | null;
   phase: RecordingPhase;
-  armedLocation: HeartFocus | null;
+  armedLocation: AuscultationFocus | null;
+  triage: TriageResult | null;
   isLiveConnected: boolean;
-  armRecording: (location: HeartFocus) => Promise<void>;
+  armRecording: (location: AuscultationFocus, mode: AuscultationMode) => Promise<void>;
   acknowledgeAlert: (id: number) => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -29,16 +30,18 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [recordings, setRecordings] = useState<RecordingResult[]>([]);
   const [lastResult, setLastResult] = useState<RecordingResult | null>(null);
   const [phase, setPhase] = useState<RecordingPhase>('idle');
-  const [armedLocation, setArmedLocation] = useState<HeartFocus | null>(null);
+  const [armedLocation, setArmedLocation] = useState<AuscultationFocus | null>(null);
+  const [triage, setTriage] = useState<TriageResult | null>(null);
   const [isLiveConnected, setIsLiveConnected] = useState(false);
   const sessionRef = useRef(currentSessionId);
   sessionRef.current = currentSessionId;
 
   const refresh = useCallback(async () => {
     try {
-      const [a, r] = await Promise.all([apiService.getAlerts(), apiService.getRecordings()]);
+      const [a, r, t] = await Promise.all([apiService.getAlerts(), apiService.getRecordings(), apiService.getTriage()]);
       setAlerts(a);
       setRecordings(r);
+      setTriage(t);
     } catch {}
   }, []);
 
@@ -51,6 +54,7 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
     setAlerts([]);
     setRecordings([]);
     setLastResult(null);
+    setTriage(null);
     setPhase('idle');
     refresh();
 
@@ -91,6 +95,9 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
           case 'RECORDING_STARTED':
             setPhase('recording');
             break;
+          case 'TRIAGE_UPDATE':
+            setTriage(msg.data);
+            break;
           case 'RECORDING_RESULT':
             setLastResult(msg.data);
             setPhase('done');
@@ -115,8 +122,8 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
     return () => clearInterval(timer);
   }, [isLiveConnected, refresh]);
 
-  const armRecording = useCallback(async (location: HeartFocus) => {
-    await apiService.armRecording(location);
+  const armRecording = useCallback(async (location: AuscultationFocus, mode: AuscultationMode) => {
+    await apiService.armRecording(location, mode);
     // Armar también vincula el ESP32 a esta sesión: empezamos a leer sus vitales del servidor.
     if (connectedType === 'none') await connectViaServer();
     setArmedLocation(location);
@@ -141,6 +148,7 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
         lastResult,
         phase,
         armedLocation,
+        triage,
         isLiveConnected,
         armRecording,
         acknowledgeAlert,

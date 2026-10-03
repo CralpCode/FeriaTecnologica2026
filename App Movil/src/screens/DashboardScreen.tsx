@@ -6,6 +6,8 @@ import { useVitals } from '../context/VitalsContext';
 import { MetricCard } from '../components/MetricCard';
 import { HospitalEcgMonitor } from '../components/HospitalEcgMonitor';
 import { AIInsightCard } from '../components/AIInsightCard';
+import { TriageCard } from '../components/TriageCard';
+import { useClinical } from '../context/ClinicalContext';
 
 interface DashboardScreenProps {
   onNavigateToAI: () => void;
@@ -17,6 +19,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onNavigateToCharts,
 }) => {
   const { vitals, aiReport } = useVitals();
+  const { triage } = useClinical();
 
   const isLive = vitals.heartRate > 0;
 
@@ -62,7 +65,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      {/* 1. MONITOR ECG HOSPITALARIO A 60 FPS (ÚNICO Y PRINCIPAL) */}
+      {/* 0. SEMÁFORO DE TRIAJE (SpO2 + pulso + corazón + pulmón) */}
+      <TriageCard triage={triage} />
+
+      {/* 1. MONITOR DE PULSO (animación al ritmo medido) */}
       <HospitalEcgMonitor
         heartRate={vitals.heartRate}
         bloodOxygen={vitals.bloodOxygen}

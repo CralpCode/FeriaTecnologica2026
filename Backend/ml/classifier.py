@@ -15,9 +15,52 @@ from . import features as F
 MODEL_PATH = Path(os.getenv("HEART_MODEL_PATH", Path(__file__).resolve().parents[1] / "models" / "heart_cnn.pt"))
 MIN_DURATION_S = 5.0
 
+MURMUR_PATH = MODEL_PATH.parent / "murmur_cnn.pt"
+
 _lock = threading.Lock()
 _model = None
 _meta: dict = {}
+_murmur_model = None
+_murmur_meta: dict = {}
+
+
+def _load_murmur() -> bool:
+    """Modelo opcional que describe el soplo. Si no existe, la clasificación sigue funcionando."""
+    global _murmur_model, _murmur_meta
+    with _lock:
+        if _murmur_model is not None:
+            return True
+        if not MURMUR_PATH.exists():
+            return False
+        import torch
+        _murmur_model = torch.jit.load(str(MURMUR_PATH), map_location="cpu").eval()
+        _murmur_meta = json.loads(MURMUR_PATH.with_suffix(".json").read_text())
+        return True
+
+
+def describe_murmur(x) -> dict:
+    """
+    Características del soplo que el modelo predice de forma confiable (las marcadas "mostrar").
+    Devuelve {caracteristica: {"valor": ..., "confianza": ...}}. No identifica la causa.
+    """
+    if not _load_murmur():
+        return {}
+    import torch
+    with torch.no_grad():
+        logits = _murmur_model(x)
+    out = {}
+    for name, h in _murmur_meta.get("caracteristicas", {}).items():
+        if not h.get("mostrar"):
+            continue
+        a, b = h["columnas"]
+        probs = torch.softmax(logits[:, a:b], dim=1).mean(0).numpy()
+        k = int(np.argmax(probs))
+        out[name] = {
+            "valor": h["clases"][k],
+            "confianza": round(float(probs[k]), 3),
+            "exactitud_modelo": round(h["metricas_prueba"]["exactitud_balanceada"], 2),
+        }
+    return out
 
 
 def _load():
@@ -46,6 +89,11 @@ def model_info() -> dict:
         "umbral": _meta.get("umbral"),
         "metricas_prueba": _meta.get("metricas_prueba"),
         "limitaciones": _meta.get("limitaciones", []),
+        "caracterizacion_soplo": {
+            name: {"mostrar": h["mostrar"], "exactitud_balanceada": round(h["metricas_prueba"]["exactitud_balanceada"], 2),
+                   "azar": round(h["metricas_prueba"]["azar"], 2)}
+            for name, h in _murmur_meta.get("caracteristicas", {}).items()
+        } if _load_murmur() else None,
     }
 
 
@@ -73,8 +121,10 @@ def classify_wav(path: str | Path) -> dict:
     prob = float(np.mean(window_probs))
     thr = float(_meta.get("umbral", 0.5))
     quality["windows"] = int(len(window_probs))
+    result = "anormal" if prob >= thr else "normal"
     return {
-        "result": "anormal" if prob >= thr else "normal",
+        "result": result,
+        "details": {"caracteristicas_soplo": describe_murmur(x)} if result == "anormal" else {},
         "reason": None,
         "probability": round(prob, 4),
         "threshold": round(thr, 4),

@@ -75,6 +75,12 @@ def init_db():
             pdf_path TEXT
         );
         """)
+        # Migraciones simples para bases creadas con versiones anteriores
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(recordings)")}
+        if "details" not in cols:
+            conn.execute("ALTER TABLE recordings ADD COLUMN details TEXT")
+        if "mode" not in cols:
+            conn.execute("ALTER TABLE recordings ADD COLUMN mode TEXT DEFAULT 'corazon'")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_rec_session ON recordings(session_id);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_session ON alerts(session_id);")
     conn.close()
@@ -241,7 +247,7 @@ def create_recording(rec_id: str, session_id: str, location: str, sample_rate: i
 def update_recording(rec_id: str, **fields):
     if not fields:
         return
-    for k in ("quality",):
+    for k in ("quality", "details"):
         if k in fields and not isinstance(fields[k], str):
             fields[k] = json.dumps(fields[k])
     cols = ", ".join(f"{k} = ?" for k in fields)
@@ -254,6 +260,7 @@ def update_recording(rec_id: str, **fields):
 def _recording_dict(row) -> dict:
     d = dict(row)
     d["quality"] = json.loads(d["quality"]) if d.get("quality") else None
+    d["details"] = json.loads(d["details"]) if d.get("details") else {}
     d.pop("wav_path", None)
     return d
 

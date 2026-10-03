@@ -8,11 +8,12 @@ from pathlib import Path
 
 import ai_engine
 import database
+import triage
 
 BASE_RULES = (
     "Eres el asistente de comunicación de SpiroScan, un prototipo universitario de TAMIZAJE "
-    "cardiorrespiratorio (sensor MAX30102 para pulso y SpO2; estetoscopio digital con una red "
-    "neuronal que estima la probabilidad de un sonido cardíaco anormal).\n"
+    "cardiorrespiratorio (sensor MAX30102 para pulso y SpO2; estetoscopio digital con redes neuronales "
+    "que estiman si un sonido cardíaco o pulmonar es anormal; un semáforo de triaje por reglas fijas).\n"
     "REGLAS OBLIGATORIAS:\n"
     "1. Nunca diagnostiques ni afirmes que la persona tiene una enfermedad. Habla de 'hallazgos' o 'resultados'.\n"
     "2. Usa SOLO los datos que se te entregan. Si falta un dato, dilo. No inventes valores.\n"
@@ -20,6 +21,8 @@ BASE_RULES = (
     "4. Ante cualquier alerta o resultado anormal, recomienda valoración por personal de salud.\n"
     "5. No recomiendes medicamentos, dosis ni tratamientos.\n"
     "6. Español claro y sin jerga, para un promotor de salud o una persona sin formación médica.\n"
+    "7. Si hay 'patrón compatible con' una enfermedad, dilo SIEMPRE como sugerencia a confirmar por un médico, "
+    "nunca como diagnóstico. Las características del soplo describen cómo suena, no su causa.\n"
 )
 
 KNOWLEDGE_PATH = Path(__file__).resolve().parent / "knowledge" / "proyecto.md"
@@ -34,7 +37,11 @@ def project_knowledge() -> str:
 
 
 SEVERITY_NAMES = {"critical": "crítica", "caution": "precaución", "info": "informativa"}
-LOCATION_NAMES = {"AV": "aórtico", "PV": "pulmonar", "TV": "tricuspídeo", "MV": "mitral"}
+LOCATION_NAMES = {
+    "AV": "aórtico", "PV": "pulmonar", "TV": "tricuspídeo", "MV": "mitral",
+    "TC": "tráquea", "AL": "tórax anterior izquierdo", "AR": "tórax anterior derecho",
+    "PL": "espalda izquierda", "PR": "espalda derecha", "LL": "costado izquierdo", "LR": "costado derecho",
+}
 
 GUIDE = {
     "AV": {"nombre": "Foco aórtico", "posicion": "Segundo espacio intercostal, a la DERECHA del esternón, pegado a su borde."},
@@ -42,6 +49,17 @@ GUIDE = {
     "TV": {"nombre": "Foco tricuspídeo", "posicion": "Cuarto o quinto espacio intercostal, a la izquierda, en el borde inferior del esternón."},
     "MV": {"nombre": "Foco mitral", "posicion": "Quinto espacio intercostal izquierdo, en la línea que baja desde la mitad de la clavícula (punta del corazón)."},
 }
+GUIDE.update({
+    "TC": {"nombre": "Tráquea", "posicion": "En el cuello, sobre la tráquea, justo encima del esternón."},
+    "AL": {"nombre": "Tórax anterior izquierdo", "posicion": "Segundo espacio intercostal izquierdo, en la línea media de la clavícula."},
+    "AR": {"nombre": "Tórax anterior derecho", "posicion": "Segundo espacio intercostal derecho, en la línea media de la clavícula."},
+    "PL": {"nombre": "Espalda izquierda", "posicion": "Entre la columna y el borde de la escápula izquierda, a media altura."},
+    "PR": {"nombre": "Espalda derecha", "posicion": "Entre la columna y el borde de la escápula derecha, a media altura."},
+    "LL": {"nombre": "Costado izquierdo", "posicion": "Línea axilar media izquierda, a la altura del quinto espacio intercostal."},
+    "LR": {"nombre": "Costado derecho", "posicion": "Línea axilar media derecha, a la altura del quinto espacio intercostal."},
+})
+GUIDE_LUNG_EXTRA = "Pulmón: pedir a la persona que respire hondo por la boca durante toda la grabación."
+
 GUIDE_COMMON = [
     "Ambiente en silencio; pedir a la persona que no hable durante la grabación.",
     "Contacto directo con la piel, sin ropa de por medio, con presión firme pero sin hundir.",
@@ -57,8 +75,10 @@ def _session_context(session_id: str) -> dict:
         "vitales_ultimas_lecturas": database.get_latest_reading(session_id=session_id),
         "resumen_vitales_sesion": database.get_vitals_summary(session_id),
         "grabaciones": [
-            {"foco": LOCATION_NAMES.get(r["location"], r["location"] or "sin especificar"),
+            {"tipo": "pulmón" if r.get("mode") == "pulmon" else "corazón",
+             "foco": LOCATION_NAMES.get(r["location"], r["location"] or "sin especificar"),
              "resultado": r["result"],
+             "detalles": r.get("details") or {},
              "probabilidad_anormal": f"{r['probability']:.0%}" if r["probability"] is not None else None,
              "umbral": f"{r['threshold']:.0%}" if r["threshold"] is not None else None,
              "hora": r["created_at"]}
@@ -69,6 +89,7 @@ def _session_context(session_id: str) -> dict:
              "titulo": a["title"], "hora": a["created_at"]}
             for a in database.list_alerts(session_id, limit=10)
         ],
+        "triaje": {k: v for k, v in triage.evaluate(session_id).items() if k in ("nivel", "titulo", "motivos")},
     }
 
 
@@ -191,7 +212,8 @@ def guide(location: str) -> dict:
     loc = location.upper()
     if loc not in GUIDE:
         raise KeyError(loc)
-    return {**GUIDE[loc], "foco": loc, "pasos": GUIDE_COMMON}
+    pasos = GUIDE_COMMON + ([GUIDE_LUNG_EXTRA] if loc in ("TC", "AL", "AR", "PL", "PR", "LL", "LR") else [])
+    return {**GUIDE[loc], "foco": loc, "pasos": pasos}
 
 
 def guide_answer(question: str, location: str | None, last_quality: dict | None) -> str:

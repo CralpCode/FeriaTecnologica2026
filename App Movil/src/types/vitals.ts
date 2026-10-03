@@ -81,13 +81,40 @@ export interface RawDevicePacket {
 // ---------------------------------------------------------------------------
 
 export type HeartFocus = 'AV' | 'PV' | 'TV' | 'MV';
+export type LungZone = 'TC' | 'AL' | 'AR' | 'PL' | 'PR' | 'LL' | 'LR';
+export type AuscultationFocus = HeartFocus | LungZone;
+export type AuscultationMode = 'corazon' | 'pulmon';
+
+export interface MurmurTrait {
+  valor: string;
+  confianza: number;
+  exactitud_modelo: number;
+}
+
+export interface RecordingDetails {
+  caracteristicas_soplo?: Record<string, MurmurTrait>;
+  ruidos?: Record<string, { presente: boolean; probabilidad: number; umbral: number; sensibilidad_modelo: number }>;
+  patron?: { compatible_con: string; probabilidad: number; sensibilidad_modelo: number };
+}
+
+export type TriageLevel = 'rojo' | 'amarillo' | 'verde' | 'gris';
+
+export interface TriageResult {
+  session_id: string;
+  nivel: TriageLevel;
+  titulo: string;
+  motivos: string[];
+  aviso: string;
+}
 
 export interface RecordingResult {
   recording_id: string;
   session_id: string;
-  location: HeartFocus | '';
+  location: AuscultationFocus | '';
+  mode?: AuscultationMode;
   duration_s: number;
-  result: 'normal' | 'anormal' | 'calidad_insuficiente' | 'error';
+  result: 'normal' | 'anormal' | 'calidad_insuficiente' | 'modelo_no_disponible' | 'error';
+  details?: RecordingDetails;
   reason?: string | null;
   probability: number | null;
   threshold: number | null;
@@ -112,7 +139,7 @@ export interface ClinicalAlert {
 }
 
 export interface FocusGuide {
-  foco: HeartFocus;
+  foco: AuscultationFocus;
   nombre: string;
   posicion: string;
   pasos: string[];

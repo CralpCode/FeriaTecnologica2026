@@ -16,7 +16,7 @@ Su objetivo es identificar a quién conviene referir a un ecocardiograma. NO dia
 - Servidor: una Mac del equipo con la base de datos, la red neuronal y el asistente de lenguaje, todo local y sin internet.
 
 ## Qué mide y qué no
-- Mide: pulso, SpO2, variabilidad entre latidos (HRV) y el sonido del corazón.
+- Mide: pulso, SpO2, variabilidad entre latidos (HRV) y el sonido del corazón y de los pulmones.
 - No mide: presión arterial, temperatura corporal ni electrocardiograma.
 
 ## La red neuronal (CNN)
@@ -26,6 +26,24 @@ Su objetivo es identificar a quién conviene referir a un ecocardiograma. NO dia
 - Evaluada con grabaciones de pacientes que la red nunca vio en entrenamiento: sensibilidad ≈ 90 %,
   especificidad ≈ 92 %, AUC ≈ 0.97. El umbral se eligió para no dejar pasar casos (tamizaje).
 - Limitación: validada con estetoscopios clínicos de las bases de datos, aún no con pacientes reales.
+
+## Características del soplo
+Cuando la red detecta un posible soplo, un segundo modelo (entrenado con las anotaciones de CirCor) describe
+cómo suena. Solo se muestran las características que el modelo acierta claramente mejor que el azar en
+pacientes no vistos: la intensidad (leve o moderada/mayor, ≈ 76 % de acierto balanceado) y la forma
+(meseta, decreciente o romboidal, ≈ 61 %). Describe el sonido; NO dice la causa del soplo.
+
+## Pulmones
+Con la base pública ICBHI 2017 se entrenan dos modelos de pulmón: uno detecta crepitantes y sibilancias,
+y otro sugiere un patrón compatible con sano, EPOC, neumonía, bronquiectasia, bronquiolitis o infección
+respiratoria. Es una sugerencia para referir, nunca un diagnóstico, y solo se muestran las clases que el
+modelo reconoce de forma confiable. Si estos modelos aún no están entrenados, la app lo indica.
+
+## Triaje combinado (semáforo)
+Une la SpO2, el pulso, el resultado del corazón y el del pulmón con reglas fijas definidas por el equipo:
+rojo (prioridad alta, p. ej. SpO2 < 90 % o hallazgo pulmonar con SpO2 < 94 %), amarillo (referir a
+evaluación, p. ej. posible soplo o SpO2 entre 90 y 93 %), verde (sin hallazgos) y gris (faltan datos).
+No es una IA entrenada: ninguna base pública trae audio y SpO2 del mismo paciente.
 
 ## Aporte original: corrección acústica
 Un estetoscopio barato "suena distinto" a uno clínico de $300. Con un fantoma (una caja con tejido simulado y un

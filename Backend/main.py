@@ -21,7 +21,8 @@ import alerts
 import audio_service
 import llm_tasks
 import reports
-from ml import classifier
+import triage
+from ml import classifier, lung
 
 app = FastAPI(
     title="SpiroScan IoT - API Backend",
@@ -128,6 +129,7 @@ class AudioStartInput(BaseModel):
 class AudioArmInput(BaseModel):
     session_id: str
     location: Optional[str] = ""
+    mode: Optional[str] = None   # "corazon" | "pulmon" (si falta, se deduce del foco)
 
 class GuideQuestionInput(BaseModel):
     question: str
@@ -257,6 +259,7 @@ async def receive_telemetry(payload: TelemetryInput):
     })
     for alert in alerts.evaluate_vitals(sid, saved):
         await _publish_alert(alert)
+    await _publish_triage_if_changed(sid)
     
     return {"status": "ok", "saved": saved, "session_id": sid}
 
@@ -1043,12 +1046,16 @@ async def link_device(payload: DeviceLinkInput):
 
 @app.post("/api/audio/arm")
 async def audio_arm(payload: AudioArmInput):
-    loc = (payload.location or "").upper()
-    if loc not in audio_service.LOCATIONS:
-        raise HTTPException(status_code=400, detail="Foco inválido. Usa AV, PV, TV o MV.")
-    _armed.update({"session_id": _get_effective_session(payload.session_id), "location": loc, "at": time.time()})
+    try:
+        loc = audio_service._check_location(payload.location)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    mode = audio_service.resolve_mode(loc, payload.mode)
+    _armed.update({"session_id": _get_effective_session(payload.session_id), "location": loc, "mode": mode,
+                   "at": time.time()})
     _device_link.update({"session_id": _armed["session_id"], "at": time.time()})
-    await manager.broadcast({"type": "RECORDING_ARMED", "session_id": _armed["session_id"], "data": {"location": loc}})
+    await manager.broadcast({"type": "RECORDING_ARMED", "session_id": _armed["session_id"],
+                             "data": {"location": loc, "mode": mode}})
     return {"status": "armed", **_armed}
 
 
@@ -1062,6 +1069,7 @@ async def _after_classification(result: dict):
     await manager.broadcast({"type": "RECORDING_RESULT", "session_id": result["session_id"], "data": result})
     for alert in alerts.evaluate_recording(result):
         await _publish_alert(alert)
+    await _publish_triage_if_changed(result["session_id"])
 
 
 @app.post("/api/audio/start")
@@ -1071,7 +1079,7 @@ async def audio_start(payload: AudioStartInput):
         payload.session_id or _linked_session() or payload.device_id)
     location = payload.location or (armed["location"] if armed else "")
     try:
-        rec_id = audio_service.start(sid, location, payload.sample_rate)
+        rec_id = audio_service.start(sid, location, payload.sample_rate, armed.get("mode") if armed else None)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await manager.broadcast({"type": "RECORDING_STARTED", "session_id": sid,
@@ -1104,10 +1112,12 @@ async def audio_finish(recording_id: str = Query(...)):
 
 
 @app.post("/api/audio/upload")
-async def audio_upload(file: UploadFile = File(...), session_id: str = Form("default"), location: str = Form("")):
+async def audio_upload(file: UploadFile = File(...), session_id: str = Form("default"), location: str = Form(""),
+                       mode: Optional[str] = Form(None)):
     data = await file.read()
     try:
-        result = await asyncio.to_thread(audio_service.save_upload, _get_effective_session(session_id), location, data)
+        result = await asyncio.to_thread(audio_service.save_upload, _get_effective_session(session_id),
+                                         location, data, mode)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -1132,6 +1142,30 @@ def get_recording_audio(recording_id: str):
 @app.get("/api/model/heart")
 def heart_model_info():
     return classifier.model_info()
+
+
+@app.get("/api/models")
+def all_models_info():
+    return {"corazon": classifier.model_info(), "pulmon": lung.model_info()}
+
+
+# ---------------------------------------------------------------------------
+# Triaje combinado (semáforo): SpO2 + pulso + corazón + pulmón, por reglas fijas
+# ---------------------------------------------------------------------------
+_last_triage: dict[str, str] = {}
+
+
+@app.get("/api/triage/{session_id}")
+def get_triage(session_id: str):
+    return triage.evaluate(_get_effective_session(session_id))
+
+
+async def _publish_triage_if_changed(sid: str):
+    t = triage.evaluate(sid)
+    key = t["nivel"] + "|" + "|".join(t["motivos"])
+    if _last_triage.get(sid) != key:
+        _last_triage[sid] = key
+        await manager.broadcast({"type": "TRIAGE_UPDATE", "session_id": sid, "data": t})
 
 
 # ---------------------------------------------------------------------------

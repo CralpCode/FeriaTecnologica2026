@@ -1,7 +1,8 @@
 import { API_CONFIG, getSessionId } from '../config/api';
 import {
   VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange,
-  HeartFocus, RecordingResult, ClinicalAlert, FocusGuide, HeartModelInfo, SessionReport,
+  AuscultationFocus, AuscultationMode, RecordingResult, ClinicalAlert, FocusGuide, HeartModelInfo,
+  SessionReport, TriageResult,
 } from '../types/vitals';
 
 const ZERO_VITALS: VitalSigns = {
@@ -175,11 +176,19 @@ class ApiService {
   }
 
   /** Indica al servidor que la próxima grabación del ESP32 pertenece a esta sesión y foco. */
-  armRecording(location: HeartFocus) {
+  armRecording(location: AuscultationFocus, mode: AuscultationMode) {
     return this.request('/api/audio/arm', {
       method: 'POST',
-      body: JSON.stringify({ session_id: getSessionId(), location }),
+      body: JSON.stringify({ session_id: getSessionId(), location, mode }),
     });
+  }
+
+  getTriage(): Promise<TriageResult> {
+    return this.request(`/api/triage/${encodeURIComponent(getSessionId())}`);
+  }
+
+  getModelsInfo(): Promise<{ corazon: HeartModelInfo; pulmon: Record<string, { loaded: boolean }> }> {
+    return this.request('/api/models');
   }
 
   /** Indica al servidor que los datos que lleguen del ESP32 por WiFi pertenecen a esta sesión. */
@@ -210,11 +219,11 @@ class ApiService {
     return `${this.baseUrl}${report.pdf_url}`;
   }
 
-  getGuide(location: HeartFocus): Promise<FocusGuide> {
+  getGuide(location: AuscultationFocus): Promise<FocusGuide> {
     return this.request(`/api/guide/${location}`);
   }
 
-  async askGuide(question: string, location: HeartFocus): Promise<string> {
+  async askGuide(question: string, location: AuscultationFocus): Promise<string> {
     const data = await this.request<{ answer: string }>('/api/guide/ask', {
       method: 'POST',
       body: JSON.stringify({ question, location, session_id: getSessionId() }),

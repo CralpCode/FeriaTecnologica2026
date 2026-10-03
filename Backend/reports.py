@@ -43,6 +43,14 @@ def build_session_pdf(report_id: int, session_id: str, content: dict, llm_genera
         story.append(Paragraph("Hallazgos", h2))
         story += [Paragraph(f"• {escape(h)}", body) for h in content["hallazgos"]]
 
+    tri = datos.get("triaje") or {}
+    if tri:
+        colors_map = {"rojo": "#DC2626", "amarillo": "#D97706", "verde": "#059669", "gris": "#64748B"}
+        story.append(Paragraph("Triaje (reglas fijas)", h2))
+        story.append(Paragraph(f"<font color='{colors_map.get(tri.get('nivel'), '#64748B')}'><b>"
+                               f"{escape(str(tri.get('nivel', '')).upper())}</b></font> · {escape(tri.get('titulo', ''))}", body))
+        story += [Paragraph(f"• {escape(m)}", body) for m in tri.get("motivos", [])]
+
     story += [Paragraph("Recomendación", h2), Paragraph(escape(content.get("recomendacion", "")), body)]
 
     if content.get("nota_referencia"):
@@ -59,14 +67,14 @@ def build_session_pdf(report_id: int, session_id: str, content: dict, llm_genera
     else:
         story.append(Paragraph("Sin lecturas válidas del sensor óptico en esta sesión.", body))
 
-    story.append(Paragraph("Auscultación cardíaca (CNN)", h2))
+    story.append(Paragraph("Auscultación (redes neuronales)", h2))
     grab = datos.get("grabaciones", [])
     if grab:
-        rows = [["Hora", "Foco", "Resultado", "Prob. anormal", "Umbral"]]
+        rows = [["Hora", "Tipo", "Foco / zona", "Resultado", "Prob.", "Detalle"]]
         for g in grab:
-            rows.append([str(g.get("hora", ""))[11:19], g.get("foco", ""), g.get("resultado", ""),
-                         g.get("probabilidad_anormal") or "—", g.get("umbral") or "—"])
-        story.append(_table(rows, [70, 110, 140, 100, 100]))
+            rows.append([str(g.get("hora", ""))[11:19], g.get("tipo", ""), g.get("foco", ""), g.get("resultado", ""),
+                         g.get("probabilidad_anormal") or "—", _detail_text(g.get("detalles") or {})])
+        story.append(_table(rows, [50, 50, 95, 80, 45, 200]))
     else:
         story.append(Paragraph("No se realizaron grabaciones.", body))
 
@@ -85,6 +93,14 @@ def build_session_pdf(report_id: int, session_id: str, content: dict, llm_genera
     ]
     SimpleDocTemplate(str(path), pagesize=letter, leftMargin=40, rightMargin=40, topMargin=36, bottomMargin=36).build(story)
     return path
+
+
+def _detail_text(det: dict) -> str:
+    parts = [f"{k}: {v['valor']}" for k, v in (det.get("caracteristicas_soplo") or {}).items()]
+    parts += [f"{k} {'sí' if v.get('presente') else 'no'}" for k, v in (det.get("ruidos") or {}).items()]
+    if det.get("patron"):
+        parts.append(f"compatible con {det['patron']['compatible_con']}")
+    return "; ".join(parts) or "—"
 
 
 def _table(rows, widths):

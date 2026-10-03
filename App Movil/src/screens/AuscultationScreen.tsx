@@ -4,21 +4,34 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useClinical } from '../context/ClinicalContext';
 import { apiService } from '../services/api';
-import { FocusGuide, HeartFocus, HeartModelInfo, RecordingResult } from '../types/vitals';
+import { AuscultationFocus, AuscultationMode, FocusGuide, HeartModelInfo, RecordingResult } from '../types/vitals';
 
-const FOCI: { id: HeartFocus; label: string }[] = [
-  { id: 'AV', label: 'Aórtico' },
-  { id: 'PV', label: 'Pulmonar' },
-  { id: 'TV', label: 'Tricuspídeo' },
-  { id: 'MV', label: 'Mitral' },
-];
+const FOCI: Record<AuscultationMode, { id: AuscultationFocus; label: string }[]> = {
+  corazon: [
+    { id: 'AV', label: 'Aórtico' },
+    { id: 'PV', label: 'Pulmonar' },
+    { id: 'TV', label: 'Tricuspídeo' },
+    { id: 'MV', label: 'Mitral' },
+  ],
+  pulmon: [
+    { id: 'TC', label: 'Tráquea' },
+    { id: 'AL', label: 'Ant. izq.' },
+    { id: 'AR', label: 'Ant. der.' },
+    { id: 'PL', label: 'Espalda izq.' },
+    { id: 'PR', label: 'Espalda der.' },
+    { id: 'LL', label: 'Costado izq.' },
+    { id: 'LR', label: 'Costado der.' },
+  ],
+};
 
-const focusName = (id?: string) => FOCI.find((f) => f.id === id)?.label || 'Sin foco';
+const focusName = (id?: string) =>
+  [...FOCI.corazon, ...FOCI.pulmon].find((f) => f.id === id)?.label || 'Sin foco';
 
 const RESULT_STYLE: Record<RecordingResult['result'], { label: string; color: string; soft: string; icon: string }> = {
   normal: { label: 'Sin hallazgos', color: Colors.success, soft: Colors.successSoft, icon: 'check-circle' },
   anormal: { label: 'Posible sonido anormal', color: Colors.danger, soft: Colors.dangerSoft, icon: 'alert-circle' },
   calidad_insuficiente: { label: 'Calidad insuficiente', color: Colors.warning, soft: Colors.warningSoft, icon: 'volume-off' },
+  modelo_no_disponible: { label: 'Modelo aún no entrenado', color: Colors.textSecondary, soft: Colors.backgroundSecondary, icon: 'progress-clock' },
   error: { label: 'Error al analizar', color: Colors.textSecondary, soft: Colors.backgroundSecondary, icon: 'close-circle' },
 };
 
@@ -26,9 +39,11 @@ const pct = (v: number | null | undefined) => (v === null || v === undefined ? '
 
 export const AuscultationScreen: React.FC = () => {
   const { phase, armedLocation, lastResult, recordings, armRecording } = useClinical();
-  const [focus, setFocus] = useState<HeartFocus>('MV');
+  const [mode, setMode] = useState<AuscultationMode>('corazon');
+  const [focus, setFocus] = useState<AuscultationFocus>('MV');
   const [guide, setGuide] = useState<FocusGuide | null>(null);
   const [model, setModel] = useState<HeartModelInfo | null>(null);
+  const [lungReady, setLungReady] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState<string | null>(null);
@@ -41,12 +56,16 @@ export const AuscultationScreen: React.FC = () => {
 
   useEffect(() => {
     apiService.getHeartModelInfo().then(setModel).catch(() => setModel(null));
+    apiService
+      .getModelsInfo()
+      .then((m) => setLungReady(Object.values(m.pulmon || {}).some((x) => x.loaded)))
+      .catch(() => setLungReady(null));
   }, []);
 
   const handleArm = async () => {
     setError(null);
     try {
-      await armRecording(focus);
+      await armRecording(focus, mode);
     } catch (e: any) {
       setError(`No se pudo contactar al servidor: ${e?.message || e}`);
     }
@@ -69,19 +88,54 @@ export const AuscultationScreen: React.FC = () => {
       <View style={styles.disclaimer}>
         <Ionicons name="information-circle" size={16} color="#92400E" />
         <Text style={styles.disclaimerText}>
-          Tamizaje con IA: detecta posibles sonidos cardíacos anormales para sugerir una referencia médica. No es un diagnóstico.
+          Tamizaje con IA: detecta posibles sonidos cardíacos o pulmonares anormales para sugerir una referencia médica. No es un diagnóstico.
         </Text>
       </View>
 
+      {/* 0. Corazón o pulmones */}
+      <View style={styles.modeRow}>
+        {(['corazon', 'pulmon'] as AuscultationMode[]).map((m) => (
+          <TouchableOpacity
+            key={m}
+            style={[styles.modeBtn, mode === m && styles.modeBtnActive]}
+            onPress={() => {
+              setMode(m);
+              setFocus(m === 'corazon' ? 'MV' : 'PL');
+            }}
+          >
+            <MaterialCommunityIcons
+              name={m === 'corazon' ? 'heart-pulse' : 'lungs'}
+              size={18}
+              color={mode === m ? '#FFFFFF' : Colors.textSecondary}
+            />
+            <Text style={[styles.modeText, mode === m && { color: '#FFFFFF' }]}>
+              {m === 'corazon' ? 'Corazón' : 'Pulmones'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {mode === 'pulmon' && lungReady === false && (
+        <View style={[styles.disclaimer, { backgroundColor: Colors.backgroundSecondary, borderColor: Colors.border }]}>
+          <MaterialCommunityIcons name="progress-clock" size={16} color={Colors.textSecondary} />
+          <Text style={[styles.disclaimerText, { color: Colors.textSecondary }]}>
+            Los modelos de pulmón aún no están entrenados (faltan los audios de ICBHI). Puedes grabar igual: el audio queda
+            guardado, pero todavía no se analiza.
+          </Text>
+        </View>
+      )}
+
       {/* 1. Selección de foco */}
-      <Text style={styles.sectionTitle}>1. Elige el foco de auscultación</Text>
-      <View style={styles.focusRow}>
-        {FOCI.map((f) => {
+      <Text style={styles.sectionTitle}>
+        1. Elige {mode === 'corazon' ? 'el foco cardíaco' : 'la zona del tórax'}
+      </Text>
+      <View style={[styles.focusRow, mode === 'pulmon' && { flexWrap: 'wrap' }]}>
+        {FOCI[mode].map((f) => {
           const active = focus === f.id;
           return (
             <TouchableOpacity
               key={f.id}
-              style={[styles.focusBtn, active && styles.focusBtnActive]}
+              style={[styles.focusBtn, mode === 'pulmon' && styles.focusBtnLung, active && styles.focusBtnActive]}
               onPress={() => setFocus(f.id)}
               activeOpacity={0.7}
             >
@@ -220,10 +274,53 @@ const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) => {
       ) : (
         <Text style={styles.statusText}>{result.reason}</Text>
       )}
+      <DetailsView result={result} />
       {result.result === 'anormal' && (
         <Text style={[styles.statusText, { fontWeight: '700', marginTop: 6 }]}>
-          Sugerencia: referir a evaluación médica y ecocardiograma.
+          {result.mode === 'pulmon'
+            ? 'Sugerencia: referir a evaluación médica.'
+            : 'Sugerencia: referir a evaluación médica y ecocardiograma.'}
         </Text>
+      )}
+    </View>
+  );
+};
+
+const TRAIT_NAMES: Record<string, string> = {
+  intensidad: 'Intensidad', forma: 'Forma', momento: 'Momento', tono: 'Tono', calidad: 'Calidad',
+};
+
+/** Caracterización del soplo (corazón) o ruidos y patrón (pulmón). Siempre como descripción, no como causa. */
+const DetailsView: React.FC<{ result: RecordingResult }> = ({ result }) => {
+  const d = result.details || {};
+  const traits = Object.entries(d.caracteristicas_soplo || {});
+  const sounds = Object.entries(d.ruidos || {});
+  if (!traits.length && !sounds.length && !d.patron) return null;
+  return (
+    <View style={styles.detailsBox}>
+      {traits.length > 0 && <Text style={styles.detailsTitle}>Cómo suena el soplo</Text>}
+      {traits.map(([k, t]) => (
+        <Text key={k} style={styles.detailsLine}>
+          • {TRAIT_NAMES[k] || k}: <Text style={{ fontWeight: '700' }}>{t.valor}</Text>
+          <Text style={styles.detailsMeta}>  (seguridad {pct(t.confianza)} · el modelo acierta {pct(t.exactitud_modelo)})</Text>
+        </Text>
+      ))}
+      {sounds.length > 0 && <Text style={styles.detailsTitle}>Ruidos respiratorios</Text>}
+      {sounds.map(([k, s]) => (
+        <Text key={k} style={styles.detailsLine}>
+          • {k.charAt(0).toUpperCase() + k.slice(1)}:{' '}
+          <Text style={{ fontWeight: '700' }}>{s.presente ? 'detectados' : 'no detectados'}</Text>
+          <Text style={styles.detailsMeta}>  ({pct(s.probabilidad)})</Text>
+        </Text>
+      ))}
+      {d.patron && (
+        <Text style={styles.detailsLine}>
+          • Patrón compatible con: <Text style={{ fontWeight: '700' }}>{d.patron.compatible_con}</Text>
+          <Text style={styles.detailsMeta}>  ({pct(d.patron.probabilidad)} · sugerencia, no diagnóstico)</Text>
+        </Text>
+      )}
+      {traits.length > 0 && (
+        <Text style={styles.detailsMeta}>Describe el sonido; no identifica la causa del soplo.</Text>
       )}
     </View>
   );
@@ -262,6 +359,26 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   focusBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  focusBtnLung: { flex: 0, minWidth: '22%', flexGrow: 1 },
+  modeRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  modeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  modeBtnActive: { backgroundColor: Colors.aiPurple, borderColor: Colors.aiPurple },
+  modeText: { fontSize: 14, fontWeight: '800', color: Colors.textSecondary },
+  detailsBox: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 10, marginTop: 8, gap: 2 },
+  detailsTitle: { fontSize: 12, fontWeight: '800', color: Colors.textPrimary, marginTop: 2 },
+  detailsLine: { fontSize: 12, color: Colors.textPrimary, lineHeight: 18 },
+  detailsMeta: { fontSize: 11, color: Colors.textSecondary },
   focusId: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
   focusLabel: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
   card: {

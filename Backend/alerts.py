@@ -28,6 +28,9 @@ TEMPLATES = {
     "soplo": ("critical", "Posible soplo cardíaco",
               "La grabación del foco {location} tuvo probabilidad de anormalidad {prob:.0%} (umbral {thr:.0%}).",
               "Esto es un tamizaje, no un diagnóstico: referir a evaluación médica y ecocardiograma."),
+    "hallazgo_pulmonar": ("caution", "Posible hallazgo pulmonar",
+                          "La grabación de la zona {location} mostró: {finding}.",
+                          "Es un tamizaje, no un diagnóstico: referir a evaluación médica."),
     "calidad_audio": ("info", "Grabación con calidad insuficiente",
                       "La grabación del foco {location} no se pudo analizar: {reason}.",
                       "Repetir la grabación con buen contacto del estetoscopio y en silencio."),
@@ -81,11 +84,22 @@ def evaluate_vitals(session_id: str, vitals: dict) -> list[dict]:
 def evaluate_recording(result: dict) -> list[dict]:
     sid = result["session_id"]
     loc = result.get("location") or "sin especificar"
+    if result["result"] == "anormal" and result.get("mode") == "pulmon":
+        det = result.get("details") or {}
+        parts = [f"{n} detectados" for n, d in (det.get("ruidos") or {}).items() if d.get("presente")]
+        patron = (det.get("patron") or {}).get("compatible_con")
+        if patron and patron != "sano":
+            parts.append(f"patrón compatible con {patron}")
+        _last_alert.pop((sid, "hallazgo_pulmonar"), None)
+        a = _fire(sid, "hallazgo_pulmonar", location=loc, finding="; ".join(parts) or "sonido anormal",
+                  recording_id=result["recording_id"], details=det)
+        return [a] if a else []
     if result["result"] == "anormal":
         # Cada grabación anormal es un hallazgo independiente: sin enfriamiento.
         _last_alert.pop((sid, "soplo"), None)
         a = _fire(sid, "soplo", location=loc, prob=result["probability"], thr=result["threshold"],
-                  recording_id=result["recording_id"])
+                  recording_id=result["recording_id"],
+                  caracteristicas=(result.get("details") or {}).get("caracteristicas_soplo", {}))
         return [a] if a else []
     if result["result"] == "calidad_insuficiente":
         _last_alert.pop((sid, "calidad_audio"), None)
