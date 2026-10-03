@@ -4,6 +4,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useVitals } from '../context/VitalsContext';
 import { DeviceConnectionModal } from './DeviceConnectionModal';
+import { ClinicalAudioModal } from './ClinicalAudioModal';
 
 interface HeaderProps {
   title?: string;
@@ -20,6 +21,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const { isDeviceDirectConnected, device, isBackendOnline, currentSessionId } = useVitals();
   const [deviceModalVisible, setDeviceModalVisible] = useState(false);
+  const [clinicalDemoVisible, setClinicalDemoVisible] = useState(false);
 
   return (
     <>
@@ -85,6 +87,16 @@ export const Header: React.FC<HeaderProps> = ({
             </Text>
           </TouchableOpacity>
 
+          {/* Botón Discreto de Banco de Pruebas Clínico (Validación ICBHI) */}
+          <TouchableOpacity
+            style={styles.labDemoButton}
+            onPress={() => setClinicalDemoVisible(true)}
+            activeOpacity={0.7}
+            accessibilityLabel="Banco de Pruebas Clínicas"
+          >
+            <MaterialCommunityIcons name="flask-outline" size={16} color={Colors.aiPurple} />
+          </TouchableOpacity>
+
           {onOpenSettings && (
             <TouchableOpacity style={styles.iconButton} onPress={onOpenSettings}>
               <Ionicons name="settings-outline" size={20} color={Colors.textSecondary} />
@@ -97,6 +109,13 @@ export const Header: React.FC<HeaderProps> = ({
       <DeviceConnectionModal
         visible={deviceModalVisible}
         onClose={() => setDeviceModalVisible(false)}
+        onOpenClinicalDemo={() => setClinicalDemoVisible(true)}
+      />
+
+      {/* Modal Discreto de Banco de Pruebas y Validación Clínica */}
+      <ClinicalAudioModal
+        visible={clinicalDemoVisible}
+        onClose={() => setClinicalDemoVisible(false)}
       />
     </>
   );
@@ -201,5 +220,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  labDemoButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#F3E8FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E9D5FF',
   },
 });

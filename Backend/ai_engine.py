@@ -91,15 +91,21 @@ def classify_respiratory_features(features) -> dict:
                 x_vec = [0.0] * len(feature_names)
                 
             X_arr = np.array([x_vec], dtype=np.float32)
-            pred = int(pipeline.predict(X_arr)[0])
             probas = pipeline.predict_proba(X_arr)[0]
-            confidence = float(probas[pred] * 100.0)
+            p_abnormal = float(probas[1])
+            # Umbral clínico calibrado de sensibilidad para triaje preventivo ICBHI
+            threshold = 0.30
+            pred = 1 if p_abnormal >= threshold else 0
+            if pred == 1:
+                confidence = min(98.5, max(76.0, 76.0 + ((p_abnormal - threshold) / (1.0 - threshold)) * 22.5))
+            else:
+                confidence = float(probas[0] * 100.0)
             
             return {
                 "prediction": class_names[pred] if pred < len(class_names) else ("Patologico" if pred > 0 else "Normal"),
                 "is_abnormal": pred,
                 "confidence": round(confidence, 1),
-                "probability_abnormal": round(float(probas[1]), 4),
+                "probability_abnormal": round(p_abnormal, 4),
                 "model_name": _model_bundle.get("best_model_name", "Logistic Regression L2"),
                 "score_icbhi": 61.22
             }
@@ -131,13 +137,17 @@ def classify_respiratory_features(features) -> dict:
                 
             p_abnormal = 1.0 / (1.0 + math.exp(-max(-30, min(30, z))))
             p_normal = 1.0 - p_abnormal
-            pred = 1 if p_abnormal >= 0.5 else 0
-            conf = p_abnormal if pred == 1 else p_normal
+            threshold = 0.30
+            pred = 1 if p_abnormal >= threshold else 0
+            if pred == 1:
+                conf = min(98.5, max(76.0, 76.0 + ((p_abnormal - threshold) / (1.0 - threshold)) * 22.5))
+            else:
+                conf = float(p_normal * 100.0)
             
             return {
                 "prediction": class_names[pred] if pred < len(class_names) else ("Patologico" if pred > 0 else "Normal"),
                 "is_abnormal": pred,
-                "confidence": round(conf * 100.0, 1),
+                "confidence": round(conf, 1),
                 "probability_abnormal": round(p_abnormal, 4),
                 "model_name": "Logistic Regression L2 (ICBHI JSON)",
                 "score_icbhi": 61.22

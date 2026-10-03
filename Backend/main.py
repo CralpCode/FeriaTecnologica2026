@@ -1,9 +1,10 @@
 import os
 import time
+import json
 import asyncio
 from typing import List, Optional, Union, Dict, Any
 from datetime import datetime
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -996,6 +997,85 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
     except Exception:
         manager.disconnect(websocket)
+
+DEMO_AUDIOS_DIR = os.path.join(os.path.dirname(__file__), "demo_audios")
+
+@app.get("/api/demo/samples")
+def get_demo_samples():
+    """Retorna el catálogo clínico de muestras de validación ICBHI 2017 para demostraciones."""
+    json_path = os.path.join(DEMO_AUDIOS_DIR, "demoSamples.json")
+    if os.path.exists(json_path):
+        with open(json_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+@app.get("/api/demo/audio/{audio_id}")
+def get_demo_audio_file(audio_id: str):
+    """Transmite el archivo de audio .wav de auscultación para su reproducción en el navegador o app."""
+    clean_id = os.path.basename(audio_id)
+    if not clean_id.endswith(".wav"):
+        clean_id += ".wav"
+    file_path = os.path.join(DEMO_AUDIOS_DIR, clean_id)
+    if os.path.exists(file_path):
+        from fastapi.responses import FileResponse
+        return FileResponse(file_path, media_type="audio/wav")
+    raise HTTPException(status_code=404, detail="Audio sample not found")
+
+@app.post("/api/demo/inject/{sample_id}")
+def inject_demo_sample(sample_id: str, session_id: Optional[str] = Query(None)):
+    """Inyecta directamente las señales fisiológicas y el audio de una muestra clínica en la sesión activa."""
+    json_path = os.path.join(DEMO_AUDIOS_DIR, "demoSamples.json")
+    if not os.path.exists(json_path):
+        raise HTTPException(status_code=404, detail="Catálogo de muestras no disponible")
+    with open(json_path, "r", encoding="utf-8") as f:
+        samples = json.load(f)
+    if sample_id not in samples:
+        raise HTTPException(status_code=404, detail=f"Muestra '{sample_id}' no encontrada")
+    
+    sample = samples[sample_id]
+    sid = _get_effective_session(session_id)
+    
+    vitals_map = {
+        "sano": {"bpm": 72, "spo2": 98.5, "sys": 118, "dia": 76, "audio_rms": 16.5, "stress": 18},
+        "sibilancias": {"bpm": 96, "spo2": 93.0, "sys": 132, "dia": 86, "audio_rms": 34.0, "stress": 55},
+        "crepitantes": {"bpm": 88, "spo2": 91.0, "sys": 128, "dia": 84, "audio_rms": 38.5, "stress": 45},
+        "ambos": {"bpm": 106, "spo2": 88.5, "sys": 145, "dia": 92, "audio_rms": 46.0, "stress": 78},
+        "neumonia": {"bpm": 102, "spo2": 89.0, "sys": 138, "dia": 88, "audio_rms": 41.0, "stress": 68}
+    }
+    v = vitals_map.get(sample_id, {"bpm": 75, "spo2": 98.0, "sys": 120, "dia": 80, "audio_rms": 20.0, "stress": 25})
+    
+    packet = {
+        "heartRate": v["bpm"],
+        "bloodOxygen": v["spo2"],
+        "systolicPressure": v["sys"],
+        "diastolicPressure": v["dia"],
+        "temperature": 36.6,
+        "hrv": 45,
+        "stressLevel": v["stress"],
+        "audio_rms": v["audio_rms"],
+        "audio_peak": round(v["audio_rms"] * 1.3, 1),
+        "steps": 4200,
+        "calories": 280,
+        "timestamp": datetime.now().isoformat(),
+        "session_id": sid,
+        "device_id": f"Demo-ICBHI-{sample['patient_id']}",
+        "device_connected": True,
+        "audio_features": sample.get("features", {})
+    }
+    database.save_reading(packet)
+    _sessions_cache[sid] = {"last_seen": time.time(), "device_id": packet["device_id"]}
+    
+    report = ai_engine.analyze_vitals_report(packet)
+    
+    return {
+        "status": "injected",
+        "sample_id": sample_id,
+        "patient_id": sample["patient_id"],
+        "diagnosis": sample["diagnosis"],
+        "cycle_class_name": sample["cycle_class_name"],
+        "vitals": packet,
+        "report": report
+    }
 
 if __name__ == "__main__":
     import uvicorn

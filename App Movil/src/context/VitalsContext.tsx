@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
-import { VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange, ChatMessage } from '../types/vitals';
+import { VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange, ChatMessage, VitalStatus } from '../types/vitals';
 import { apiService } from '../services/api';
 import { API_CONFIG, setCustomBackendUrl, getCustomBackendUrl, getSessionId, setSessionId, generateNewSessionId } from '../config/api';
 import { deviceBridge } from '../services/DeviceBridgeService';
+import localDemoSamples from '../config/demoSamples.json';
 
-export type ConnectedDeviceType = 'none' | 'wokwi_wifi' | 'direct_ble';
+export type ConnectedDeviceType = 'none' | 'wokwi_wifi' | 'direct_ble' | 'demo_icbhi';
 
 export interface SessionInfo {
   session_id: string;
@@ -42,6 +43,7 @@ interface VitalsContextProps {
   connectToWokwiEmulator: () => void;
   connectDirectBluetooth: () => Promise<{ success: boolean; message: string; deviceName?: string }>;
   disconnectAllDevices: () => void;
+  injectClinicalDemo: (sampleId: string) => Promise<boolean>;
 }
 
 const ABSOLUTE_ZERO_VITALS: VitalSigns = {
@@ -292,7 +294,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     if (!isStreaming) return;
 
     const interval = setInterval(async () => {
-      if (connectedTypeRef.current === 'direct_ble') return;
+      if (connectedTypeRef.current === 'direct_ble' || connectedTypeRef.current === 'demo_icbhi') return;
       if (userManualDisconnectRef.current || connectedTypeRef.current === 'none') return;
       if (isFetchingRef.current) return;
       isFetchingRef.current = true;
@@ -375,6 +377,158 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     setVitals(ABSOLUTE_ZERO_VITALS);
     apiService.disconnectSession(currentSessionId).catch(() => {});
   }, [currentSessionId]);
+
+  // 3. Inyección y Simulación Activa del Banco de Pruebas Clínicas ICBHI
+  const injectClinicalDemo = useCallback(async (sampleId: string): Promise<boolean> => {
+    userManualDisconnectRef.current = false;
+    const sampleData = (localDemoSamples as any)[sampleId];
+    if (!sampleData) return false;
+
+    const nowIso = new Date().toISOString();
+    const timeLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    const vitalsMap: Record<string, { bpm: number; spo2: number; sys: number; dia: number; audio_rms: number; stress: number; temp: number }> = {
+      sano: { bpm: 72, spo2: 98.5, sys: 118, dia: 76, audio_rms: 16.5, stress: 18, temp: 36.6 },
+      sibilancias: { bpm: 96, spo2: 93.0, sys: 132, dia: 86, audio_rms: 34.0, stress: 55, temp: 36.8 },
+      crepitantes: { bpm: 88, spo2: 91.0, sys: 128, dia: 84, audio_rms: 38.5, stress: 45, temp: 37.1 },
+      ambos: { bpm: 106, spo2: 88.5, sys: 145, dia: 92, audio_rms: 46.0, stress: 78, temp: 37.4 },
+      mixto: { bpm: 106, spo2: 88.5, sys: 145, dia: 92, audio_rms: 46.0, stress: 78, temp: 37.4 },
+      neumonia: { bpm: 102, spo2: 89.0, sys: 138, dia: 88, audio_rms: 41.0, stress: 68, temp: 38.6 },
+    };
+
+    const v = vitalsMap[sampleId] || { bpm: 75, spo2: 98.0, sys: 120, dia: 80, audio_rms: 20.0, stress: 25, temp: 36.7 };
+
+    const newVitals: VitalSigns = {
+      heartRate: v.bpm,
+      bloodOxygen: v.spo2,
+      systolicPressure: v.sys,
+      diastolicPressure: v.dia,
+      temperature: v.temp,
+      hrv: sampleData.is_abnormal ? 32 : 58,
+      stressLevel: v.stress,
+      audio_rms: v.audio_rms,
+      audio_peak: Number((v.audio_rms * 1.3).toFixed(1)),
+      steps: 3420,
+      calories: 215,
+      timestamp: nowIso,
+      device_connected: true,
+      finger: true,
+    };
+
+    setConnectedType('demo_icbhi');
+    setVitals(newVitals);
+    setDevice({
+      name: `Banco Clínico ICBHI (Pac. #${sampleData.patient_id})`,
+      model: `Simulador Torácico (${sampleData.sound_type})`,
+      connected: true,
+      battery: 100,
+      lastSync: nowIso,
+      firmwareVersion: 'v2.1 (Validación ICBHI 2017)',
+      signalStrength: 'excellent',
+    });
+
+    const newPoint: VitalsHistoryPoint = {
+      timeLabel,
+      heartRate: newVitals.heartRate,
+      bloodOxygen: newVitals.bloodOxygen,
+      systolicPressure: newVitals.systolicPressure,
+      diastolicPressure: newVitals.diastolicPressure,
+      temperature: newVitals.temperature,
+      stressLevel: newVitals.stressLevel,
+    };
+    setHistory((prev) => {
+      const updated = [...prev, newPoint];
+      return updated.length > 50 ? updated.slice(updated.length - 50) : updated;
+    });
+
+    const isAbnormal = sampleData.is_abnormal === 1;
+    const isCritical = sampleId === 'ambos' || sampleId === 'mixto' || sampleId === 'neumonia' || newVitals.bloodOxygen < 90;
+    const status: VitalStatus = isCritical ? 'critical' : (isAbnormal ? 'caution' : 'normal');
+    const healthScore = isCritical ? 45 : (isAbnormal ? 68 : 96);
+
+    const localReport: AIAnalysisReport = {
+      id: `demo-${sampleId}-${Date.now()}`,
+      timestamp: nowIso,
+      healthScore,
+      status,
+      title: isAbnormal ? `Alerta Pulmonar: ${sampleData.diagnosis}` : 'Patrón Cardiorrespiratorio Saludable',
+      summary: `Validación Clínica ICBHI: Paciente #${sampleData.patient_id}. ${sampleData.description}`,
+      recommendations: isAbnormal
+        ? [
+            'Monitoreo continuo de SpO2 y frecuencia respiratoria',
+            'Evaluar administración de broncodilatadores o aerosolterapia',
+            'Auscultación formal de campos pulmonares basales'
+          ]
+        : [
+            'Frecuencia y saturación estables dentro de rangos normales',
+            'Monitoreo preventivo continuo activo'
+          ],
+      anomaliesDetected: isAbnormal
+        ? [
+            `Ruidos adventicios torácicos detectados (${sampleData.sound_type})`,
+            `SpO2 comprometido: ${newVitals.bloodOxygen}%`,
+          ]
+        : [],
+      confidence: 94.5,
+      acoustic_analysis: {
+        prediction: isAbnormal ? 'Patologico (Sibilancias/Crepitantes)' : 'Normal',
+        is_abnormal: sampleData.is_abnormal,
+        confidence: 94.5,
+        probability_abnormal: isAbnormal ? 0.94 : 0.06,
+        model_name: 'Logistic Regression (L2) - ICBHI 2017',
+        score_icbhi: 61.22,
+      },
+    };
+
+    setAiReport(localReport);
+
+    const chatText = `[DEMO CLÍNICA ICBHI] Paciente #${sampleData.patient_id} (${sampleData.name}) cargado al monitor principal.\n` +
+      `• Diagnóstico: ${sampleData.diagnosis}\n` +
+      `• Auscultación: ${sampleData.sound_type}\n` +
+      `• Constantes: ${newVitals.heartRate} LPM, ${newVitals.bloodOxygen}% SpO2, ${newVitals.audio_rms} dB RMS.\n` +
+      `• Análisis IA: ${sampleData.clinical_tip}`;
+
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: `demo-msg-${Date.now()}`,
+        sender: 'ai',
+        text: chatText,
+        timestamp: timeLabel,
+      },
+    ]);
+
+    try {
+      const res = await apiService.injectDemoSample(sampleId);
+      if (res && res.report) {
+        setAiReport(res.report);
+        setIsBackendOnline(true);
+      }
+    } catch {
+      // Backend offline, el reporte autónomo ya está aplicado
+    }
+
+    return true;
+  }, []);
+
+  // Simulación de fluctuación fisiológica sutil durante modo demostración clínica
+  useEffect(() => {
+    if (connectedType !== 'demo_icbhi') return;
+    const demoTimer = setInterval(() => {
+      setVitals((prev) => {
+        if (prev.heartRate <= 0) return prev;
+        const jitterBpm = Math.floor(Math.random() * 3) - 1; // -1, 0, +1
+        const jitterAudio = (Math.random() * 0.8) - 0.4;
+        return {
+          ...prev,
+          heartRate: Math.max(45, prev.heartRate + jitterBpm),
+          audio_rms: Math.max(10, Number((prev.audio_rms + jitterAudio).toFixed(1))),
+          timestamp: new Date().toISOString(),
+        };
+      });
+    }, 2500);
+    return () => clearInterval(demoTimer);
+  }, [connectedType]);
 
   const loadInitialData = useCallback(async () => {
     try {
@@ -490,6 +644,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         connectToWokwiEmulator,
         connectDirectBluetooth,
         disconnectAllDevices,
+        injectClinicalDemo,
       }}
     >
       {children}
