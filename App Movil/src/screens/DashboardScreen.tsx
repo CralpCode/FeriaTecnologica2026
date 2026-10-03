@@ -96,8 +96,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 <Text style={styles.pulmonaryTagText}>PREDICCIÓN NEUMOLÓGICA IA</Text>
                 <View style={styles.pulmonaryLiveDot} />
               </View>
-              <Text style={styles.pulmonaryCardTitle}>Auscultación Pulmonar Digital</Text>
-              <Text style={styles.pulmonaryCardSub}>
+              <Text style={styles.pulmonaryCardTitle} numberOfLines={1}>Auscultación Pulmonar Digital</Text>
+              <Text style={styles.pulmonaryCardSub} numberOfLines={1}>
                 {vitals.audio_rms ? `${vitals.audio_rms.toFixed(1)} dB RMS` : '0.0 dB'} · Detección de Asma, Neumonía y EPOC
               </Text>
             </View>
@@ -246,6 +246,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 14,
     marginTop: 10,
+    minHeight: 76,
     borderWidth: 1,
     borderColor: '#99F6E4',
     shadowColor: '#0D9488',
@@ -298,6 +299,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#64748B',
     marginTop: 2,
+    height: 16,
+    overflow: 'hidden',
   },
   pulmonaryArrowBtn: {
     width: 32,

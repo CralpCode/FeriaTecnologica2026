@@ -44,80 +44,14 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   const iconScale = useRef(new Animated.Value(1)).current;
   const pressScale = useRef(new Animated.Value(1)).current;
   const liveDotOpacity = useRef(new Animated.Value(0.4)).current;
+  const prevBpmRef = useRef<number>(0);
+  const breathAnimRef = useRef<Animated.CompositeAnimation | null>(null);
 
+  const isHeart = finalIcon === 'heart-pulse' || title.toLowerCase().includes('cardíaco');
+  const numericBpm = isHeart ? (typeof value === 'number' ? value : parseInt(String(value), 10) || 0) : 0;
+
+  // 1. Animación del punto de pulso en vivo: se ejecuta una sola vez al montar
   useEffect(() => {
-    let breathAnimation: Animated.CompositeAnimation | null = null;
-    const isHeart = finalIcon === 'heart-pulse' || title.toLowerCase().includes('cardíaco');
-    const numericBpm = isHeart ? (typeof value === 'number' ? value : parseInt(String(value), 10) || 0) : 0;
-
-    if (isHeart) {
-      if (numericBpm <= 0) {
-        // En reposo (sin dedo o sin pulso): escala fija en 1.0 sin latidos fantasma
-        iconScale.setValue(1);
-      } else {
-        // Ciclo adaptado exactamente a la frecuencia cardíaca real (60,000 / BPM)
-        const cycleDuration = Math.round(60000 / Math.max(45, Math.min(180, numericBpm)));
-        const lubRise = Math.round(cycleDuration * 0.12);
-        const lubFall = Math.round(cycleDuration * 0.10);
-        const dubRise = Math.round(cycleDuration * 0.11);
-        const dubFall = Math.round(cycleDuration * 0.15);
-        const pause = Math.max(50, cycleDuration - (lubRise + lubFall + dubRise + dubFall));
-
-        breathAnimation = Animated.loop(
-          Animated.sequence([
-            // Primer latido sistólico (Lub)
-            Animated.timing(iconScale, {
-              toValue: 1.25,
-              duration: lubRise,
-              easing: Easing.out(Easing.quad),
-              useNativeDriver: true,
-            }),
-            Animated.timing(iconScale, {
-              toValue: 1.05,
-              duration: lubFall,
-              easing: Easing.in(Easing.quad),
-              useNativeDriver: true,
-            }),
-            // Segundo latido sistólico (Dub)
-            Animated.timing(iconScale, {
-              toValue: 1.20,
-              duration: dubRise,
-              easing: Easing.out(Easing.quad),
-              useNativeDriver: true,
-            }),
-            Animated.timing(iconScale, {
-              toValue: 1.0,
-              duration: dubFall,
-              easing: Easing.in(Easing.quad),
-              useNativeDriver: true,
-            }),
-            // Pausa diastólica adaptada al ritmo cardíaco medido
-            Animated.delay(pause),
-          ])
-        );
-        breathAnimation.start();
-      }
-    } else {
-      // Respiración suave y continua para otras métricas
-      breathAnimation = Animated.loop(
-        Animated.sequence([
-          Animated.timing(iconScale, {
-            toValue: 1.10,
-            duration: 1200,
-            easing: Easing.inOut(Easing.sin),
-            useNativeDriver: true,
-          }),
-          Animated.timing(iconScale, {
-            toValue: 1.0,
-            duration: 1200,
-            easing: Easing.inOut(Easing.sin),
-            useNativeDriver: true,
-          }),
-        ])
-      );
-      breathAnimation.start();
-    }
-
     const dotAnimation = Animated.loop(
       Animated.sequence([
         Animated.timing(liveDotOpacity, {
@@ -134,16 +68,101 @@ export const MetricCard: React.FC<MetricCardProps> = ({
         }),
       ])
     );
-
     dotAnimation.start();
+    return () => dotAnimation.stop();
+  }, [liveDotOpacity]);
+
+  // 2. Animación suave del icono: no se reinicia con cada cambio de valor numérico
+  useEffect(() => {
+    if (!isHeart) {
+      // Para métricas no cardíacas (Micrófono, SpO2, etc.): bucle continuo sin cortes
+      const nonHeartAnim = Animated.loop(
+        Animated.sequence([
+          Animated.timing(iconScale, {
+            toValue: 1.08,
+            duration: 1400,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: true,
+          }),
+          Animated.timing(iconScale, {
+            toValue: 1.0,
+            duration: 1400,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      nonHeartAnim.start();
+      return () => nonHeartAnim.stop();
+    }
+  }, [isHeart, iconScale]);
+
+  // 3. Animación cardíaca con histeresis: solo se reajusta si el BPM cambia de forma relevante (>=3 BPM)
+  useEffect(() => {
+    if (!isHeart) return;
+
+    const prevBpm = prevBpmRef.current;
+    if (numericBpm <= 0) {
+      if (breathAnimRef.current) breathAnimRef.current.stop();
+      iconScale.setValue(1);
+      prevBpmRef.current = 0;
+      return;
+    }
+
+    // Solo recalibrar si hubo un cambio apreciable o veníamos de 0
+    if (prevBpm > 0 && Math.abs(numericBpm - prevBpm) < 3) {
+      return;
+    }
+    prevBpmRef.current = numericBpm;
+
+    if (breathAnimRef.current) {
+      breathAnimRef.current.stop();
+    }
+
+    const cycleDuration = Math.round(60000 / Math.max(45, Math.min(180, numericBpm)));
+    const lubRise = Math.round(cycleDuration * 0.12);
+    const lubFall = Math.round(cycleDuration * 0.10);
+    const dubRise = Math.round(cycleDuration * 0.11);
+    const dubFall = Math.round(cycleDuration * 0.15);
+    const pause = Math.max(50, cycleDuration - (lubRise + lubFall + dubRise + dubFall));
+
+    const heartAnim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(iconScale, {
+          toValue: 1.25,
+          duration: lubRise,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(iconScale, {
+          toValue: 1.05,
+          duration: lubFall,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(iconScale, {
+          toValue: 1.20,
+          duration: dubRise,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(iconScale, {
+          toValue: 1.0,
+          duration: dubFall,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.delay(pause),
+      ])
+    );
+
+    breathAnimRef.current = heartAnim;
+    heartAnim.start();
 
     return () => {
-      if (breathAnimation) {
-        breathAnimation.stop();
-      }
-      dotAnimation.stop();
+      if (breathAnimRef.current) breathAnimRef.current.stop();
     };
-  }, [finalIcon, title, iconScale, liveDotOpacity, value]);
+  }, [isHeart, numericBpm, iconScale]);
 
   const handlePressIn = () => {
     Animated.spring(pressScale, {
@@ -308,12 +327,14 @@ const styles = StyleSheet.create({
   valueRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
+    height: 32,
   },
   valueText: {
     fontSize: 24,
     fontWeight: '800',
     letterSpacing: -0.5,
     marginRight: 5,
+    fontVariant: ['tabular-nums'],
   },
   unitText: {
     fontSize: 11,

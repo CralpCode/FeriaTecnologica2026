@@ -36,11 +36,17 @@ export const PulmonaryAIScreen: React.FC = () => {
   // Foco anatómico seleccionado para guía didáctica
   const [selectedFocus, setSelectedFocus] = useState<'tracheal' | 'apical' | 'basal'>('apical');
 
-  // Cargar análisis inicial
+  // Referencia a vitals para no recrear runAnalysis en cada paquete entrante de telemetría
+  const vitalsRef = useRef(vitals);
+  useEffect(() => {
+    vitalsRef.current = vitals;
+  }, [vitals]);
+
+  // Cargar análisis médico de forma controlada y sin parpadeos
   const runAnalysis = useCallback(async () => {
     setIsAnalyzing(true);
     try {
-      const res = await apiService.getPulmonaryAnalysis(vitals);
+      const res = await apiService.getPulmonaryAnalysis(vitalsRef.current);
       setReport(res);
       const now = new Date();
       setLastAnalyzedTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`);
@@ -49,16 +55,16 @@ export const PulmonaryAIScreen: React.FC = () => {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [vitals]);
+  }, []);
 
   useEffect(() => {
     runAnalysis();
-    // Re-evaluar automáticamente cada 8 segundos si no está corriendo el protocolo guiado
+    // Re-evaluar automáticamente cada 10 segundos para no alterar la pantalla constantemente
     const autoInterval = setInterval(() => {
       if (!isProtocolRunning) {
         runAnalysis();
       }
-    }, 8000);
+    }, 10000);
     return () => clearInterval(autoInterval);
   }, [runAnalysis, isProtocolRunning]);
 
@@ -140,16 +146,42 @@ export const PulmonaryAIScreen: React.FC = () => {
     };
   }, []);
 
-  const rms = vitals.audio_rms || 0;
-  const peak = vitals.audio_peak || 0;
+  // Suavizado EMA para visualización estable de decibelios y picos (sin sacudidas en pantalla)
+  const [smoothedRms, setSmoothedRms] = useState(vitals.audio_rms || 0);
+  const [smoothedPeak, setSmoothedPeak] = useState(vitals.audio_peak || 0);
+  const lastRmsUpdateRef = useRef(Date.now());
 
-  // Interpretación cualitativa de intensidad sonora
+  useEffect(() => {
+    const rawRms = vitals.audio_rms || 0;
+    const rawPeak = vitals.audio_peak || 0;
+    const now = Date.now();
+
+    // Limitar la cadencia de actualización visual a máx 1 vez cada 180ms
+    if (now - lastRmsUpdateRef.current < 180) {
+      return;
+    }
+    lastRmsUpdateRef.current = now;
+
+    setSmoothedRms((prev) => {
+      // Zona muerta (deadband) si el cambio de ruido es mínimo (< 0.4 dB) para no mover números
+      if (Math.abs(prev - rawRms) < 0.4) return prev;
+      return Math.round((prev * 0.65 + rawRms * 0.35) * 10) / 10;
+    });
+
+    setSmoothedPeak((prev) => {
+      if (Math.abs(prev - rawPeak) < 250) return prev;
+      return Math.round(prev * 0.6 + rawPeak * 0.4);
+    });
+  }, [vitals.audio_rms, vitals.audio_peak]);
+
+  // Interpretación cualitativa de intensidad sonora con histeresis para evitar oscilación de textos
   const getAcousticInterpretation = () => {
-    if (rms < 25) return { label: 'Silencio / Flujo Muy Tenue', color: '#64748B', desc: 'Murmullo apenas perceptible' };
-    if (rms < 48) return { label: 'Flujo Eupneico Normal', color: '#10B981', desc: 'Ventilación alveolar limpia' };
-    if (rms < 65) return { label: 'Flujo Aéreo Aumentado / Voz', color: '#0284C7', desc: 'Sonido bronquial o habla activa' };
-    if (rms < 78) return { label: 'Turbulencia Acústica Elevada', color: '#F59E0B', desc: 'Posible fricción o sibilancia' };
-    return { label: 'Pico Acústico Intenso / Tos', color: '#EF4444', desc: 'Evento paroxístico o choque de aire' };
+    const r = smoothedRms;
+    if (r < 25) return { label: 'Silencio / Reposo', color: '#64748B', desc: 'Murmullo apenas perceptible' };
+    if (r < 50) return { label: 'Flujo Normal', color: '#10B981', desc: 'Ventilación alveolar limpia' };
+    if (r < 66) return { label: 'Flujo Aumentado', color: '#0284C7', desc: 'Sonido bronquial fisiológico' };
+    if (r < 78) return { label: 'Turbulencia Elevada', color: '#F59E0B', desc: 'Posible fricción o sibilancia' };
+    return { label: 'Pico Intenso / Tos', color: '#EF4444', desc: 'Evento paroxístico o choque de aire' };
   };
 
   const acousticStatus = getAcousticInterpretation();
@@ -211,9 +243,9 @@ export const PulmonaryAIScreen: React.FC = () => {
     },
   ];
 
-  // Cálculo de nivel VU dinámico (0 a 10 barras)
+  // Cálculo de nivel VU dinámico (0 a 12 barras) con valor suavizado
   const vuBarsCount = 12;
-  const activeBars = Math.min(vuBarsCount, Math.max(1, Math.round((rms / 85) * vuBarsCount)));
+  const activeBars = Math.min(vuBarsCount, Math.max(1, Math.round((smoothedRms / 85) * vuBarsCount)));
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -275,7 +307,7 @@ export const PulmonaryAIScreen: React.FC = () => {
           </View>
           <View style={[styles.statusBadge, { backgroundColor: `${acousticStatus.color}20` }]}>
             <View style={[styles.statusDot, { backgroundColor: acousticStatus.color }]} />
-            <Text style={[styles.statusBadgeText, { color: acousticStatus.color }]}>
+            <Text style={[styles.statusBadgeText, { color: acousticStatus.color }]} numberOfLines={1}>
               {acousticStatus.label}
             </Text>
           </View>
@@ -285,16 +317,16 @@ export const PulmonaryAIScreen: React.FC = () => {
           <View style={styles.acousticMetricItem}>
             <Text style={styles.acousticMetricLabel}>Intensidad Sonora</Text>
             <View style={styles.acousticValueRow}>
-              <Text style={styles.acousticMetricValue}>{rms.toFixed(1)}</Text>
+              <Text style={styles.acousticMetricValue}>{smoothedRms.toFixed(1)}</Text>
               <Text style={styles.acousticMetricUnit}>dB RMS</Text>
             </View>
-            <Text style={styles.acousticMetricSub}>{acousticStatus.desc}</Text>
+            <Text style={styles.acousticMetricSub} numberOfLines={1}>{acousticStatus.desc}</Text>
           </View>
 
           <View style={styles.acousticMetricItem}>
             <Text style={styles.acousticMetricLabel}>Amplitud Pico</Text>
             <View style={styles.acousticValueRow}>
-              <Text style={styles.acousticMetricValue}>{peak.toLocaleString()}</Text>
+              <Text style={styles.acousticMetricValue}>{smoothedPeak.toLocaleString()}</Text>
               <Text style={styles.acousticMetricUnit}>raw</Text>
             </View>
             <Text style={styles.acousticMetricSub}>Microfono INMP441</Text>
@@ -513,7 +545,7 @@ export const PulmonaryAIScreen: React.FC = () => {
               <MaterialCommunityIcons name="waveform" size={18} color="#7C3AED" />
             </View>
             <Text style={styles.sensorLabel}>Audio I2S RMS</Text>
-            <Text style={styles.sensorValue}>{rms.toFixed(1)} dB</Text>
+            <Text style={styles.sensorValue}>{smoothedRms.toFixed(1)} dB</Text>
             <Text style={styles.sensorStatus}>INMP441 Digital</Text>
           </View>
 
@@ -846,6 +878,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
+    height: 28,
+    minWidth: 135,
+    justifyContent: 'center',
   },
   statusDot: {
     width: 6,
@@ -868,6 +903,7 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 1,
     borderColor: '#F1F5F9',
+    minHeight: 88,
   },
   acousticMetricLabel: {
     fontSize: 11,
@@ -879,11 +915,13 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     gap: 4,
     marginVertical: 4,
+    height: 30,
   },
   acousticMetricValue: {
     fontSize: 22,
     fontWeight: '900',
     color: '#0D9488',
+    fontVariant: ['tabular-nums'],
   },
   acousticMetricUnit: {
     fontSize: 12,
@@ -894,6 +932,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#94A3B8',
     fontWeight: '500',
+    height: 14,
   },
   vuMeterContainer: {
     backgroundColor: '#F8FAFC',
