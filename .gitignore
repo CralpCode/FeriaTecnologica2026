@@ -71,3 +71,4 @@ Thumbs.db
 Backend/recordings/
 Backend/reports/
 Esp32/spiroscan_config.h
+Backend/.public_url
