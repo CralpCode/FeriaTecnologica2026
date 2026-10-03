@@ -81,11 +81,12 @@ int active_i2c_scl = I2C_SCL_PIN;
 #define ONBOARD_LED_PIN    2    // LED Azul interno de la placa
 #define NUM_LEDS           8    // Tira/Barra de 8 LEDs RGB direccionables
 
-// Modos y Temporizacion de Escaneos Acotados (Cero bucles infinitos)
+// Modos y Temporizacion de Escaneos Acotados y Modo Infinito Continuo
 enum ScanMode {
   SCAN_NONE = 0,
   SCAN_CARDIAC = 1,
-  SCAN_PULMONARY = 2
+  SCAN_PULMONARY = 2,
+  SCAN_CONTINUOUS = 3  // Modo Infinito / Continuo en Tiempo Real (Combo K1+K2 o comando)
 };
 ScanMode active_scan_mode = SCAN_NONE;
 unsigned long scan_start_ms = 0;
@@ -139,10 +140,10 @@ const unsigned long AUTO_SCAN_INTERVAL_MS = 7200000;  // 2 horas entre escaneos 
 
 enum DevicePowerState {
   STATE_TRANSMITTING_ACTIVE,  // Transmitiendo en vivo
-  STATE_STANDBY_SAVER         // Modo ahorro / reposo (2 horas)
+  STATE_STANDBY_SAVER         // Modo ahorro / reposo (Todo apagado)
 };
 
-DevicePowerState power_state = STATE_TRANSMITTING_ACTIVE;
+DevicePowerState power_state = STATE_STANDBY_SAVER; // De inicio TODO apagado
 unsigned long active_window_start_ms = 0;
 unsigned long standby_start_ms = 0;
 unsigned long previous_millis_telemetry = 0;
@@ -822,33 +823,37 @@ void update_biometric_signals() {
 }
 
 // ------------------------------------------------------------------------------
-// 8. GESTION ENERGETICA Y BOTON K1 (IO17)
+// 8. GESTION ENERGETICA Y BOTONES FISICOS K1 (IO17), K2 (IO16) & COMBO
 // ------------------------------------------------------------------------------
 void activate_transmission() {
   power_state = STATE_TRANSMITTING_ACTIVE;
   active_window_start_ms = millis();
-  for (int i = 0; i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, strip.Color(0, 200, 100)); // Destello de encendido en todos los LEDs
-  }
-  strip.show();
 
   Serial.println(F("\r\n========================================================================="));
-  Serial.println(F("  >>> [SPIROSCAN ACTIVADO] Transmision activa iniciada (2 minutos)    <<<"));
+  Serial.println(F("  >>> [SPIROSCAN ACTIVADO] Transmision activa iniciada.              <<<"));
   Serial.println(F("=========================================================================\r\n"));
 }
 
 void enter_standby() {
   power_state = STATE_STANDBY_SAVER;
+  active_scan_mode = SCAN_NONE;
   standby_start_ms = millis();
+  
+  // Apagar absolutamente todos los 8 LEDs
   for (int i = 0; i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, strip.Color(0, 0, 0)); // Apagar todos los LEDs en ahorro
+    strip.setPixelColor(i, strip.Color(0, 0, 0));
   }
   strip.show();
 
+  // Asegurar que el LED azul onboard permanezca apagado
+  digitalWrite(ONBOARD_LED_PIN, LOW);
+  beat_detected_flash = false;
+  beat_flash_start = 0;
+
   Serial.println(F("\r\n========================================================================="));
-  Serial.println(F("  >>> [MODO REPOSO] Ventana de 2 minutos completada para ahorro.      <<<"));
-  Serial.println(F("  >>> Sensores y radio en reposo. Proximo chequeo en 2 horas.         <<<"));
-  Serial.println(F("  >>> Pulsa el boton K1 (IO17) o envia 'WAKE' para reactivar.         <<<"));
+  Serial.println(F("  >>> [MODO REPOSO - TODO APAGADO] Hardware y sensores en espera.     <<<"));
+  Serial.println(F("  >>> Presiona K1 (20s Cardiaco), K2 (20s Pulmonar) o                 <<<"));
+  Serial.println(F("  >>> Presiona K1+K2 juntos a la vez para activar Modo Infinito.     <<<"));
   Serial.println(F("=========================================================================\r\n"));
 }
 
@@ -861,7 +866,7 @@ void start_cardiac_scan() {
   Serial.println(F("  >>> Monitoreo de FC, SpO2, PTT y HRV con promedio estadistico.     <<<"));
   Serial.println(F("=========================================================================\r\n"));
 
-  // Destello rapido Magenta/Rubi en la tira LED
+  // Destello rapido Carmín/Rubí en la tira LED
   for (int i = 0; i < NUM_LEDS; i++) {
     strip.setPixelColor(i, strip.Color(255, 10, 80));
   }
@@ -884,8 +889,39 @@ void start_pulmonary_scan() {
   strip.show();
 }
 
+void start_continuous_mode() {
+  active_scan_mode = SCAN_CONTINUOUS;
+  scan_start_ms = millis();
+  activate_transmission();
+
+  Serial.println(F("\r\n========================================================================="));
+  Serial.println(F("  >>> [COMBO K1+K2 IO17+IO16] MODO INFINITO / TIEMPO REAL ACTIVADO   <<<"));
+  Serial.println(F("  >>> Monitoreo continuo 100% en vivo sin limite de 20 segundos.     <<<"));
+  Serial.println(F("  >>> Para apagar todo: presiona K1+K2 juntos o envia 'OFF' / 'SLEEP'.<<<"));
+  Serial.println(F("=========================================================================\r\n"));
+
+  // Destello rapido Violeta Neón en todos los LEDs indicando Modo Infinito
+  for (int i = 0; i < NUM_LEDS; i++) {
+    strip.setPixelColor(i, strip.Color(180, 0, 255));
+  }
+  strip.show();
+  delay(120);
+}
+
+void handle_combo_press() {
+  if (power_state == STATE_TRANSMITTING_ACTIVE) {
+    // Si ya estaba activo (en modo continuo o escaneo), apagar todo y entrar a reposo
+    Serial.println(F("\r\n[*] COMBO K1+K2: Dispositivo activo detectado -> APAGANDO TODO (Reposo)..."));
+    enter_standby();
+  } else {
+    // Si estaba apagado / reposo, encender en Modo Infinito Continuo
+    Serial.println(F("\r\n[*] COMBO K1+K2: Dispositivo en reposo -> ACTIVANDO MODO INFINITO EN VIVO..."));
+    start_continuous_mode();
+  }
+}
+
 void update_scan_status() {
-  if (active_scan_mode != SCAN_NONE) {
+  if (active_scan_mode == SCAN_CARDIAC || active_scan_mode == SCAN_PULMONARY) {
     unsigned long elapsed = millis() - scan_start_ms;
     if (elapsed >= SCAN_DURATION_MS) {
       Serial.println(F("\r\n========================================================================="));
@@ -901,40 +937,78 @@ void update_scan_status() {
       delay(250);
 
       active_scan_mode = SCAN_NONE;
+      // Mantener la transmision activa por 30 segundos mas para que la app lea resultados y luego apagar
+      active_window_start_ms = millis();
     }
+  } else if (active_scan_mode == SCAN_CONTINUOUS) {
+    // Modo Infinito: Transmisión continua sin límite de 20s
   }
 }
 
 void check_buttons() {
-  // 1. Boton K1 (GPIO 17): Chequeo Cardiaco (20 segundos)
-  static int last_heart_state = HIGH;
-  static unsigned long heart_press_time = 0;
-  int current_heart_state = digitalRead(BUTTON_HEART_PIN);
+  static int last_k1 = HIGH;
+  static int last_k2 = HIGH;
+  static unsigned long k1_down_time = 0;
+  static unsigned long k2_down_time = 0;
+  static bool combo_detected = false;
+  static bool combo_triggered = false;
+  static bool k1_action_pending = false;
+  static bool k2_action_pending = false;
 
-  if (last_heart_state == HIGH && current_heart_state == LOW) {
-    heart_press_time = millis();
-  } else if (last_heart_state == LOW && current_heart_state == HIGH) {
-    unsigned long duration = millis() - heart_press_time;
-    if (duration > 40) {
+  int current_k1 = digitalRead(BUTTON_HEART_PIN);
+  int current_k2 = digitalRead(BUTTON_LUNG_PIN);
+
+  // 1. Deteccion de flanco de bajada (al presionar un boton)
+  if (last_k1 == HIGH && current_k1 == LOW) {
+    k1_down_time = millis();
+    k1_action_pending = true;
+  }
+  if (last_k2 == HIGH && current_k2 == LOW) {
+    k2_down_time = millis();
+    k2_action_pending = true;
+  }
+
+  // 2. Deteccion de pulsacion simultanea (ambos en LOW a la vez)
+  if (current_k1 == LOW && current_k2 == LOW) {
+    combo_detected = true;
+    k1_action_pending = false;
+    k2_action_pending = false;
+
+    // Si ambos llevan presionados juntos mas de 90ms y no se ha disparado el combo aun:
+    if (!combo_triggered && (millis() - max(k1_down_time, k2_down_time) > 90)) {
+      handle_combo_press();
+      combo_triggered = true;
+    }
+  }
+
+  // 3. Flanco de subida K1 (soltar)
+  if (last_k1 == LOW && current_k1 == HIGH) {
+    unsigned long dur = millis() - k1_down_time;
+    if (!combo_detected && !combo_triggered && k1_action_pending && dur > 40) {
       start_cardiac_scan();
     }
+    k1_action_pending = false;
   }
-  last_heart_state = current_heart_state;
 
-  // 2. Boton K2 (GPIO 16): Auscultacion Pulmonar (20 segundos)
-  static int last_lung_state = HIGH;
-  static unsigned long lung_press_time = 0;
-  int current_lung_state = digitalRead(BUTTON_LUNG_PIN);
-
-  if (last_lung_state == HIGH && current_lung_state == LOW) {
-    lung_press_time = millis();
-  } else if (last_lung_state == LOW && current_lung_state == HIGH) {
-    unsigned long duration = millis() - lung_press_time;
-    if (duration > 40) {
+  // 4. Flanco de subida K2 (soltar)
+  if (last_k2 == LOW && current_k2 == HIGH) {
+    unsigned long dur = millis() - k2_down_time;
+    if (!combo_detected && !combo_triggered && k2_action_pending && dur > 40) {
       start_pulmonary_scan();
     }
+    k2_action_pending = false;
   }
-  last_lung_state = current_lung_state;
+
+  // 5. Cuando ambos botones vuelven a estar libres (HIGH), rearmar banderas
+  if (current_k1 == HIGH && current_k2 == HIGH) {
+    combo_detected = false;
+    combo_triggered = false;
+    k1_action_pending = false;
+    k2_action_pending = false;
+  }
+
+  last_k1 = current_k1;
+  last_k2 = current_k2;
 }
 
 // ------------------------------------------------------------------------------
@@ -950,22 +1024,28 @@ void handle_incoming_commands(String cmd) {
     start_cardiac_scan();
   } else if (cmd == "SCAN_PULM" || cmd == "PULM" || cmd == "LUNG" || cmd == "PULMON") {
     start_pulmonary_scan();
+  } else if (cmd == "SCAN_CONT" || cmd == "LIVE" || cmd == "INFINITE" || cmd == "CONTINUO") {
+    start_continuous_mode();
   } else if (cmd == "STOP_SCAN" || cmd == "STOP") {
     active_scan_mode = SCAN_NONE;
     Serial.println(F("[ESCANEO] Escaneo detenido manualmente."));
-  } else if (cmd == "SLEEP" || cmd == "S") {
+  } else if (cmd == "SLEEP" || cmd == "S" || cmd == "OFF" || cmd == "STANDBY" || cmd == "APAGAR") {
     enter_standby();
+  } else if (cmd == "TOGGLE_CONT") {
+    handle_combo_press();
   } else if (cmd == "MIC") {
     report_i2s_clocks();
   } else if (cmd == "MICSD") {
     report_i2s_sd();
   } else if (cmd == "STATUS" || cmd == "INFO") {
     const char* scan_str = (active_scan_mode == SCAN_CARDIAC) ? "cardiac" :
-                           ((active_scan_mode == SCAN_PULMONARY) ? "pulmonary" : "none");
+                           ((active_scan_mode == SCAN_PULMONARY) ? "pulmonary" :
+                           ((active_scan_mode == SCAN_CONTINUOUS) ? "continuous" : "none"));
     char status_buf[256];
     snprintf(status_buf, sizeof(status_buf),
-             "{\"device\":\"%s\",\"ble_connected\":%s,\"sensor_hw\":%s,\"uptime_s\":%lu,\"i2c_sda\":%d,\"i2c_scl\":%d,\"scan_mode\":\"%s\"}",
-             BLE_DEVICE_NAME, ble_connected ? "true" : "false",
+             "{\"device\":\"%s\",\"power\":\"%s\",\"ble_connected\":%s,\"sensor_hw\":%s,\"uptime_s\":%lu,\"i2c_sda\":%d,\"i2c_scl\":%d,\"scan_mode\":\"%s\"}",
+             BLE_DEVICE_NAME, (power_state == STATE_TRANSMITTING_ACTIVE) ? "active" : "standby",
+             ble_connected ? "true" : "false",
              sensor_hw_found ? "true" : "false", millis() / 1000,
              active_i2c_sda, active_i2c_scl, scan_str);
     if (ble_connected && pTelemetryCharacteristic) {
@@ -994,14 +1074,19 @@ void broadcast_telemetry() {
     scan_active = true;
     unsigned long elapsed = millis() - scan_start_ms;
     scan_remaining = (elapsed < SCAN_DURATION_MS) ? ((SCAN_DURATION_MS - elapsed) / 1000) : 0;
+  } else if (active_scan_mode == SCAN_CONTINUOUS) {
+    scan_str = "continuous";
+    scan_active = true;
+    scan_remaining = (millis() - scan_start_ms) / 1000;
   }
 
-  char json_payload[320];
+  char json_payload[340];
   snprintf(json_payload, sizeof(json_payload),
-           "{\"bpm\":%d,\"spo2\":%.1f,\"systolic\":%d,\"diastolic\":%d,\"temperature\":%.1f,\"stress\":%d,\"hrv\":%d,\"audio_rms\":%.2f,\"audio_peak\":%.2f,\"finger\":%s,\"scan_mode\":\"%s\",\"scan_sec\":%d,\"scan_active\":%s,\"test\":false,\"device_id\":\"ESP32-BIO-01\"}",
+           "{\"bpm\":%d,\"spo2\":%.1f,\"systolic\":%d,\"diastolic\":%d,\"temperature\":%.1f,\"stress\":%d,\"hrv\":%d,\"audio_rms\":%.2f,\"audio_peak\":%.2f,\"finger\":%s,\"scan_mode\":\"%s\",\"scan_sec\":%d,\"scan_active\":%s,\"power\":\"%s\",\"test\":false,\"device_id\":\"ESP32-BIO-01\"}",
            beat_avg, spo2_val, systolic_bp, diastolic_bp, body_temp, stress_score, hrv_ms,
            audio_rms, audio_peak, finger_detected ? "true" : "false",
-           scan_str, scan_remaining, scan_active ? "true" : "false");
+           scan_str, scan_remaining, scan_active ? "true" : "false",
+           (power_state == STATE_TRANSMITTING_ACTIVE) ? "active" : "standby");
 
   // 1. Envio por BLE (Directo a Google Chrome / Edge en Celular y PC sin cables)
   if (ble_connected && pTelemetryCharacteristic != NULL) {
@@ -1244,7 +1329,7 @@ void setup() {
   strip.begin();
   strip.setBrightness(30); // Nivel óptimo de visibilidad, nitidez y elegancia clínica
   for (int i = 0; i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, strip.Color(0, 180, 255)); // Autoprueba: todos en Azul Cielo al arrancar
+    strip.setPixelColor(i, strip.Color(0, 0, 0)); // De inicio TODO apagado
   }
   strip.show();
 
@@ -1304,7 +1389,7 @@ void setup() {
   Serial.println(F("[OK] Firmware inicializado con exito."));
   Serial.println(F("=========================================================================\r\n"));
 
-  activate_transmission();
+  enter_standby(); // De inicio TODO apagado (Modo Reposo)
 }
 
 void loop() {
@@ -1324,43 +1409,46 @@ void loop() {
   update_audio_rms();
   update_biometric_signals();
 
-  // 4. Control de la ventana de transmision activa (Modo Feria Continua 24h)
+  // 4. Control de la ventana de transmision activa
   if (power_state == STATE_TRANSMITTING_ACTIVE) {
-    if (ble_connected || finger_detected) {
-      active_window_start_ms = current_millis;
-    } else if (current_millis - active_window_start_ms >= ACTIVE_WINDOW_MS) {
-      enter_standby();
-    }
-  } else if (power_state == STATE_STANDBY_SAVER) {
-    if (ble_connected || finger_detected) {
-      Serial.println(F("\r\n[*] Conexion Bluetooth o dedo detectado: Reactivando transmision..."));
-      activate_transmission();
+    if (active_scan_mode == SCAN_CONTINUOUS) {
+      active_window_start_ms = current_millis; // Mantener vivo indefinidamente en modo continuo
+    } else if (active_scan_mode != SCAN_NONE) {
+      active_window_start_ms = current_millis; // Mantener vivo durante escaneos acotados (20s)
+    } else {
+      // Si el escaneo terminó, mantener activo 30 segundos para observar resultados y luego apagar
+      if (current_millis - active_window_start_ms >= 30000) {
+        enter_standby();
+      }
     }
   }
 
-  // 7. Envio periodico de Telemetria en tiempo real ultra-rapido (Cada 100 ms = 10 Hz)
+  // 7. Envio periodico de Telemetria
   if (power_state == STATE_TRANSMITTING_ACTIVE) {
     if (current_millis - previous_millis_telemetry >= 100) {
       previous_millis_telemetry = current_millis;
       broadcast_telemetry();
     }
+  } else if (power_state == STATE_STANDBY_SAVER) {
+    // En reposo con BLE conectado: latido suave cada 2500 ms con power:standby
+    if (ble_connected && current_millis - previous_millis_telemetry >= 2500) {
+      previous_millis_telemetry = current_millis;
+      broadcast_telemetry();
+    }
   }
 
-  // Reconexion dinamica en caliente: Sigue buscando el MAX30102 cada 2.5 segundos
-  if (!sensor_hw_found) {
-    static unsigned long last_probe_time = 0;
-    if (current_millis - last_probe_time >= 2500) {
-      last_probe_time = current_millis;
-      setup_max30102();
-    }
-    // Parpadeo rapido del LED azul onboard mientras busca el sensor
-    digitalWrite(ONBOARD_LED_PIN, (current_millis / 300) % 2);
+  // Control del LED Azul onboard (Completamente apagado en reposo)
+  if (power_state == STATE_STANDBY_SAVER) {
+    digitalWrite(ONBOARD_LED_PIN, LOW);
   } else {
-    // Sensor detectado: LED azul fijo, y parpadea con cada latido cardiaco real
-    if (finger_detected && beat_detected_flash) {
-      digitalWrite(ONBOARD_LED_PIN, LOW);
+    if (!sensor_hw_found) {
+      digitalWrite(ONBOARD_LED_PIN, (current_millis / 300) % 2);
     } else {
-      digitalWrite(ONBOARD_LED_PIN, HIGH);
+      if (finger_detected && beat_detected_flash) {
+        digitalWrite(ONBOARD_LED_PIN, LOW);
+      } else {
+        digitalWrite(ONBOARD_LED_PIN, HIGH);
+      }
     }
   }
 

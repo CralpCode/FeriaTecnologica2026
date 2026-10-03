@@ -32,7 +32,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onNavigateToPulmonary,
   onNavigateToCharts,
 }) => {
-  const { vitals, aiReport, wakeDevice, startCardiacScan: startCardiacScanBle, stopScan } = useVitals();
+  const {
+    vitals,
+    aiReport,
+    wakeDevice,
+    startCardiacScan: startCardiacScanBle,
+    startContinuousMode,
+    powerOffDevice,
+    stopScan,
+  } = useVitals();
 
   const isLive = vitals.heartRate > 0;
 
@@ -218,8 +226,45 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         isAlert={heartStatus.status === 'critical'}
       />
 
+      {/* MODO INFINITO / TIEMPO REAL CONTINUO ACTIVO */}
+      {vitals.scan_mode === 'continuous' && scanState !== 'scanning' && (
+        <View style={[styles.cardiacActionCard, styles.continuousActiveCard]}>
+          <View style={styles.cardiacActionHeader}>
+            <View style={styles.cardiacBadgeRow}>
+              <View style={[styles.cardiacPill, { backgroundColor: '#EDE9FE' }]}>
+                <Ionicons name="infinite" size={14} color="#7C3AED" />
+                <Text style={[styles.cardiacPillText, { color: '#7C3AED' }]}>MODO INFINITO EN VIVO</Text>
+              </View>
+              <View style={styles.liveIndicatorDot} />
+            </View>
+            <Text style={styles.cardiacActionTitle}>Monitoreo Continuo en Tiempo Real</Text>
+            <Text style={styles.cardiacActionSub}>
+              El dispositivo está transmitiendo constantemente sin límite de tiempo (activado por K1+K2 en la pulsera o desde la app).
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+            <TouchableOpacity
+              style={[styles.cardiacStartBtn, { flex: 1, backgroundColor: '#EF4444', marginTop: 0 }]}
+              activeOpacity={0.85}
+              onPress={() => powerOffDevice()}
+            >
+              <Ionicons name="power" size={18} color="#FFFFFF" />
+              <Text style={styles.cardiacStartBtnText}>Apagar / Reposo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.cardiacStartBtn, { flex: 1, backgroundColor: '#E11D48', marginTop: 0 }]}
+              activeOpacity={0.85}
+              onPress={() => startCardiacScan(true)}
+            >
+              <Ionicons name="timer-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.cardiacStartBtnText}>Chequeo (20s)</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* 1b. BOTÓN Y CONTROL DEL CHEQUEO CARDÍACO POR TIEMPO (20 SEGUNDOS) */}
-      {scanState === 'idle' && (
+      {scanState === 'idle' && vitals.scan_mode !== 'continuous' && (
         <View style={styles.cardiacActionCard}>
           <View style={styles.cardiacActionHeader}>
             <View style={styles.cardiacBadgeRow}>
@@ -227,10 +272,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 <Ionicons name="timer-outline" size={13} color="#E11D48" />
                 <Text style={styles.cardiacPillText}>PROTOCOLO ESTANDARIZADO 20s</Text>
               </View>
+              {vitals.power === 'standby' && (
+                <View style={[styles.cardiacPill, { backgroundColor: '#F1F5F9', marginLeft: 6 }]}>
+                  <Ionicons name="moon-outline" size={12} color="#64748B" />
+                  <Text style={[styles.cardiacPillText, { color: '#64748B' }]}>HARDWARE EN REPOSO</Text>
+                </View>
+              )}
             </View>
             <Text style={styles.cardiacActionTitle}>Chequeo Cardíaco Acotado (20s)</Text>
             <Text style={styles.cardiacActionSub}>
-              Muestrea y promedia con rigor clínico ritmo cardíaco, SpO2 y tensión durante 20s. Actívalo con este botón o pulsando el botón físico K1 (IO17) en tu pulsera.
+              Muestrea y promedia con rigor clínico ritmo cardíaco, SpO2 y tensión durante 20s. Actívalo con K1 (IO17) o inicia el Modo Infinito pulsando K1 y K2 simultáneamente.
             </Text>
           </View>
           <TouchableOpacity
@@ -241,6 +292,26 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <MaterialCommunityIcons name="heart-pulse" size={22} color="#FFFFFF" />
             <Text style={styles.cardiacStartBtnText}>Iniciar Chequeo Cardíaco (20s)</Text>
           </TouchableOpacity>
+
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+            <TouchableOpacity
+              style={[styles.secondaryActionBtn, { flex: 1.2 }]}
+              activeOpacity={0.85}
+              onPress={() => startContinuousMode()}
+            >
+              <Ionicons name="infinite" size={16} color="#7C3AED" />
+              <Text style={styles.secondaryActionBtnText}>Modo Infinito</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.secondaryActionBtn, { flex: 1 }]}
+              activeOpacity={0.85}
+              onPress={() => powerOffDevice()}
+            >
+              <Ionicons name="power" size={16} color="#64748B" />
+              <Text style={[styles.secondaryActionBtnText, { color: '#64748B' }]}>Apagar Todo</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -890,5 +961,32 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '800',
+  },
+  continuousActiveCard: {
+    borderColor: '#C4B5FD',
+    backgroundColor: '#FAF5FF',
+  },
+  liveIndicatorDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10B981',
+    marginLeft: 6,
+  },
+  secondaryActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+  secondaryActionBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#7C3AED',
   },
 });

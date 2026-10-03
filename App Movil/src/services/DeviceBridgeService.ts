@@ -401,6 +401,16 @@ class DeviceBridgeService {
     return await this.sendCommand('STOP_SCAN');
   }
 
+  public async startContinuousMode(): Promise<boolean> {
+    console.log('[DeviceBridge] Activando modo continuo / tiempo real infinito en ESP32 (SCAN_CONT)...');
+    return await this.sendCommand('SCAN_CONT');
+  }
+
+  public async powerOffDevice(): Promise<boolean> {
+    console.log('[DeviceBridge] Apagando dispositivo y entrando en reposo (OFF)...');
+    return await this.sendCommand('OFF');
+  }
+
   public handleIncomingRawData(raw: RawDevicePacket) {
     // Si el usuario desconectó el dispositivo, ignorar paquetes residuales inmediatamente
     if (!this.isConnected) {
@@ -458,6 +468,7 @@ class DeviceBridgeService {
       finger: isFingerPresent,
       scan_mode: raw.scan_mode || 'none',
       scan_sec: raw.scan_sec !== undefined ? raw.scan_sec : 0,
+      power: raw.power || 'active',
     };
 
     this.notifyVitalsListeners(updatedVitals);

@@ -45,7 +45,9 @@ interface VitalsContextProps {
   wakeDevice: () => Promise<boolean>;
   startCardiacScan: () => Promise<boolean>;
   startPulmonaryScan: () => Promise<boolean>;
+  startContinuousMode: () => Promise<boolean>;
   stopScan: () => Promise<boolean>;
+  powerOffDevice: () => Promise<boolean>;
 }
 
 const ABSOLUTE_ZERO_VITALS: VitalSigns = {
@@ -396,6 +398,14 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     return await deviceBridge.stopScan();
   }, []);
 
+  const startContinuousMode = useCallback(async (): Promise<boolean> => {
+    return await deviceBridge.startContinuousMode();
+  }, []);
+
+  const powerOffDevice = useCallback(async (): Promise<boolean> => {
+    return await deviceBridge.powerOffDevice();
+  }, []);
+
   const loadInitialData = useCallback(async () => {
     try {
       const hist = await apiService.getVitalsHistory(selectedRange);
@@ -513,7 +523,9 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         wakeDevice,
         startCardiacScan,
         startPulmonaryScan,
+        startContinuousMode,
         stopScan,
+        powerOffDevice,
       }}
     >
       {children}
