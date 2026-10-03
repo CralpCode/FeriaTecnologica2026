@@ -468,6 +468,8 @@ class DeviceBridgeService {
       finger: isFingerPresent,
       scan_mode: raw.scan_mode || 'none',
       scan_sec: raw.scan_sec !== undefined ? raw.scan_sec : 0,
+      scan_phase: raw.scan_phase || (raw.scan_mode === 'cardiac' && (raw.cardiac_locked || (raw.bpm && raw.bpm > 0)) ? 'measuring' : (raw.scan_mode === 'cardiac' ? 'calibrating' : 'none')),
+      cardiac_locked: raw.cardiac_locked !== undefined ? Boolean(raw.cardiac_locked) : (finalHeartRate > 0),
       power: raw.power || 'active',
     };
 

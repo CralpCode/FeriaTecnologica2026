@@ -58,6 +58,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     hrv: number;
   }>>([]);
   const scanTimerRef = useRef<any>(null);
+  const isCountingDownRef = useRef(false);
   const progressAnim = useRef(new Animated.Value(0)).current;
 
   // Colección de muestras fisiológicas durante la ventana de 20s
@@ -76,6 +77,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   }, [vitals, scanState]);
 
   const finishCardiacScan = useCallback(() => {
+    isCountingDownRef.current = false;
     const samples = scanSamplesRef.current;
     if (samples.length >= 2) {
       const avgBpm = Math.round(samples.reduce((a, b) => a + b.bpm, 0) / samples.length);
@@ -128,38 +130,76 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     setSamplesCountLive(0);
     setScanSecondsLeft(20);
     setScanState('scanning');
-
+    isCountingDownRef.current = false;
     progressAnim.setValue(0);
-    Animated.timing(progressAnim, {
-      toValue: 1,
-      duration: 20000,
-      useNativeDriver: false,
-    }).start();
 
-    if (scanTimerRef.current) clearInterval(scanTimerRef.current);
+    if (scanTimerRef.current) {
+      clearInterval(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
+  }, [startCardiacScanBle, progressAnim]);
 
-    let seconds = 20;
-    scanTimerRef.current = setInterval(() => {
-      seconds -= 1;
-      setScanSecondsLeft(seconds);
+  // Inicio del conteo clínico de 20s SOLAMENTE tras fijar y calibrar el pulso cardíaco
+  useEffect(() => {
+    if (scanState !== 'scanning') return;
 
-      if (seconds <= 0) {
-        if (scanTimerRef.current) clearInterval(scanTimerRef.current);
-        finishCardiacScan();
-      }
-    }, 1000);
-  }, [startCardiacScanBle, progressAnim, finishCardiacScan]);
+    const isPulseLocked = Boolean(vitals.cardiac_locked || (vitals.heartRate && vitals.heartRate > 0));
 
-  // Sincronización reactiva si se presiona el botón físico K1 (Corazón IO17) en el ESP32
+    if (isPulseLocked && !isCountingDownRef.current) {
+      console.log('[Dashboard] ¡Pulso cardíaco fijado y calibrado! Iniciando conteo clínico de 20s...');
+      isCountingDownRef.current = true;
+
+      progressAnim.setValue(0);
+      Animated.timing(progressAnim, {
+        toValue: 1,
+        duration: 20000,
+        useNativeDriver: false,
+      }).start();
+
+      let seconds = 20;
+      setScanSecondsLeft(20);
+
+      if (scanTimerRef.current) clearInterval(scanTimerRef.current);
+      scanTimerRef.current = setInterval(() => {
+        seconds -= 1;
+        setScanSecondsLeft(seconds);
+
+        if (seconds <= 0) {
+          if (scanTimerRef.current) clearInterval(scanTimerRef.current);
+          scanTimerRef.current = null;
+          isCountingDownRef.current = false;
+          finishCardiacScan();
+        }
+      }, 1000);
+    }
+  }, [scanState, vitals.cardiac_locked, vitals.heartRate, progressAnim, finishCardiacScan]);
+
+  // Sincronización reactiva si se presiona el botón físico K1 (Corazón) o combo K1+K2 (Infinito) en el ESP32
   useEffect(() => {
     if (vitals.scan_mode === 'cardiac' && scanState !== 'scanning') {
       console.log('[Dashboard] Botón físico K1 (Corazón) presionado en ESP32: Sincronizando interfaz...');
       startCardiacScan(false);
+    } else if (vitals.scan_mode === 'none' && scanState === 'scanning' && isCountingDownRef.current) {
+      // El ESP32 finalizó su protocolo clínico de 20s
+      if (scanTimerRef.current) clearInterval(scanTimerRef.current);
+      scanTimerRef.current = null;
+      isCountingDownRef.current = false;
+      finishCardiacScan();
+    } else if (vitals.scan_mode === 'continuous') {
+      // Si el ESP32 entró en Modo Infinito, cancelar cualquier conteo de 20s y poner interfaz en reposo activo
+      if (scanTimerRef.current) clearInterval(scanTimerRef.current);
+      scanTimerRef.current = null;
+      isCountingDownRef.current = false;
+      if (scanState !== 'idle') {
+        setScanState('idle');
+      }
     }
-  }, [vitals.scan_mode, scanState, startCardiacScan]);
+  }, [vitals.scan_mode, scanState, startCardiacScan, finishCardiacScan]);
 
   const cancelCardiacScan = useCallback(() => {
     if (scanTimerRef.current) clearInterval(scanTimerRef.current);
+    scanTimerRef.current = null;
+    isCountingDownRef.current = false;
     progressAnim.stopAnimation();
     setScanState('idle');
     try {
@@ -297,7 +337,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <TouchableOpacity
               style={[styles.secondaryActionBtn, { flex: 1.2 }]}
               activeOpacity={0.85}
-              onPress={() => startContinuousMode()}
+              onPress={() => {
+                setScanState('idle');
+                setScanResult(null);
+                startContinuousMode();
+              }}
             >
               <Ionicons name="infinite" size={16} color="#7C3AED" />
               <Text style={styles.secondaryActionBtnText}>Modo Infinito</Text>
@@ -320,10 +364,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           <View style={styles.cardiacScanHeaderRow}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <ActivityIndicator size="small" color="#E11D48" />
-              <Text style={styles.cardiacScanningTitle}>Adquiriendo Constantes...</Text>
+              <Text style={styles.cardiacScanningTitle}>
+                {isCountingDownRef.current || vitals.heartRate > 0
+                  ? 'Adquiriendo Constantes Clínicas...'
+                  : 'Calibrando Sensor Cardíaco...'}
+              </Text>
             </View>
             <View style={styles.countdownBadge}>
-              <Text style={styles.countdownBadgeText}>{scanSecondsLeft}s restantes</Text>
+              <Text style={styles.countdownBadgeText}>
+                {isCountingDownRef.current || vitals.heartRate > 0
+                  ? `${scanSecondsLeft}s restantes`
+                  : '20s (Esperando pulso...)'}
+              </Text>
             </View>
           </View>
 
@@ -350,8 +402,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             />
             <Text style={styles.scanningStatusText} numberOfLines={1}>
               {vitals.heartRate > 0
-                ? `Pulso detectado: ${vitals.heartRate} LPM (${samplesCountLive} muestras)`
-                : 'Coloque el dedo firmemente sobre el sensor MAX30102...'}
+                ? `Pulso fijado: ${vitals.heartRate} LPM (${samplesCountLive} muestras)`
+                : (vitals.finger
+                    ? 'Dedo detectado. Calibrando pulso y filtro óptico...'
+                    : 'Coloque el dedo firmemente sobre el sensor MAX30102...')}
             </Text>
           </View>
 
@@ -419,9 +473,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <TouchableOpacity
               style={styles.continuousBtn}
               activeOpacity={0.85}
-              onPress={() => setScanState('idle')}
+              onPress={() => {
+                setScanState('idle');
+                setScanResult(null);
+                startContinuousMode();
+              }}
             >
-              <Text style={styles.continuousBtnText}>Modo Continuo</Text>
+              <Text style={styles.continuousBtnText}>Modo Infinito</Text>
             </TouchableOpacity>
           </View>
         </View>

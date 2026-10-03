@@ -17,6 +17,8 @@ export interface VitalSigns {
   finger?: boolean;             // Dedo detectado sobre el sensor
   scan_mode?: 'cardiac' | 'pulmonary' | 'continuous' | 'none'; // Modo de escaneo activo (disparado por boton fisico o app)
   scan_sec?: number;            // Segundos restantes del escaneo (o transcurridos en continuo)
+  scan_phase?: 'calibrating' | 'measuring' | 'none'; // Fase del escaneo clínico (calibración previa vs medición activa)
+  cardiac_locked?: boolean;     // Verdadero únicamente cuando el pulso fue fijado y calibrado
   power?: 'active' | 'standby'; // Estado energetico del hardware
 }
 
@@ -101,5 +103,7 @@ export interface RawDevicePacket {
   device_id?: string;
   scan_mode?: 'cardiac' | 'pulmonary' | 'continuous' | 'none';
   scan_sec?: number;
+  scan_phase?: 'calibrating' | 'measuring' | 'none';
+  cardiac_locked?: boolean;
   power?: 'active' | 'standby';
 }

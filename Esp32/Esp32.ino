@@ -91,6 +91,8 @@ enum ScanMode {
 ScanMode active_scan_mode = SCAN_NONE;
 unsigned long scan_start_ms = 0;
 const unsigned long SCAN_DURATION_MS = 20000; // 20 segundos estandarizados
+bool cardiac_locked = false;                  // True únicamente cuando se detecta y calibra el primer pulso real
+unsigned long cardiac_wait_start_ms = 0;      // Tiempo de espera para colocar el dedo
 
 Adafruit_NeoPixel strip(NUM_LEDS, WS2812_PIN, NEO_GRB + NEO_KHZ800);
 MAX30105 particleSensor;
@@ -829,19 +831,16 @@ void activate_transmission() {
   power_state = STATE_TRANSMITTING_ACTIVE;
   active_window_start_ms = millis();
 
-  // Reactivar el sensor óptico MAX30102 (enciende LEDs para lectura médica)
-  if (sensor_hw_found) {
-    particleSensor.wakeUp();
-  }
-
+  // NOTA: No despertar sensores ciegamente aqui; cada modo activa exclusivamente su sensor correspondiente.
   Serial.println(F("\r\n========================================================================="));
-  Serial.println(F("  >>> [SPIROSCAN ACTIVADO] Sensores reactivados y transmision activa. <<<"));
+  Serial.println(F("  >>> [SPIROSCAN ACTIVADO] Transmision activa de telemetria.          <<<"));
   Serial.println(F("=========================================================================\r\n"));
 }
 
 void enter_standby() {
   power_state = STATE_STANDBY_SAVER;
   active_scan_mode = SCAN_NONE;
+  cardiac_locked = false;
   standby_start_ms = millis();
   
   // 1. Apagar el sensor MAX30102 (apaga físicamente los LEDs Rojo e IR en el hardware)
@@ -877,9 +876,9 @@ void enter_standby() {
   digitalWrite(ONBOARD_LED_PIN, LOW);
 
   Serial.println(F("\r\n========================================================================="));
-  Serial.println(F("  >>> [MODO REPOSO - TODO APAGADO] Hardware y sensores en reposo total.<<<"));
+  Serial.println(F("  >>> [MODO REPOSO - EN ESPERA] Sensores en reposo, LEDs 0 y 1 activos.<<<"));
   Serial.println(F("  >>> Sensor cardiaco MAX30102 apagado (LEDs rojo/IR apagados).        <<<"));
-  Serial.println(F("  >>> Microfono I2S en reposo. Tira de LEDs apagada.                  <<<"));
+  Serial.println(F("  >>> Microfono I2S en reposo.                                         <<<"));
   Serial.println(F("  >>> Presiona K1 (20s Cardiaco), K2 (20s Pulmonar) o                 <<<"));
   Serial.println(F("  >>> Presiona K1+K2 juntos a la vez para activar Modo Infinito.     <<<"));
   Serial.println(F("=========================================================================\r\n"));
@@ -887,11 +886,26 @@ void enter_standby() {
 
 void start_cardiac_scan() {
   active_scan_mode = SCAN_CARDIAC;
-  scan_start_ms = millis();
+  cardiac_locked = false;
+  cardiac_wait_start_ms = millis();
+  scan_start_ms = 0; // Conteo regresivo de 20s empezara solo tras calibrar y fijar pulso
+
+  // 1. Activar estrictamente el sensor optico MAX30102
+  if (sensor_hw_found) {
+    particleSensor.wakeUp();
+  }
+
+  // 2. Silenciar y aislar completamente el microfono I2S
+  audio_rms = 0.0f;
+  audio_peak = 0.0f;
+
   activate_transmission();
+
   Serial.println(F("\r\n========================================================================="));
-  Serial.println(F("  >>> [BOTON K1 IO17] INICIANDO CHEQUEO CARDIACO (20 SEGUNDOS)       <<<"));
-  Serial.println(F("  >>> Monitoreo de FC, SpO2, PTT y HRV con promedio estadistico.     <<<"));
+  Serial.println(F("  >>> [BOTON K1 IO17] INICIANDO CHEQUEO CARDIACO                     <<<"));
+  Serial.println(F("  >>> Fase 1: Calibracion inicial y deteccion de pulso (coloque dedo).<<<"));
+  Serial.println(F("  >>> Fase 2: Conteo clinico de 20s iniciara al fijar pulso (LPM > 0).<<<"));
+  Serial.println(F("  >>> Microfono I2S completamente desactivado y aislado.              <<<"));
   Serial.println(F("=========================================================================\r\n"));
 
   // Destello rapido Carmín/Rubí en la tira LED
@@ -904,10 +918,31 @@ void start_cardiac_scan() {
 void start_pulmonary_scan() {
   active_scan_mode = SCAN_PULMONARY;
   scan_start_ms = millis();
+  cardiac_locked = false;
+
+  // 1. Apagar FISICAMENTE el sensor optico MAX30102 (apaga sus LEDs Rojo e IR en la placa)
+  if (sensor_hw_found) {
+    particleSensor.shutDown();
+  }
+
+  // 2. Poner a cero y aislar todas las variables cardiacas
+  finger_detected = false;
+  beat_avg = 0;
+  spo2_val = 0.0f;
+  systolic_bp = 0;
+  diastolic_bp = 0;
+  body_temp = 0.0f;
+  stress_score = 0;
+  hrv_ms = 0;
+  beat_detected_flash = false;
+  beat_flash_start = 0;
+
   activate_transmission();
+
   Serial.println(F("\r\n========================================================================="));
   Serial.println(F("  >>> [BOTON K2 IO16] INICIANDO AUSCULTACION PULMONAR (20 SEGUNDOS)  <<<"));
-  Serial.println(F("  >>> Analisis bio-acustico INMP441 + clasificacion espectral IA.    <<<"));
+  Serial.println(F("  >>> Analisis bio-acustico INMP441 activo.                          <<<"));
+  Serial.println(F("  >>> Sensor optico MAX30102 apagado fisicamente (LEDs rojo/IR OFF). <<<"));
   Serial.println(F("=========================================================================\r\n"));
 
   // Destello rapido Cian/Turquesa en la tira LED
@@ -920,11 +955,18 @@ void start_pulmonary_scan() {
 void start_continuous_mode() {
   active_scan_mode = SCAN_CONTINUOUS;
   scan_start_ms = millis();
+  cardiac_locked = true;
+
+  // En Modo Continuo / Infinito se activan AMBOS sensores simultaneamente en vivo
+  if (sensor_hw_found) {
+    particleSensor.wakeUp();
+  }
+
   activate_transmission();
 
   Serial.println(F("\r\n========================================================================="));
   Serial.println(F("  >>> [COMBO K1+K2 IO17+IO16] MODO INFINITO / TIEMPO REAL ACTIVADO   <<<"));
-  Serial.println(F("  >>> Monitoreo continuo 100% en vivo sin limite de 20 segundos.     <<<"));
+  Serial.println(F("  >>> Monitoreo continuo 100% en vivo (Microfono + MAX30102 juntos).  <<<"));
   Serial.println(F("  >>> Para apagar todo: presiona K1+K2 juntos o envia 'OFF' / 'SLEEP'.<<<"));
   Serial.println(F("=========================================================================\r\n"));
 
@@ -937,39 +979,96 @@ void start_continuous_mode() {
 }
 
 void handle_combo_press() {
-  if (power_state == STATE_TRANSMITTING_ACTIVE) {
-    // Si ya estaba activo (en modo continuo o escaneo), apagar todo y entrar a reposo
-    Serial.println(F("\r\n[*] COMBO K1+K2: Dispositivo activo detectado -> APAGANDO TODO (Reposo)..."));
+  if (active_scan_mode == SCAN_CONTINUOUS) {
+    // Si ya estaba en Modo Infinito, presionar combo o largo apaga todo y entra a reposo
+    Serial.println(F("\r\n[*] COMBO K1+K2: Modo Infinito ya activo -> APAGANDO TODO (Reposo)..."));
     enter_standby();
   } else {
-    // Si estaba apagado / reposo, encender en Modo Infinito Continuo
-    Serial.println(F("\r\n[*] COMBO K1+K2: Dispositivo en reposo -> ACTIVANDO MODO INFINITO EN VIVO..."));
+    // Si estaba en reposo, o en un escaneo acotado (cardiaco o pulmonar): ACTIVAR MODO INFINITO
+    Serial.println(F("\r\n[*] COMBO K1+K2: ACTIVANDO MODO INFINITO / TIEMPO REAL CONTINUO..."));
     start_continuous_mode();
   }
 }
 
 void update_scan_status() {
-  if (active_scan_mode == SCAN_CARDIAC || active_scan_mode == SCAN_PULMONARY) {
-    unsigned long elapsed = millis() - scan_start_ms;
+  unsigned long now = millis();
+
+  if (active_scan_mode == SCAN_CARDIAC) {
+    if (!cardiac_locked) {
+      // FASE 1: Calibracion fisiologica y deteccion del primer pulso valido
+      if (finger_detected && beat_avg > 0) {
+        cardiac_locked = true;
+        scan_start_ms = now; // Inicia aqui el conteo de los 20 segundos reales
+        Serial.println(F("\r\n========================================================================="));
+        Serial.printf("  >>> [PULSO CARDIACO FIJADO: %d BPM] INICIANDO 20s DE MEDICION CLINICA <<<\r\n", beat_avg);
+        Serial.println(F("=========================================================================\r\n"));
+
+        // Destello breve en LED 3 para confirmar enganche de pulso
+        strip.setPixelColor(3, strip.Color(255, 255, 255));
+        strip.show();
+      } else {
+        // Timeout: Si pasan 25 segundos sin colocar el dedo / fijar pulso, volver a reposo
+        if (now - cardiac_wait_start_ms >= 25000) {
+          Serial.println(F("\r\n[ESCANEO CARDIACO] Tiempo de espera agotado sin deteccion de pulso. Volviendo a reposo..."));
+          enter_standby();
+          return;
+        }
+      }
+    } else {
+      // FASE 2: Conteo regresivo clinico de 20 segundos tras calibrar pulso
+      static unsigned long finger_lost_start = 0;
+      if (!finger_detected) {
+        if (finger_lost_start == 0) finger_lost_start = now;
+        if (now - finger_lost_start > 5000) {
+          Serial.println(F("\r\n[ESCANEO CARDIACO] Dedo retirado por mas de 5s. Cancelando chequeo y apagando sensor..."));
+          finger_lost_start = 0;
+          enter_standby();
+          return;
+        }
+      } else {
+        finger_lost_start = 0;
+      }
+
+      unsigned long elapsed = now - scan_start_ms;
+      if (elapsed >= SCAN_DURATION_MS) {
+        finger_lost_start = 0;
+        Serial.println(F("\r\n========================================================================="));
+        Serial.printf("  >>> [FIN DE CHEQUEO CARDIACO] Protocolo 20s completado: %d BPM | SpO2: %.1f%% <<<\r\n", beat_avg, spo2_val);
+        Serial.println(F("=========================================================================\r\n"));
+
+        // Emitir paquete final con los datos consolidados antes de apagar
+        broadcast_telemetry();
+
+        // Destello clinico verde en los 8 LEDs indicando finalizacion exitosa
+        for (int i = 0; i < NUM_LEDS; i++) {
+          strip.setPixelColor(i, strip.Color(0, 255, 60));
+        }
+        strip.show();
+        delay(300);
+
+        // APAGADO INSTANTANEO: Apaga el sensor MAX30102 y LEDs 2-7 de inmediato
+        enter_standby();
+      }
+    }
+  } else if (active_scan_mode == SCAN_PULMONARY) {
+    // Auscultacion pulmonar de 20 segundos
+    unsigned long elapsed = now - scan_start_ms;
     if (elapsed >= SCAN_DURATION_MS) {
       Serial.println(F("\r\n========================================================================="));
-      Serial.printf("  >>> [FIN DE ESCANEO] %s completado con exito (20s). <<<\r\n",
-                    active_scan_mode == SCAN_CARDIAC ? "Chequeo Cardiaco" : "Auscultacion Pulmonar");
+      Serial.printf("  >>> [FIN DE AUSCULTACION PULMONAR] Protocolo 20s completado: Audio RMS %.1f dB <<<\r\n", audio_rms);
       Serial.println(F("=========================================================================\r\n"));
 
-      // Destello clinico verde de confirmacion de finalizacion en los 8 LEDs
+      broadcast_telemetry();
+
       for (int i = 0; i < NUM_LEDS; i++) {
         strip.setPixelColor(i, strip.Color(0, 255, 60));
       }
       strip.show();
-      delay(250);
+      delay(300);
 
-      active_scan_mode = SCAN_NONE;
-      // Mantener la transmision activa por 30 segundos mas para que la app lea resultados y luego apagar
-      active_window_start_ms = millis();
+      // APAGADO INSTANTANEO: Apaga microfono y pasa de inmediato a reposo
+      enter_standby();
     }
-  } else if (active_scan_mode == SCAN_CONTINUOUS) {
-    // Modo Infinito: Transmisión continua sin límite de 20s
   }
 }
 
@@ -1143,31 +1242,40 @@ void handle_incoming_commands(String cmd) {
 // ------------------------------------------------------------------------------
 void broadcast_telemetry() {
   const char* scan_str = "none";
+  const char* scan_phase = "none";
   int scan_remaining = 0;
   bool scan_active = false;
 
   if (active_scan_mode == SCAN_CARDIAC) {
     scan_str = "cardiac";
     scan_active = true;
-    unsigned long elapsed = millis() - scan_start_ms;
-    scan_remaining = (elapsed < SCAN_DURATION_MS) ? ((SCAN_DURATION_MS - elapsed) / 1000) : 0;
+    if (!cardiac_locked) {
+      scan_phase = "calibrating";
+      scan_remaining = 20; // 20s listos a la espera de fijar pulso
+    } else {
+      scan_phase = "measuring";
+      unsigned long elapsed = millis() - scan_start_ms;
+      scan_remaining = (elapsed < SCAN_DURATION_MS) ? ((SCAN_DURATION_MS - elapsed) / 1000) : 0;
+    }
   } else if (active_scan_mode == SCAN_PULMONARY) {
     scan_str = "pulmonary";
     scan_active = true;
+    scan_phase = "measuring";
     unsigned long elapsed = millis() - scan_start_ms;
     scan_remaining = (elapsed < SCAN_DURATION_MS) ? ((SCAN_DURATION_MS - elapsed) / 1000) : 0;
   } else if (active_scan_mode == SCAN_CONTINUOUS) {
     scan_str = "continuous";
     scan_active = true;
+    scan_phase = "measuring";
     scan_remaining = (millis() - scan_start_ms) / 1000;
   }
 
-  char json_payload[340];
+  char json_payload[380];
   snprintf(json_payload, sizeof(json_payload),
-           "{\"bpm\":%d,\"spo2\":%.1f,\"systolic\":%d,\"diastolic\":%d,\"temperature\":%.1f,\"stress\":%d,\"hrv\":%d,\"audio_rms\":%.2f,\"audio_peak\":%.2f,\"finger\":%s,\"scan_mode\":\"%s\",\"scan_sec\":%d,\"scan_active\":%s,\"power\":\"%s\",\"test\":false,\"device_id\":\"ESP32-BIO-01\"}",
+           "{\"bpm\":%d,\"spo2\":%.1f,\"systolic\":%d,\"diastolic\":%d,\"temperature\":%.1f,\"stress\":%d,\"hrv\":%d,\"audio_rms\":%.2f,\"audio_peak\":%.2f,\"finger\":%s,\"scan_mode\":\"%s\",\"scan_sec\":%d,\"scan_phase\":\"%s\",\"cardiac_locked\":%s,\"scan_active\":%s,\"power\":\"%s\",\"test\":false,\"device_id\":\"ESP32-BIO-01\"}",
            beat_avg, spo2_val, systolic_bp, diastolic_bp, body_temp, stress_score, hrv_ms,
            audio_rms, audio_peak, finger_detected ? "true" : "false",
-           scan_str, scan_remaining, scan_active ? "true" : "false",
+           scan_str, scan_remaining, scan_phase, cardiac_locked ? "true" : "false", scan_active ? "true" : "false",
            (power_state == STATE_TRANSMITTING_ACTIVE) ? "active" : "standby");
 
   // 1. Envio por BLE (Directo a Google Chrome / Edge en Celular y PC sin cables)
@@ -1367,6 +1475,43 @@ void update_led_effects() {
   }
   strip.setPixelColor(7, led7_color);
 
+  // ============================================================================
+  // AISLAMIENTO ESTRICTO DE LEDS SEGÚN MODO DE ESCANEO
+  // ============================================================================
+  if (active_scan_mode == SCAN_CARDIAC) {
+    // 1. En chequeo cardíaco: El micrófono (LED 6) queda COMPLETAMENTE APAGADO
+    strip.setPixelColor(6, strip.Color(0, 0, 0));
+
+    // 2. Si aún está en fase de calibración inicial (!cardiac_locked):
+    if (!cardiac_locked) {
+      if (!finger_detected) {
+        // Sin dedo aún: LED 2 apagado, LED 3 respirando en rubí suave invitando al usuario, LEDs 4, 5, 7 apagados
+        strip.setPixelColor(2, strip.Color(0, 0, 0));
+        float breath = 0.5f + 0.5f * sin((float)now / 200.0f);
+        strip.setPixelColor(3, strip.Color((int)(110.0f * breath + 20.0f), 0, (int)(30.0f * breath)));
+        strip.setPixelColor(4, strip.Color(0, 0, 0));
+        strip.setPixelColor(5, strip.Color(0, 0, 0));
+        strip.setPixelColor(7, strip.Color(0, 0, 0));
+      } else {
+        // Dedo colocado, estabilizando filtro DC y calculando primer pulso: LED 2 dorado, LED 3 respirando rubí/coral
+        strip.setPixelColor(2, strip.Color(200, 130, 0));
+        float breath = 0.5f + 0.5f * sin((float)now / 130.0f);
+        strip.setPixelColor(3, strip.Color((int)(150.0f * breath + 30.0f), (int)(15.0f * breath), (int)(35.0f * breath)));
+        strip.setPixelColor(4, strip.Color(0, (int)(45.0f * breath + 10.0f), (int)(35.0f * breath + 10.0f)));
+        strip.setPixelColor(5, strip.Color((int)(45.0f * breath + 10.0f), 0, (int)(30.0f * breath + 10.0f)));
+        strip.setPixelColor(7, strip.Color(0, (int)(35.0f * breath + 10.0f), (int)(20.0f * breath + 10.0f)));
+      }
+    }
+  } else if (active_scan_mode == SCAN_PULMONARY) {
+    // En auscultación pulmonar: Todos los LEDs biomédicos del sensor óptico (2, 3, 4, 5, 7) quedan TOTALMENTE APAGADOS
+    strip.setPixelColor(2, strip.Color(0, 0, 0));
+    strip.setPixelColor(3, strip.Color(0, 0, 0));
+    strip.setPixelColor(4, strip.Color(0, 0, 0));
+    strip.setPixelColor(5, strip.Color(0, 0, 0));
+    strip.setPixelColor(7, strip.Color(0, 0, 0));
+    // Únicamente LED 0 (Power), LED 1 (BLE) y LED 6 (Micrófono I2S) están activos
+  }
+
   strip.show();
 }
 
@@ -1502,10 +1647,30 @@ void loop() {
     handle_incoming_commands(ser_cmd);
   }
 
-  // 3. Procesamiento de Senales Biologicas y Acusticas 100% Reales (Solo cuando está activo)
+  // 3. Procesamiento de Senales Biologicas y Acusticas 100% Reales (Aislamiento Estricto por Modo)
   if (power_state == STATE_TRANSMITTING_ACTIVE) {
-    update_audio_rms();
-    update_biometric_signals();
+    if (active_scan_mode == SCAN_CARDIAC) {
+      update_biometric_signals();
+      audio_rms = 0.0f;
+      audio_peak = 0.0f;
+    } else if (active_scan_mode == SCAN_PULMONARY) {
+      update_audio_rms();
+      finger_detected = false;
+      beat_avg = 0;
+      spo2_val = 0.0f;
+      systolic_bp = 0;
+      diastolic_bp = 0;
+      body_temp = 0.0f;
+      stress_score = 0;
+      hrv_ms = 0;
+    } else if (active_scan_mode == SCAN_CONTINUOUS) {
+      update_audio_rms();
+      update_biometric_signals();
+    } else {
+      // Activo pero SCAN_NONE (ej. periodo de gracia de 30s para visualizar resultados)
+      audio_rms = 0.0f;
+      audio_peak = 0.0f;
+    }
   } else {
     // En reposo: microfono y sensor cardiaco en silencio absoluto
     audio_rms = 0.0f;
@@ -1519,10 +1684,8 @@ void loop() {
     } else if (active_scan_mode != SCAN_NONE) {
       active_window_start_ms = current_millis; // Mantener vivo durante escaneos acotados (20s)
     } else {
-      // Si el escaneo terminó, mantener activo 30 segundos para observar resultados y luego apagar
-      if (current_millis - active_window_start_ms >= 30000) {
-        enter_standby();
-      }
+      // Si no hay ningun escaneo activo, entrar a reposo de inmediato sin retrasos
+      enter_standby();
     }
   }
 
