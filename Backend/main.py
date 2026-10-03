@@ -45,10 +45,6 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-# Contraseña para accesos desde internet (túnel); la red local no la necesita.
-from remote_auth import RemoteAuthMiddleware
-app.add_middleware(RemoteAuthMiddleware)
-
 database.init_db()
 
 PORT = int(os.getenv("PORT", 8000))

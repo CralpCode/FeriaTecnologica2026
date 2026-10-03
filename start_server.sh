@@ -4,7 +4,6 @@
 #   ./start_server.sh            -> red local (la app se abre en http://spiroscan.local:8000)
 #   ./start_server.sh --build    -> además recompila la app web (después de cambiar la app)
 #   ./start_server.sh --tunnel   -> además publica la app en internet (túnel de Cloudflare, https)
-#                                   con usuario y contraseña (Backend/.env: REMOTE_USER / REMOTE_PASSWORD)
 # Variables opcionales: VENV (entorno Python), LLM_MODEL, PORT
 # ==============================================================================
 set -euo pipefail
@@ -34,15 +33,6 @@ APP_DIR="$ROOT/App Movil"
 if [ "$BUILD" = 1 ] || [ ! -f "$APP_DIR/dist/index.html" ]; then
   echo "[*] Compilando la app web ..."
   (cd "$APP_DIR" && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && CI=1 npx expo export --platform web >/dev/null)
-fi
-
-# Contraseña para el acceso remoto: se genera una vez y queda en Backend/.env (no se sube a git).
-touch .env
-if ! grep -q '^REMOTE_PASSWORD=.\+' .env; then
-  sed -i '' '/^REMOTE_PASSWORD=/d;/^REMOTE_USER=/d' .env
-  echo "REMOTE_USER=spiroscan" >> .env
-  echo "REMOTE_PASSWORD=$(LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 10)" >> .env
-  echo "[OK] Se generó la contraseña de acceso remoto en Backend/.env"
 fi
 
 if ! curl -s localhost:11434/api/version >/dev/null; then
@@ -79,7 +69,6 @@ if [ "$TUNNEL" = 1 ]; then
     echo "=============================================================="
     echo "  DESDE CUALQUIER RED (datos móviles, otra casa):"
     echo "  $PUBLIC_URL"
-    echo "  Usuario y contraseña: ver REMOTE_USER / REMOTE_PASSWORD en Backend/.env"
     echo "  (este enlace cambia cada vez que se reinicia el túnel)"
     echo "=============================================================="
     "$VENV/bin/python" -c "import qrcode,sys; q=qrcode.QRCode(border=1); q.add_data(sys.argv[1]); q.print_ascii(invert=True)" "$PUBLIC_URL" 2>/dev/null || true
