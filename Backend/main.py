@@ -1,7 +1,7 @@
 import os
 import time
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Union, Dict, Any
 from datetime import datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -88,6 +88,10 @@ class LLMDirectInput(BaseModel):
     prompt: str
     system: Optional[str] = None
 
+class AudioClassifyInput(BaseModel):
+    features: Optional[Union[dict, list]] = None
+    session_id: Optional[str] = "default"
+
 _sessions_cache: dict[str, dict] = {}
 
 def _get_effective_session(session_id: Optional[str] = None) -> str:
@@ -98,10 +102,11 @@ def read_root():
     return {
         "status": "online",
         "service": "SpiroScan IoT Backend API",
-        "version": "1.4.0",
+        "version": "1.5.0",
         "phone_connected": session_state["is_phone_connected"],
         "active_sessions_count": len(_sessions_cache),
-        "llm_model": ai_engine.OLLAMA_MODEL
+        "llm_model": ai_engine.OLLAMA_MODEL,
+        "acoustic_model": ai_engine.get_acoustic_model_info()
     }
 
 @app.get("/api/sessions")
@@ -946,6 +951,11 @@ def export_report(time_range: str = Query("24h", alias="range")):
 @app.post("/api/ai/vitals/analyze")
 def analyze_vitals(payload: AnalyzeInput):
     return ai_engine.analyze_vitals_report(payload.vitals)
+
+@app.post("/api/ai/audio/classify")
+def classify_audio_telemetry(payload: AudioClassifyInput):
+    """Clasifica características acústicas del micrófono INMP441 mediante el modelo ICBHI (61 features)."""
+    return ai_engine.classify_respiratory_features(payload.features or {})
 
 @app.post("/api/ai/chat")
 def chat_ai(payload: ChatInput):
