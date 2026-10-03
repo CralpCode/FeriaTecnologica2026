@@ -294,7 +294,7 @@ void report_i2s_sd() {
   bool input_enabled = (REG_READ(GPIO_PIN_MUX_REG[I2S_SD_PIN]) & FUN_IE) != 0;
   bool output_enabled = (GPIO.enable1.val & (1UL << (I2S_SD_PIN - 32))) != 0;
   int rtc_index = rtc_io_number_get((gpio_num_t)I2S_SD_PIN);
-  bool rtc_mux = rtc_index >= 0 && (REG_READ(rtc_io_desc[rtc_index].reg) & rtc_io_desc[rtc_index].mux) != 0;
+  bool rtc_mux = false;
   // Test de resistencia pull-down vs pull-up para discernir corto a GND vs Hi-Z (flotante)
   gpio_set_pull_mode((gpio_num_t)I2S_SD_PIN, GPIO_PULLDOWN_ONLY);
   delayMicroseconds(500);
@@ -924,12 +924,12 @@ void start_continuous_mode() {
   Serial.println(F("  >>> Para apagar todo: presiona K1+K2 juntos o envia 'OFF' / 'SLEEP'.<<<"));
   Serial.println(F("=========================================================================\r\n"));
 
-  // Destello rapido Violeta Neón en todos los LEDs indicando Modo Infinito
+  // Destello rápido Blanco Puro / Clínico en todos los LEDs indicando Modo Infinito
   for (int i = 0; i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, strip.Color(180, 0, 255));
+    strip.setPixelColor(i, strip.Color(255, 255, 255));
   }
   strip.show();
-  delay(120);
+  delay(150);
 }
 
 void handle_combo_press() {
@@ -974,61 +974,115 @@ void check_buttons() {
   static int last_k2 = HIGH;
   static unsigned long k1_down_time = 0;
   static unsigned long k2_down_time = 0;
-  static bool combo_detected = false;
-  static bool combo_triggered = false;
-  static bool k1_action_pending = false;
-  static bool k2_action_pending = false;
+  static unsigned long k1_up_time = 0;
+  static unsigned long k2_up_time = 0;
 
+  static bool k1_pending_single = false;
+  static bool k2_pending_single = false;
+  static bool combo_handled = false;
+  static bool k1_long_press_handled = false;
+  static bool k2_long_press_handled = false;
+
+  unsigned long now = millis();
   int current_k1 = digitalRead(BUTTON_HEART_PIN);
   int current_k2 = digitalRead(BUTTON_LUNG_PIN);
 
-  // 1. Deteccion de flanco de bajada (al presionar un boton)
+  // 1. Detección de flanco de bajada (al presionar un botón)
   if (last_k1 == HIGH && current_k1 == LOW) {
-    k1_down_time = millis();
-    k1_action_pending = true;
-  }
-  if (last_k2 == HIGH && current_k2 == LOW) {
-    k2_down_time = millis();
-    k2_action_pending = true;
-  }
+    k1_down_time = now;
+    k1_long_press_handled = false;
 
-  // 2. Deteccion de pulsacion simultanea (ambos en LOW a la vez)
-  if (current_k1 == LOW && current_k2 == LOW) {
-    combo_detected = true;
-    k1_action_pending = false;
-    k2_action_pending = false;
-
-    // Si ambos llevan presionados juntos mas de 90ms y no se ha disparado el combo aun:
-    if (!combo_triggered && (millis() - max(k1_down_time, k2_down_time) > 90)) {
+    // Si K2 se había soltado hace menos de 280ms: ¡Es un combo entre ambos dedos!
+    if (k2_pending_single && (now - k2_up_time < 280)) {
+      k2_pending_single = false;
+      combo_handled = true;
       handle_combo_press();
-      combo_triggered = true;
     }
   }
 
-  // 3. Flanco de subida K1 (soltar)
+  if (last_k2 == HIGH && current_k2 == LOW) {
+    k2_down_time = now;
+    k2_long_press_handled = false;
+
+    // Si K1 se había soltado hace menos de 280ms: ¡Es un combo entre ambos dedos!
+    if (k1_pending_single && (now - k1_up_time < 280)) {
+      k1_pending_single = false;
+      combo_handled = true;
+      handle_combo_press();
+    }
+  }
+
+  // 2. Ambos presionados al mismo tiempo (simultáneo o mientras uno se mantiene)
+  if (current_k1 == LOW && current_k2 == LOW) {
+    k1_pending_single = false;
+    k2_pending_single = false;
+    if (!combo_handled) {
+      combo_handled = true;
+      handle_combo_press();
+    }
+  }
+
+  // 3. Detección de pulsación larga individual (> 1.2s en K1 o K2) para activar/apagar sin sincronizar 2 dedos
+  if (current_k1 == LOW && current_k2 == HIGH && !combo_handled && !k1_long_press_handled) {
+    if (now - k1_down_time >= 1200) {
+      k1_long_press_handled = true;
+      k1_pending_single = false;
+      Serial.println(F("[BOTON K1] Pulsacion larga (>1.2s) detectada -> Alternando Modo Infinito / Reposo"));
+      handle_combo_press();
+    }
+  }
+
+  if (current_k2 == LOW && current_k1 == HIGH && !combo_handled && !k2_long_press_handled) {
+    if (now - k2_down_time >= 1200) {
+      k2_long_press_handled = true;
+      k2_pending_single = false;
+      Serial.println(F("[BOTON K2] Pulsacion larga (>1.2s) detectada -> Alternando Modo Infinito / Reposo"));
+      handle_combo_press();
+    }
+  }
+
+  // 4. Flanco de subida K1 (soltar)
   if (last_k1 == LOW && current_k1 == HIGH) {
-    unsigned long dur = millis() - k1_down_time;
-    if (!combo_detected && !combo_triggered && k1_action_pending && dur > 40) {
+    unsigned long press_dur = now - k1_down_time;
+    if (!combo_handled && !k1_long_press_handled && press_dur >= 40) {
+      // Poner en espera de ventana de gracia (250ms) por si el segundo botón venía en camino
+      k1_pending_single = true;
+      k1_up_time = now;
+    }
+  }
+
+  // 5. Flanco de subida K2 (soltar)
+  if (last_k2 == LOW && current_k2 == HIGH) {
+    unsigned long press_dur = now - k2_down_time;
+    if (!combo_handled && !k2_long_press_handled && press_dur >= 40) {
+      // Poner en espera de ventana de gracia (250ms) por si el segundo botón venía en camino
+      k2_pending_single = true;
+      k2_up_time = now;
+    }
+  }
+
+  // 6. Evaluación de ventana de gracia tras soltar para acciones individuales (250 ms)
+  if (k1_pending_single && (now - k1_up_time >= 250)) {
+    k1_pending_single = false;
+    if (!combo_handled) {
       start_cardiac_scan();
     }
-    k1_action_pending = false;
   }
 
-  // 4. Flanco de subida K2 (soltar)
-  if (last_k2 == LOW && current_k2 == HIGH) {
-    unsigned long dur = millis() - k2_down_time;
-    if (!combo_detected && !combo_triggered && k2_action_pending && dur > 40) {
+  if (k2_pending_single && (now - k2_up_time >= 250)) {
+    k2_pending_single = false;
+    if (!combo_handled) {
       start_pulmonary_scan();
     }
-    k2_action_pending = false;
   }
 
-  // 5. Cuando ambos botones vuelven a estar libres (HIGH), rearmar banderas
+  // 7. Rearmar banderas cuando ambos botones están completamente libres
   if (current_k1 == HIGH && current_k2 == HIGH) {
-    combo_detected = false;
-    combo_triggered = false;
-    k1_action_pending = false;
-    k2_action_pending = false;
+    if (!k1_pending_single && !k2_pending_single) {
+      combo_handled = false;
+    }
+    k1_long_press_handled = false;
+    k2_long_press_handled = false;
   }
 
   last_k1 = current_k1;
@@ -1298,12 +1352,11 @@ void update_led_effects() {
 }
 
 
-// Callbacks para recepcion de comandos BLE desde la App Movil (WAKE, SCAN_CARD, SCAN_PULM)
+// Callbacks para recepcion de comandos BLE desde la App Movil (WAKE, SCAN_CARD, SCAN_PULM, SCAN_CONT, OFF)
 class TelemetryCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
-      std::string val = pCharacteristic->getValue();
-      if (val.length() > 0) {
-        String cmd = String(val.c_str());
+      String cmd = pCharacteristic->getValue();
+      if (cmd.length() > 0) {
         Serial.printf("[BLE RX] Comando recibido: %s\r\n", cmd.c_str());
         handle_incoming_commands(cmd);
       }
@@ -1317,8 +1370,6 @@ class MyServerCallbacks: public BLEServerCallbacks {
       Serial.println(F("\r\n========================================================================="));
       Serial.println(F("  [BLE] >>> ¡CLIENTE BLUETOOTH CONECTADO DIRECTO! (CELULAR / PC)       <<<"));
       Serial.println(F("=========================================================================\r\n"));
-      power_state = STATE_TRANSMITTING_ACTIVE;
-      active_window_start_ms = millis();
       broadcast_telemetry();
     };
 
