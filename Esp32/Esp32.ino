@@ -863,8 +863,12 @@ void enter_standby() {
   beat_detected_flash = false;
   beat_flash_start = 0;
 
-  // 3. Apagar absolutamente todos los 8 LEDs RGB WS2812B
-  for (int i = 0; i < NUM_LEDS; i++) {
+  // 3. Mantener encendidos solo LED 0 (Power - Verde) y LED 1 (Bluetooth - Azul); LEDs 2 a 7 apagados
+  uint32_t led0_color = sensor_hw_found ? strip.Color(0, 230, 60) : strip.Color(240, 90, 0);
+  strip.setPixelColor(0, led0_color);
+  uint32_t led1_color = ble_connected ? strip.Color(0, 120, 255) : strip.Color(0, 80, 255);
+  strip.setPixelColor(1, led1_color);
+  for (int i = 2; i < NUM_LEDS; i++) {
     strip.setPixelColor(i, strip.Color(0, 0, 0));
   }
   strip.show();
@@ -1197,8 +1201,23 @@ void update_led_effects() {
   last_led_update = now;
 
   if (power_state == STATE_STANDBY_SAVER) {
-    for (int i = 0; i < NUM_LEDS; i++) {
-      strip.setPixelColor(i, strip.Color(0, 0, 0)); // Apagado en reposo
+    // LED 0: Power / Alimentación (Verde Esmeralda fijo)
+    uint32_t led0_color = sensor_hw_found ? strip.Color(0, 230, 60) : strip.Color(240, 90, 0);
+    strip.setPixelColor(0, led0_color);
+
+    // LED 1: Bluetooth BLE (Azul Neón fijo si conectado; suave parpadeo cada 500ms en espera)
+    uint32_t led1_color;
+    if (ble_connected) {
+      led1_color = strip.Color(0, 120, 255);
+    } else {
+      bool blink_on = (now / 500) % 2;
+      led1_color = blink_on ? strip.Color(0, 80, 255) : strip.Color(0, 0, 0);
+    }
+    strip.setPixelColor(1, led1_color);
+
+    // LEDs 2 al 7: Sensores médicos y acústica totalmente apagados en reposo
+    for (int i = 2; i < NUM_LEDS; i++) {
+      strip.setPixelColor(i, strip.Color(0, 0, 0));
     }
     strip.show();
     return;
@@ -1403,8 +1422,11 @@ void setup() {
 
   strip.begin();
   strip.setBrightness(30); // Nivel óptimo de visibilidad, nitidez y elegancia clínica
-  for (int i = 0; i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, strip.Color(0, 0, 0)); // De inicio TODO apagado
+  // LED 0 (Power - Verde) y LED 1 (Bluetooth - Azul) activos desde el inicio
+  strip.setPixelColor(0, strip.Color(0, 230, 60));
+  strip.setPixelColor(1, strip.Color(0, 80, 255));
+  for (int i = 2; i < NUM_LEDS; i++) {
+    strip.setPixelColor(i, strip.Color(0, 0, 0));
   }
   strip.show();
 
