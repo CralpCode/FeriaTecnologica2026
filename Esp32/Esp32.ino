@@ -829,8 +829,13 @@ void activate_transmission() {
   power_state = STATE_TRANSMITTING_ACTIVE;
   active_window_start_ms = millis();
 
+  // Reactivar el sensor óptico MAX30102 (enciende LEDs para lectura médica)
+  if (sensor_hw_found) {
+    particleSensor.wakeUp();
+  }
+
   Serial.println(F("\r\n========================================================================="));
-  Serial.println(F("  >>> [SPIROSCAN ACTIVADO] Transmision activa iniciada.              <<<"));
+  Serial.println(F("  >>> [SPIROSCAN ACTIVADO] Sensores reactivados y transmision activa. <<<"));
   Serial.println(F("=========================================================================\r\n"));
 }
 
@@ -839,19 +844,38 @@ void enter_standby() {
   active_scan_mode = SCAN_NONE;
   standby_start_ms = millis();
   
-  // Apagar absolutamente todos los 8 LEDs
+  // 1. Apagar el sensor MAX30102 (apaga físicamente los LEDs Rojo e IR en el hardware)
+  if (sensor_hw_found) {
+    particleSensor.shutDown();
+  }
+
+  // 2. Limpiar y apagar variables biomédicas y acústicas
+  finger_detected = false;
+  beat_avg = 0;
+  spo2_val = 0.0f;
+  systolic_bp = 0;
+  diastolic_bp = 0;
+  body_temp = 0.0f;
+  stress_score = 0;
+  hrv_ms = 0;
+  audio_rms = 0.0f;
+  audio_peak = 0.0f;
+  beat_detected_flash = false;
+  beat_flash_start = 0;
+
+  // 3. Apagar absolutamente todos los 8 LEDs RGB WS2812B
   for (int i = 0; i < NUM_LEDS; i++) {
     strip.setPixelColor(i, strip.Color(0, 0, 0));
   }
   strip.show();
 
-  // Asegurar que el LED azul onboard permanezca apagado
+  // 4. Asegurar que el LED azul onboard permanezca apagado
   digitalWrite(ONBOARD_LED_PIN, LOW);
-  beat_detected_flash = false;
-  beat_flash_start = 0;
 
   Serial.println(F("\r\n========================================================================="));
-  Serial.println(F("  >>> [MODO REPOSO - TODO APAGADO] Hardware y sensores en espera.     <<<"));
+  Serial.println(F("  >>> [MODO REPOSO - TODO APAGADO] Hardware y sensores en reposo total.<<<"));
+  Serial.println(F("  >>> Sensor cardiaco MAX30102 apagado (LEDs rojo/IR apagados).        <<<"));
+  Serial.println(F("  >>> Microfono I2S en reposo. Tira de LEDs apagada.                  <<<"));
   Serial.println(F("  >>> Presiona K1 (20s Cardiaco), K2 (20s Pulmonar) o                 <<<"));
   Serial.println(F("  >>> Presiona K1+K2 juntos a la vez para activar Modo Infinito.     <<<"));
   Serial.println(F("=========================================================================\r\n"));
@@ -1405,9 +1429,15 @@ void loop() {
     handle_incoming_commands(ser_cmd);
   }
 
-  // 3. Procesamiento de Senales Biologicas y Acusticas 100% Reales
-  update_audio_rms();
-  update_biometric_signals();
+  // 3. Procesamiento de Senales Biologicas y Acusticas 100% Reales (Solo cuando está activo)
+  if (power_state == STATE_TRANSMITTING_ACTIVE) {
+    update_audio_rms();
+    update_biometric_signals();
+  } else {
+    // En reposo: microfono y sensor cardiaco en silencio absoluto
+    audio_rms = 0.0f;
+    audio_peak = 0.0f;
+  }
 
   // 4. Control de la ventana de transmision activa
   if (power_state == STATE_TRANSMITTING_ACTIVE) {
