@@ -18,7 +18,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onNavigateToAI,
   onNavigateToCharts,
 }) => {
-  const { vitals, aiReport } = useVitals();
+  const { vitals, aiReport, connectedType } = useVitals();
   const { triage } = useClinical();
 
   const isLive = vitals.heartRate > 0;
@@ -65,6 +65,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      {connectedType === 'demo_icbhi' && (
+        <View style={styles.demoBanner}>
+          <Ionicons name="flask-outline" size={16} color="#6B21A8" />
+          <Text style={styles.demoBannerText}>
+            Modo demostración: audio real de ICBHI 2017; el pulso y la SpO2 son datos de ejemplo.
+          </Text>
+        </View>
+      )}
+
       {/* 0. SEMÁFORO DE TRIAJE (SpO2 + pulso + corazón + pulmón) */}
       <TriageCard triage={triage} />
 
@@ -192,6 +201,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: Colors.primary,
+  },
+  demoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FAF5FF',
+    borderColor: '#C4B5FD',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 12,
+  },
+  demoBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6B21A8',
   },
   grid: {
     flexDirection: 'row',

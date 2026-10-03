@@ -270,6 +270,36 @@ class ApiService {
       };
     }
   }
+
+  getDemoAudioUrl(sampleId: string): string {
+    return `${this.baseUrl}/api/demo/audio/${sampleId}.wav`;
+  }
+
+  async getDemoSamples(): Promise<Record<string, any>> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/demo/samples`, {
+        headers: this.defaultHeaders,
+      });
+      if (!response.ok) return {};
+      return await response.json();
+    } catch {
+      return {};
+    }
+  }
+
+  async injectDemoSample(sampleId: string): Promise<any | null> {
+    try {
+      const sid = getSessionId();
+      const response = await fetch(`${this.baseUrl}/api/demo/inject/${encodeURIComponent(sampleId)}?session_id=${encodeURIComponent(sid)}`, {
+        method: 'POST',
+        headers: this.defaultHeaders,
+      });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
+    }
+  }
 }
 
 export const apiService = new ApiService();

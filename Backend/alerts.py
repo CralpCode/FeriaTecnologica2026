@@ -90,6 +90,8 @@ def evaluate_recording(result: dict) -> list[dict]:
         patron = (det.get("patron") or {}).get("compatible_con")
         if patron and patron != "sano":
             parts.append(f"patrón compatible con {patron}")
+        if not parts and (det.get("modelo_base") or {}).get("is_abnormal") == 1:
+            parts.append("sonido patológico según el modelo base")
         _last_alert.pop((sid, "hallazgo_pulmonar"), None)
         a = _fire(sid, "hallazgo_pulmonar", location=loc, finding="; ".join(parts) or "sonido anormal",
                   recording_id=result["recording_id"], details=det)

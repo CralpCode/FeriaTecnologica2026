@@ -49,6 +49,10 @@ web-build/
 node_modules/
 __pycache__/
 *.py[cod]
+.venv
+**/.venv
+venv/
+**/.venv/
 .env
 .env*.local
 .expo/

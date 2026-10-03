@@ -1,5 +1,7 @@
 import os
 import time
+import uuid
+import json
 import asyncio
 from typing import List, Optional, Union, Dict, Any
 from datetime import datetime
@@ -1245,6 +1247,99 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
     except Exception:
         manager.disconnect(websocket)
+
+# ---------------------------------------------------------------------------
+# Banco de pruebas clínico (casos de ICBHI 2017 para demostraciones; autor: chayand-wil)
+# Los signos vitales de cada caso son DATOS DE EJEMPLO: se guardan marcados como demo y solo
+# pulso y SpO2 (el dispositivo no mide presión ni temperatura).
+# ---------------------------------------------------------------------------
+DEMO_AUDIOS_DIR = os.path.join(os.path.dirname(__file__), "demo_audios")
+DEMO_EXAMPLE_VITALS = {
+    "sano": {"bpm": 72, "spo2": 98.5},
+    "sibilancias": {"bpm": 96, "spo2": 93.0},
+    "crepitantes": {"bpm": 88, "spo2": 91.0},
+    "ambos": {"bpm": 106, "spo2": 88.5},
+    "neumonia": {"bpm": 102, "spo2": 89.0},
+}
+
+
+def _demo_samples() -> dict:
+    json_path = os.path.join(DEMO_AUDIOS_DIR, "demoSamples.json")
+    if not os.path.exists(json_path):
+        return {}
+    with open(json_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@app.get("/api/demo/samples")
+def get_demo_samples():
+    """Catálogo de casos de ICBHI 2017 para demostraciones."""
+    return _demo_samples()
+
+
+@app.get("/api/demo/audio/{audio_id}")
+def get_demo_audio_file(audio_id: str):
+    """Audio .wav de un caso de demostración, para escucharlo en la app."""
+    clean_id = os.path.basename(audio_id)
+    if not clean_id.endswith(".wav"):
+        clean_id += ".wav"
+    file_path = os.path.join(DEMO_AUDIOS_DIR, clean_id)
+    if os.path.exists(file_path):
+        return FileResponse(file_path, media_type="audio/wav")
+    raise HTTPException(status_code=404, detail="Audio de demostración no encontrado")
+
+
+@app.post("/api/demo/inject/{sample_id}")
+async def inject_demo_sample(sample_id: str, session_id: Optional[str] = Query(None)):
+    """Carga un caso de demostración en la sesión: vitales de ejemplo + análisis del modelo base de pulmón."""
+    samples = _demo_samples()
+    if sample_id not in samples:
+        raise HTTPException(status_code=404, detail=f"Muestra '{sample_id}' no encontrada")
+    sample = samples[sample_id]
+    sid = _get_effective_session(session_id)
+    v = DEMO_EXAMPLE_VITALS.get(sample_id, {"bpm": 75, "spo2": 98.0})
+
+    saved = database.save_reading({"bpm": v["bpm"], "spo2": v["spo2"], "session_id": sid})
+    saved.update({"device_connected": True, "demo": True})
+    _sessions_cache[sid] = {"vitals": saved, "timestamp": time.time(),
+                            "last_active": datetime.now().isoformat(), "name": f"Demo ICBHI {sample['patient_id']}"}
+    await manager.broadcast({"type": "VITALS_UPDATE", "session_id": sid, "data": saved})
+
+    acoustic = lung_baseline.classify_features(sample.get("features", {}))
+    report = ai_engine.analyze_vitals_report({**saved, "audio_features": sample.get("features", {})})
+
+    # Se registra como una grabación de pulmón para que la vean el semáforo, las alertas y el informe.
+    zone = (sample.get("recording_name", "").split("_") + ["", "", ""])[2].upper()
+    zone = zone if zone in audio_service.LUNG_LOCATIONS else ""
+    rec_id = f"demo_{sample_id}_{uuid.uuid4().hex[:4]}"
+    database.create_recording(rec_id, sid, zone, 0)
+    abnormal = acoustic.get("is_abnormal") == 1
+    details = {"modelo_base": acoustic, "demo": {"caso": sample_id, "paciente_icbhi": sample["patient_id"],
+                                                 "diagnostico_icbhi": sample["diagnosis"],
+                                                 "ciclo": sample["cycle_class_name"]}}
+    database.update_recording(rec_id, mode="pulmon", status="done", finished_at=datetime.now().isoformat(),
+                              result="anormal" if abnormal else "normal",
+                              probability=acoustic.get("probability_abnormal"),
+                              threshold=acoustic.get("umbral"), details=details, model="modelo_base_demo")
+    result = {"recording_id": rec_id, "session_id": sid, "location": zone, "mode": "pulmon", "duration_s": 0,
+              "result": "anormal" if abnormal else "normal", "reason": None,
+              "probability": acoustic.get("probability_abnormal"), "threshold": acoustic.get("umbral"),
+              "details": details, "quality": None}
+    await _after_classification(result)
+
+    return {
+        "status": "injected",
+        "demo": True,
+        "aviso": "Caso de demostración de ICBHI 2017: los signos vitales son datos de ejemplo.",
+        "sample_id": sample_id,
+        "patient_id": sample["patient_id"],
+        "diagnosis": sample["diagnosis"],
+        "cycle_class_name": sample["cycle_class_name"],
+        "vitals": saved,
+        "report": report,
+        "recording": result,
+    }
+
 
 # ---------------------------------------------------------------------------
 # App web servida por esta misma Mac (npx expo export --platform web -> App Movil/dist)

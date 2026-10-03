@@ -63,6 +63,9 @@ def evaluate(session_id: str) -> dict:
             parts.append(" y ".join(ruidos) + " detectados")
         if patron and patron != "sano":
             parts.append(f"patrón compatible con {patron}")
+        base = det.get("modelo_base") or {}
+        if not parts and base.get("is_abnormal") == 1:
+            parts.append(f"sonido patológico según el modelo base ({round(base.get('probability_abnormal', 0) * 100)} %)")
         lung_finding = "; ".join(parts) or "hallazgo pulmonar"
 
     if v:

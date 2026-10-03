@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
-import { VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange, ChatMessage } from '../types/vitals';
+import { VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange, ChatMessage, VitalStatus } from '../types/vitals';
 import { apiService } from '../services/api';
 import { API_CONFIG, setCustomBackendUrl, getCustomBackendUrl, getSessionId, setSessionId, generateNewSessionId } from '../config/api';
 import { deviceBridge } from '../services/DeviceBridgeService';
+import localDemoSamples from '../config/demoSamples.json';
 
-export type ConnectedDeviceType = 'none' | 'wokwi_wifi' | 'direct_ble';
+export type ConnectedDeviceType = 'none' | 'wokwi_wifi' | 'direct_ble' | 'demo_icbhi';
 
 export interface SessionInfo {
   session_id: string;
@@ -43,6 +44,7 @@ interface VitalsContextProps {
   connectViaServer: () => Promise<{ success: boolean; message: string }>;
   connectDirectBluetooth: () => Promise<{ success: boolean; message: string; deviceName?: string }>;
   disconnectAllDevices: () => void;
+  injectClinicalDemo: (sampleId: string) => Promise<boolean>;
 }
 
 const ABSOLUTE_ZERO_VITALS: VitalSigns = {
@@ -289,7 +291,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     if (!isStreaming) return;
 
     const interval = setInterval(async () => {
-      if (connectedTypeRef.current === 'direct_ble') return;
+      if (connectedTypeRef.current === 'direct_ble' || connectedTypeRef.current === 'demo_icbhi') return;
       if (userManualDisconnectRef.current || connectedTypeRef.current === 'none') return;
       if (isFetchingRef.current) return;
       isFetchingRef.current = true;
@@ -383,6 +385,70 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     setVitals(ABSOLUTE_ZERO_VITALS);
     apiService.disconnectSession(currentSessionId).catch(() => {});
   }, [currentSessionId]);
+
+  // 3. Inyección y Simulación Activa del Banco de Pruebas Clínicas ICBHI
+  // Banco de pruebas clínico (casos de ICBHI 2017). Los signos vitales son DATOS DE EJEMPLO
+  // y el resultado acústico SIEMPRE viene del modelo real en el servidor.
+  const injectClinicalDemo = useCallback(async (sampleId: string): Promise<boolean> => {
+    userManualDisconnectRef.current = false;
+    const sampleData = (localDemoSamples as any)[sampleId];
+    if (!sampleData) return false;
+
+    const nowIso = new Date().toISOString();
+    const timeLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const exampleVitals: Record<string, { bpm: number; spo2: number }> = {
+      sano: { bpm: 72, spo2: 98.5 },
+      sibilancias: { bpm: 96, spo2: 93.0 },
+      crepitantes: { bpm: 88, spo2: 91.0 },
+      ambos: { bpm: 106, spo2: 88.5 },
+      mixto: { bpm: 106, spo2: 88.5 },
+      neumonia: { bpm: 102, spo2: 89.0 },
+    };
+    const v = exampleVitals[sampleId] || { bpm: 75, spo2: 98.0 };
+
+    setConnectedType('demo_icbhi');
+    setVitals({ ...ABSOLUTE_ZERO_VITALS, heartRate: v.bpm, bloodOxygen: v.spo2, timestamp: nowIso, device_connected: true, finger: true });
+    setDevice({
+      name: `Demo ICBHI (paciente #${sampleData.patient_id})`,
+      model: 'Datos de ejemplo',
+      connected: true,
+      battery: 0,
+      lastSync: nowIso,
+      firmwareVersion: 'Modo demostración',
+      signalStrength: 'good',
+    });
+
+    let modelText = 'No se pudo analizar: el servidor no está disponible.';
+    try {
+      const res = await apiService.injectDemoSample(sampleId);
+      if (res && res.report) {
+        setAiReport(res.report);
+        setIsBackendOnline(true);
+        const ac = res.report.acoustic_analysis;
+        if (ac) {
+          modelText = `Modelo base: ${ac.prediction} (probabilidad de patológico ${Math.round(ac.probability_abnormal * 100)} %).`;
+        }
+      }
+    } catch {
+      setIsBackendOnline(false);
+    }
+
+    const truth = sampleData.is_abnormal ? 'patológico' : 'normal';
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: `demo-msg-${Date.now()}`,
+        sender: 'ai',
+        text:
+          `[DEMO ICBHI] Caso del paciente #${sampleData.patient_id} (${sampleData.diagnosis}).\n` +
+          `• Etiqueta real del ciclo en ICBHI: ${sampleData.cycle_class_name} (${truth}).\n` +
+          `• ${modelText}\n` +
+          `• Pulso y SpO2 son datos de ejemplo para la demostración.`,
+        timestamp: timeLabel,
+      },
+    ]);
+    return true;
+  }, []);
 
   const loadInitialData = useCallback(async () => {
     try {
@@ -498,6 +564,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         connectViaServer,
         connectDirectBluetooth,
         disconnectAllDevices,
+        injectClinicalDemo,
       }}
     >
       {children}

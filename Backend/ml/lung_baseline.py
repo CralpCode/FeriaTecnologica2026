@@ -18,6 +18,22 @@ MODEL_JOBLIB_PATH = os.path.join(MODEL_DIR, "mejor_clasificador_icbhi.joblib")
 MODEL_JSON_PATH = os.path.join(MODEL_DIR, "modelo_icbhi_exportado.json")
 # Puntaje ICBHI informado por el autor al entrenar (no se recalcula en el servidor)
 REPORTED_ICBHI_SCORE = 61.22
+# Umbral calibrado por el autor para tamizaje (prioriza no dejar pasar casos anormales)
+THRESHOLD = 0.30
+
+
+def _result(p_abn: float, classes: list[str], model_name: str) -> dict:
+    """Resultado con la probabilidad REAL del modelo como confianza (sin escalas artificiales)."""
+    pred = 1 if p_abn >= THRESHOLD else 0
+    return {
+        "prediction": classes[pred] if pred < len(classes) else ("Patologico" if pred else "Normal"),
+        "is_abnormal": pred,
+        "confidence": round((p_abn if pred else 1 - p_abn) * 100.0, 1),
+        "probability_abnormal": round(p_abn, 4),
+        "umbral": THRESHOLD,
+        "model_name": model_name,
+        "score_icbhi": REPORTED_ICBHI_SCORE,
+    }
 
 _model_bundle = None
 _model_json_data = None
@@ -88,16 +104,8 @@ def classify_features(features) -> dict:
             import numpy as np
             pipeline = _model_bundle["pipeline"]
             arr = np.array([x], dtype=np.float32)
-            pred = int(pipeline.predict(arr)[0])
-            probas = pipeline.predict_proba(arr)[0]
-            return {
-                "prediction": classes[pred] if pred < len(classes) else ("Patologico" if pred else "Normal"),
-                "is_abnormal": pred,
-                "confidence": round(float(probas[pred]) * 100.0, 1),
-                "probability_abnormal": round(float(probas[1]), 4),
-                "model_name": _model_bundle.get("best_model_name", "Regresión logística L2"),
-                "score_icbhi": REPORTED_ICBHI_SCORE,
-            }
+            p_abn = float(pipeline.predict_proba(arr)[0][1])
+            return _result(p_abn, classes, _model_bundle.get("best_model_name", "Regresión logística L2"))
         except Exception as e:
             print(f"[MODELO BASE] Error en inferencia joblib ({e}); se usa el JSON")
 
@@ -113,15 +121,7 @@ def classify_features(features) -> dict:
         scale = d["scaler_scale"][i] or 1.0
         z += d["coef"][i] * (xi - d["scaler_mean"][i]) / scale
     p_abn = 1.0 / (1.0 + math.exp(-max(-30, min(30, z))))
-    pred = 1 if p_abn >= 0.5 else 0
-    return {
-        "prediction": classes[pred] if pred < len(classes) else ("Patologico" if pred else "Normal"),
-        "is_abnormal": pred,
-        "confidence": round((p_abn if pred else 1 - p_abn) * 100.0, 1),
-        "probability_abnormal": round(p_abn, 4),
-        "model_name": "Regresión logística L2 (JSON)",
-        "score_icbhi": REPORTED_ICBHI_SCORE,
-    }
+    return _result(p_abn, classes, "Regresión logística L2 (JSON)")
 
 
 def classify_audio(y, sr: int) -> dict:

@@ -19,9 +19,10 @@ import { DEFAULT_LOCAL_LAN } from '../config/api';
 interface DeviceConnectionModalProps {
   visible: boolean;
   onClose: () => void;
+  onOpenClinicalDemo?: () => void;
 }
 
-export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ visible, onClose }) => {
+export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ visible, onClose, onOpenClinicalDemo }) => {
   const {
     connectedType,
     device,
@@ -126,6 +127,8 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
                 >
                   {connectedType === 'direct_ble'
                     ? 'ENLACE DIRECTO BLUETOOTH BLE ACTIVO'
+                    : connectedType === 'demo_icbhi'
+                    ? 'BANCO DE PRUEBAS CLÍNICAS (ICBHI 2017)'
                     : connectedType !== 'none'
                     ? 'ENLAZADO A SPIROSCAN'
                     : 'DISPOSITIVO EN ESPERA (CERO ABSOLUTO)'}
@@ -136,7 +139,9 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
                     { color: connectedType !== 'none' ? '#166534' : '#7F1D1D' },
                   ]}
                 >
-                  {connectedType !== 'none'
+                  {connectedType === 'demo_icbhi'
+                    ? 'Modo demostración: audio real de ICBHI 2017 con pulso y SpO2 de ejemplo.'
+                    : connectedType !== 'none'
                     ? 'Recibiendo telemetría física en tiempo real del sensor MAX30102.'
                     : 'Sincroniza directamente con tu pulsera SpiroScan por Bluetooth.'}
                 </Text>
@@ -420,6 +425,33 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
+                </View>
+              )}
+
+              {/* Sección Discreta de Demostración y Validación Clínica */}
+              {onOpenClinicalDemo && (
+                <View style={styles.demoSection}>
+                  <Text style={styles.sectionHeading}>BANCO DE PRUEBAS CLÍNICAS (ICBHI 2017)</Text>
+                  <View style={styles.demoCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                      <MaterialCommunityIcons name="flask-outline" size={18} color={Colors.aiPurple} style={{ marginRight: 6 }} />
+                      <Text style={styles.demoCardTitle}>Demostración con casos de ICBHI</Text>
+                    </View>
+                    <Text style={styles.demoCardDesc}>
+                      Prueba grabaciones de la base pública ICBHI 2017 (sano, sibilancias, crepitantes, neumonía) y compara lo que dice el modelo con la etiqueta real.
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.openDemoBtn}
+                      onPress={() => {
+                        onClose();
+                        onOpenClinicalDemo();
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <MaterialCommunityIcons name="stethoscope" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.openDemoBtnText}>Abrir Banco de Auscultación</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               )}
             </View>
@@ -819,5 +851,42 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     backgroundColor: '#16A34A',
+  },
+  demoSection: {
+    marginTop: 18,
+    marginBottom: 6,
+  },
+  demoCard: {
+    backgroundColor: '#FAF5FF',
+    borderColor: '#E9D5FF',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+  },
+  demoCardTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6B21A8',
+  },
+  demoCardDesc: {
+    fontSize: 11,
+    color: '#64748B',
+    lineHeight: 16,
+    marginBottom: 10,
+  },
+  openDemoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.aiPurple,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  openDemoBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });
