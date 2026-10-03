@@ -239,7 +239,7 @@ void update_biometrics() {
   systolic_bp = constrain(base_sys + dynamic_sys_offset, 95, 180);
   diastolic_bp = constrain(base_dia + dynamic_dia_offset, 60, 115);
 
-  stress_score = constrain((int)((beat_avg - 50) * 1.3f + (audio_rms * 0.45f)), 10, 95);
+  stress_score = constrain((int)((beat_avg - 50) * 1.35f), 10, 95);
 
   static unsigned long last_sim_beat = 0;
   int beat_interval = 60000 / max(40, beat_avg);

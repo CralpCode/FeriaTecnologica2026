@@ -16,17 +16,30 @@ import { useVitals } from '../context/VitalsContext';
 import { apiService } from '../services/api';
 import { PulmonaryReport } from '../types/vitals';
 
+interface PulmonarySessionResult {
+  completedAt: string;
+  avgRms: number;
+  maxPeak: number;
+  samplesCount: number;
+  avgSpo2: number;
+  avgBpm: number;
+}
+
 export const PulmonaryAIScreen: React.FC = () => {
-  const { vitals, isBackendOnline } = useVitals();
+  const { vitals, isBackendOnline, wakeDevice } = useVitals();
 
   const [report, setReport] = useState<PulmonaryReport | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [lastAnalyzedTime, setLastAnalyzedTime] = useState<string>('Recién iniciado');
 
-  // Protocolo Guiado de Auscultación (10 segundos)
+  // Protocolo Guiado de Auscultación (20 segundos)
   const [isProtocolRunning, setIsProtocolRunning] = useState(false);
-  const [protocolSecondsLeft, setProtocolSecondsLeft] = useState(10);
+  const [protocolSecondsLeft, setProtocolSecondsLeft] = useState(20);
   const [protocolStage, setProtocolStage] = useState<'idle' | 'inhale' | 'hold' | 'exhale' | 'classify'>('idle');
+  const [sessionResult, setSessionResult] = useState<PulmonarySessionResult | null>(null);
+
+  // Muestras acústicas acumuladas durante el escaneo
+  const pulmonarySamplesRef = useRef<Array<{ rms: number; peak: number; spo2: number; bpm: number }>>([]);
 
   // Animaciones para pulsación de onda y pulmones
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -41,6 +54,18 @@ export const PulmonaryAIScreen: React.FC = () => {
   useEffect(() => {
     vitalsRef.current = vitals;
   }, [vitals]);
+
+  // Colección de muestras durante el protocolo activo
+  useEffect(() => {
+    if (isProtocolRunning) {
+      pulmonarySamplesRef.current.push({
+        rms: vitals.audio_rms || 0,
+        peak: vitals.audio_peak || 0,
+        spo2: vitals.bloodOxygen || 0,
+        bpm: vitals.heartRate || 0,
+      });
+    }
+  }, [vitals, isProtocolRunning]);
 
   // Cargar análisis médico de forma controlada y sin parpadeos
   const runAnalysis = useCallback(async () => {
@@ -57,16 +82,10 @@ export const PulmonaryAIScreen: React.FC = () => {
     }
   }, []);
 
+  // Evaluación inicial al montar (sin polling infinito que consuma recursos o altere la pantalla)
   useEffect(() => {
     runAnalysis();
-    // Re-evaluar automáticamente cada 10 segundos para no alterar la pantalla constantemente
-    const autoInterval = setInterval(() => {
-      if (!isProtocolRunning) {
-        runAnalysis();
-      }
-    }, 10000);
-    return () => clearInterval(autoInterval);
-  }, [runAnalysis, isProtocolRunning]);
+  }, [runAnalysis]);
 
   // Animación del medidor de pulso/onda
   useEffect(() => {
@@ -88,45 +107,57 @@ export const PulmonaryAIScreen: React.FC = () => {
     ).start();
   }, [pulseAnim]);
 
-  // Manejador del Protocolo de Auscultación de 10 Segundos
-  const startAuscultationProtocol = () => {
+  // Manejador del Protocolo de Auscultación Guiada de 20 Segundos
+  const startAuscultationProtocol = async () => {
     if (isProtocolRunning) return;
+
+    // 1. Despertar hardware ESP32 por BLE
+    try {
+      await wakeDevice();
+    } catch {}
+
+    pulmonarySamplesRef.current = [];
     setIsProtocolRunning(true);
-    setProtocolSecondsLeft(10);
+    setProtocolSecondsLeft(20);
     setProtocolStage('inhale');
 
-    // Animación de pulmones inflando
+    // Animación de pulmones inflando (etapa inspiración profunda: 6s)
     Animated.timing(lungScale, {
-      toValue: 1.25,
-      duration: 3000,
+      toValue: 1.3,
+      duration: 6000,
       easing: Easing.inOut(Easing.quad),
       useNativeDriver: true,
     }).start();
 
-    let counter = 10;
+    let counter = 20;
     if (timerRef.current) clearInterval(timerRef.current);
 
     timerRef.current = setInterval(() => {
       counter -= 1;
       setProtocolSecondsLeft(counter);
 
-      if (counter > 7) {
+      if (counter > 14) {
+        // Etapa 1: 20s a 14s (6s) -> Inspiración
         setProtocolStage('inhale');
-      } else if (counter > 5) {
+      } else if (counter > 9) {
+        // Etapa 2: 14s a 9s (5s) -> Apnea / Sostener
         setProtocolStage('hold');
-      } else if (counter > 2) {
+      } else if (counter > 3) {
+        // Etapa 3: 9s a 3s (6s) -> Espiración
+        if (counter === 9) {
+          Animated.timing(lungScale, {
+            toValue: 0.92,
+            duration: 6000,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }).start();
+        }
         setProtocolStage('exhale');
-        // Pulmones desinflando
-        Animated.timing(lungScale, {
-          toValue: 0.95,
-          duration: 3000,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        }).start();
       } else if (counter > 0) {
+        // Etapa 4: 3s a 0s (3s) -> Clasificación
         setProtocolStage('classify');
       } else {
-        // Finalizado
+        // Finalizado a los 20 segundos
         if (timerRef.current) clearInterval(timerRef.current);
         setIsProtocolRunning(false);
         setProtocolStage('idle');
@@ -135,7 +166,59 @@ export const PulmonaryAIScreen: React.FC = () => {
           duration: 400,
           useNativeDriver: true,
         }).start();
-        runAnalysis();
+
+        // Procesar estadísticas y promedios de la sesión
+        const samples = pulmonarySamplesRef.current;
+        let avgRms = vitalsRef.current.audio_rms || 0;
+        let maxPeak = vitalsRef.current.audio_peak || 0;
+        let avgSpo2 = vitalsRef.current.bloodOxygen || 0;
+        let avgBpm = vitalsRef.current.heartRate || 0;
+
+        if (samples.length > 0) {
+          avgRms = Number((samples.reduce((a, b) => a + b.rms, 0) / samples.length).toFixed(1));
+          maxPeak = Math.max(...samples.map((s) => s.peak));
+          const validSpo2 = samples.filter((s) => s.spo2 > 0);
+          if (validSpo2.length > 0) {
+            avgSpo2 = Number((validSpo2.reduce((a, b) => a + b.spo2, 0) / validSpo2.length).toFixed(1));
+          }
+          const validBpm = samples.filter((s) => s.bpm > 0);
+          if (validBpm.length > 0) {
+            avgBpm = Math.round(validBpm.reduce((a, b) => a + b.bpm, 0) / validBpm.length);
+          }
+        }
+
+        const now = new Date();
+        const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+
+        setSessionResult({
+          completedAt: timeStr,
+          avgRms,
+          maxPeak,
+          samplesCount: samples.length,
+          avgSpo2,
+          avgBpm,
+        });
+
+        // Correlación multivariada IA con los promedios reales de la auscultación
+        setIsAnalyzing(true);
+        apiService
+          .getPulmonaryAnalysis({
+            ...vitalsRef.current,
+            audio_rms: avgRms,
+            audio_peak: maxPeak,
+            bloodOxygen: avgSpo2,
+            heartRate: avgBpm,
+          })
+          .then((res) => {
+            setReport(res);
+            setLastAnalyzedTime(timeStr);
+          })
+          .catch((err) => {
+            console.warn('Error al analizar fonometría pulmonar:', err);
+          })
+          .finally(() => {
+            setIsAnalyzing(false);
+          });
       }
     }, 1000);
   };
@@ -366,22 +449,26 @@ export const PulmonaryAIScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* 3. PROTOCOLO DE AUSCULTACIÓN GUIADA DE 10 SEGUNDOS */}
+      {/* 3. PROTOCOLO DE AUSCULTACIÓN GUIADA DE 20 SEGUNDOS */}
       <View style={[styles.card, styles.protocolCard]}>
         <View style={styles.cardHeaderRow}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <MaterialCommunityIcons name="timer-sand" size={20} color="#0D9488" />
-            <Text style={styles.cardTitle}>Protocolo Clínico de Auscultación</Text>
+            <Text style={styles.cardTitle}>Protocolo Clínico de Auscultación (20s)</Text>
           </View>
-          {isProtocolRunning && (
+          {isProtocolRunning ? (
             <View style={styles.timerBadge}>
               <Text style={styles.timerBadgeText}>{protocolSecondsLeft}s restantes</Text>
             </View>
-          )}
+          ) : sessionResult ? (
+            <View style={[styles.timerBadge, { backgroundColor: '#10B981' }]}>
+              <Text style={styles.timerBadgeText}>Completado</Text>
+            </View>
+          ) : null}
         </View>
 
         <Text style={styles.protocolDesc}>
-          Prueba estandarizada de 10 segundos para aislar ruidos adventicios (sibilancias, crepitantes o estertores).
+          Prueba estandarizada de 20 segundos para aislar y clasificar ruidos adventicios (sibilancias, crepitantes o estridor) mediante IA.
         </Text>
 
         {/* Escenario Activo Durante la Prueba */}
@@ -406,29 +493,65 @@ export const PulmonaryAIScreen: React.FC = () => {
             <View style={styles.stageInstructions}>
               {protocolStage === 'inhale' && (
                 <>
-                  <Text style={[styles.stageTitle, { color: '#0284C7' }]}>1. INSPIRACIÓN PROFUNDA</Text>
+                  <Text style={[styles.stageTitle, { color: '#0284C7' }]}>1. INSPIRACIÓN PROFUNDA (6s)</Text>
                   <Text style={styles.stageSubtitle}>Inhale aire lenta y profundamente llenando sus pulmones.</Text>
                 </>
               )}
               {protocolStage === 'hold' && (
                 <>
-                  <Text style={[styles.stageTitle, { color: '#F59E0B' }]}>2. MANTENGA EL AIRE</Text>
-                  <Text style={styles.stageSubtitle}>Sostenga la respiración brevemente sin toser.</Text>
+                  <Text style={[styles.stageTitle, { color: '#F59E0B' }]}>2. MANTENGA EL AIRE (5s)</Text>
+                  <Text style={styles.stageSubtitle}>Sostenga la respiración en reposo para calibrar el piso de ruido acústico.</Text>
                 </>
               )}
               {protocolStage === 'exhale' && (
                 <>
-                  <Text style={[styles.stageTitle, { color: '#10B981' }]}>3. ESPIRACIÓN CONTROLADA</Text>
-                  <Text style={styles.stageSubtitle}>Exhale suave y prolongadamente cerca del micrófono.</Text>
+                  <Text style={[styles.stageTitle, { color: '#10B981' }]}>3. ESPIRACIÓN CONTROLADA (6s)</Text>
+                  <Text style={styles.stageSubtitle}>Exhale suave y prolongadamente cerca del micrófono INMP441.</Text>
                 </>
               )}
               {protocolStage === 'classify' && (
                 <>
-                  <Text style={[styles.stageTitle, { color: '#0D9488' }]}>4. PROCESANDO CON IA</Text>
+                  <Text style={[styles.stageTitle, { color: '#0D9488' }]}>4. PROCESANDO CON IA (3s)</Text>
                   <Text style={styles.stageSubtitle}>Correlacionando espectro de audio, SpO2 y frecuencia cardíaca...</Text>
                 </>
               )}
             </View>
+          </View>
+        ) : sessionResult ? (
+          <View style={styles.sessionResultBox}>
+            <View style={styles.sessionResultHeader}>
+              <View style={styles.sessionCheckCircle}>
+                <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sessionResultTitle}>Sesión de Auscultación Concluida (20s)</Text>
+                <Text style={styles.sessionResultSubtitle}>Finalizada a las {sessionResult.completedAt} ({sessionResult.samplesCount} muestras acústicas)</Text>
+              </View>
+            </View>
+
+            <View style={styles.sessionMetricsRow}>
+              <View style={styles.sessionMetricItem}>
+                <Text style={styles.sessionMetricLabel}>Intensidad Media</Text>
+                <Text style={styles.sessionMetricVal}>{sessionResult.avgRms.toFixed(1)} dB</Text>
+              </View>
+              <View style={styles.sessionMetricItem}>
+                <Text style={styles.sessionMetricLabel}>Amplitud Pico</Text>
+                <Text style={styles.sessionMetricVal}>{sessionResult.maxPeak.toLocaleString()}</Text>
+              </View>
+              <View style={styles.sessionMetricItem}>
+                <Text style={styles.sessionMetricLabel}>SpO2 Medio</Text>
+                <Text style={styles.sessionMetricVal}>{sessionResult.avgSpo2 > 0 ? `${sessionResult.avgSpo2}%` : '--'}</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.startProtocolBtn}
+              activeOpacity={0.8}
+              onPress={startAuscultationProtocol}
+            >
+              <Ionicons name="refresh" size={18} color="#FFFFFF" />
+              <Text style={styles.startProtocolBtnText}>Repetir Auscultación (20s)</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <TouchableOpacity
@@ -437,7 +560,7 @@ export const PulmonaryAIScreen: React.FC = () => {
             onPress={startAuscultationProtocol}
           >
             <MaterialCommunityIcons name="play-circle-outline" size={22} color="#FFFFFF" />
-            <Text style={styles.startProtocolBtnText}>Iniciar Test Guiado (10s)</Text>
+            <Text style={styles.startProtocolBtnText}>Iniciar Auscultación Pulmonar (20s)</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -1030,6 +1153,65 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '800',
+  },
+  sessionResultBox: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#99F6E4',
+  },
+  sessionResultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0FDFA',
+  },
+  sessionCheckCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sessionResultTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+  },
+  sessionResultSubtitle: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  sessionMetricsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+  },
+  sessionMetricItem: {
+    flex: 1,
+    backgroundColor: '#F0FDFA',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#CCFBF1',
+  },
+  sessionMetricLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#0D9488',
+    textTransform: 'uppercase',
+  },
+  sessionMetricVal: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: Colors.textPrimary,
+    marginTop: 4,
   },
   refreshPill: {
     flexDirection: 'row',

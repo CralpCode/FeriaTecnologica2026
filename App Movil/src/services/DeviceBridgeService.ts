@@ -10,6 +10,7 @@ type StatusListener = (connected: boolean, deviceName: string | null) => void;
 
 class DeviceBridgeService {
   private bluetoothDevice: any = null;
+  private customChar: any = null;
   private isConnected: boolean = false;
   private deviceName: string | null = null;
   private vitalsListeners: Set<VitalsListener> = new Set();
@@ -223,6 +224,7 @@ class DeviceBridgeService {
     try {
       const customService = await server.getPrimaryService('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
       const customChar = await customService.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8');
+      this.customChar = customChar;
       await customChar.startNotifications();
 
       const textDecoder = new TextDecoder('utf-8');
@@ -323,6 +325,7 @@ class DeviceBridgeService {
       }
       this.bluetoothDevice = null;
     }
+    this.customChar = null;
 
     if (this.ws) {
       try {
@@ -332,6 +335,55 @@ class DeviceBridgeService {
     }
 
     this.notifyStatusListeners(false, null);
+  }
+
+  /**
+   * Enviar comando de control al ESP32 (p. ej. "WAKE")
+   */
+  public async sendCommand(cmd: string): Promise<boolean> {
+    // 1. Android Nativo (APK)
+    if (Platform.OS !== 'web') {
+      return await nativeBle.sendCommand(cmd);
+    }
+
+    // 2. Web Bluetooth
+    if (this.customChar) {
+      try {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(cmd);
+        if (typeof this.customChar.writeValueWithoutResponse === 'function') {
+          await this.customChar.writeValueWithoutResponse(data);
+        } else {
+          await this.customChar.writeValue(data);
+        }
+        console.log('[DeviceBridge Web] Comando BLE enviado:', cmd);
+        return true;
+      } catch (err) {
+        console.warn('[DeviceBridge Web] Error enviando comando BLE:', err);
+        return false;
+      }
+    }
+
+    // 3. Fallback WebSocket PC
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.ws.send(JSON.stringify({ command: cmd }));
+        console.log('[DeviceBridge WS] Comando enviado por WebSocket PC:', cmd);
+        return true;
+      } catch (err) {
+        console.warn('[DeviceBridge WS] Error enviando comando por WS:', err);
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Reactiva el hardware ESP32 despierto durante su ventana activa
+   */
+  public async wakeDevice(): Promise<boolean> {
+    console.log('[DeviceBridge] Despertando hardware ESP32 (comando WAKE)...');
+    return await this.sendCommand('WAKE');
   }
 
   public handleIncomingRawData(raw: RawDevicePacket) {

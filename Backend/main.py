@@ -79,6 +79,12 @@ class AnalyzeInput(BaseModel):
     vitals: dict
     session_id: Optional[str] = None
 
+class PulmonaryAnalyzeInput(BaseModel):
+    vitals: Optional[dict] = None
+    audio_rms: Optional[float] = None
+    audio_peak: Optional[float] = None
+    session_id: Optional[str] = None
+
 class ChatInput(BaseModel):
     message: str
     vitals: Optional[dict] = None
@@ -946,6 +952,21 @@ def export_report(time_range: str = Query("24h", alias="range")):
 @app.post("/api/ai/vitals/analyze")
 def analyze_vitals(payload: AnalyzeInput):
     return ai_engine.analyze_vitals_report(payload.vitals)
+
+@app.post("/api/ai/pulmonary/analyze")
+def analyze_pulmonary(payload: PulmonaryAnalyzeInput):
+    sid = _get_effective_session(payload.session_id)
+    vitals = dict(payload.vitals or {})
+    if payload.audio_rms is not None:
+        vitals["audio_rms"] = payload.audio_rms
+    if payload.audio_peak is not None:
+        vitals["audio_peak"] = payload.audio_peak
+    if not vitals or vitals.get("heartRate", 0) == 0:
+        latest = database.get_latest_reading(session_id=sid)
+        for k, v in latest.items():
+            if k not in vitals or vitals[k] == 0:
+                vitals[k] = v
+    return ai_engine.analyze_pulmonary_acoustic(vitals)
 
 @app.post("/api/ai/chat")
 def chat_ai(payload: ChatInput):

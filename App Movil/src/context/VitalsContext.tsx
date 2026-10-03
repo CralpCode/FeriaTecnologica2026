@@ -42,6 +42,7 @@ interface VitalsContextProps {
   connectToWokwiEmulator: () => void;
   connectDirectBluetooth: () => Promise<{ success: boolean; message: string; deviceName?: string }>;
   disconnectAllDevices: () => void;
+  wakeDevice: () => Promise<boolean>;
 }
 
 const ABSOLUTE_ZERO_VITALS: VitalSigns = {
@@ -376,6 +377,10 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     apiService.disconnectSession(currentSessionId).catch(() => {});
   }, [currentSessionId]);
 
+  const wakeDevice = useCallback(async (): Promise<boolean> => {
+    return await deviceBridge.wakeDevice();
+  }, []);
+
   const loadInitialData = useCallback(async () => {
     try {
       const hist = await apiService.getVitalsHistory(selectedRange);
@@ -490,6 +495,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         connectToWokwiEmulator,
         connectDirectBluetooth,
         disconnectAllDevices,
+        wakeDevice,
       }}
     >
       {children}

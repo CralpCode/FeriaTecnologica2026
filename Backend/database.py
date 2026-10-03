@@ -46,9 +46,9 @@ def save_reading(data: dict):
     
     systolic = int(data.get("systolic", int(115 + (bpm - 70) * 0.45) if bpm > 0 else 0))
     diastolic = int(data.get("diastolic", int(75 + (bpm - 70) * 0.25) if bpm > 0 else 0))
-    stress = int(min(100, max(10, (bpm - 55) * 1.3 + (audio_rms * 0.4)))) if bpm > 0 else 0
-    hrv = int(max(20, 65 - (bpm - 70) * 0.5)) if bpm > 0 else 0
-    temp = round(36.5 + (bpm - 70) * 0.008, 1) if bpm > 0 else 0.0
+    stress = int(data.get("stress", data.get("stress_score", int(min(100, max(10, (bpm - 55) * 1.35))) if bpm > 0 else 0)))
+    hrv = int(data.get("hrv", int(max(20, 65 - (bpm - 70) * 0.5)) if bpm > 0 else 0))
+    temp = round(float(data.get("temperature", 36.5 + (bpm - 70) * 0.008 if bpm > 0 else 0.0)), 1)
 
     with conn:
         conn.execute("""

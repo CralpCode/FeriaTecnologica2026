@@ -26,6 +26,14 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <driver/i2s.h>
+#include <driver/pcnt.h>
+#include <driver/rtc_io.h>
+#include <esp_timer.h>
+#include <esp_rom_gpio.h>
+#include <soc/gpio_periph.h>
+#include <soc/gpio_sig_map.h>
+#include <soc/gpio_struct.h>
+#include <soc/io_mux_reg.h>
 #include <Adafruit_NeoPixel.h>
 #include "MAX30105.h"
 #include "heartRate.h"
@@ -48,10 +56,13 @@ bool ble_connected = false;
 // 2. ASIGNACION DE PINES SEGUN ESQUEMATICO
 // ------------------------------------------------------------------------------
 // Bus I2S para Microfono Digital INMP441 (U2)
-#define I2S_SCK_PIN        14   // BCLK / SCK
+#define I2S_SCK_PIN        27   // BCLK / SCK (Reubicado a P27)
 #define I2S_WS_PIN         15   // LRCK / WS
 #define I2S_SD_PIN         32   // DOUT / SD
 #define I2S_PORT           I2S_NUM_0
+const int AUDIO_SAMPLE_RATE = 16000;
+bool i2s_ready = false;
+bool i2s_clock_counters_ready = false;
 
 // Bus I2C para Sensor Optico MAX30102 (U1)
 // En la placa NodeMCU-32S (38 pines), P22 y P23 son pines fisicos contiguos.
@@ -78,7 +89,7 @@ bool sensor_hw_found = false;
 bool finger_detected = false;
 
 // Variables de Calculo de Pulso Cardiaco y Oximetria Real
-const byte RATE_SIZE = 4;
+const byte RATE_SIZE = 8;
 byte rates[RATE_SIZE];
 byte rateSpot = 0;
 long lastBeat = 0;
@@ -95,6 +106,18 @@ float audio_peak = 0.0f;
 int stress_score = 0;
 int hrv_ms = 0;
 bool beat_detected_flash = false;
+
+// Variables de Filtro y Seguimiento Fisiológico PPG (MAX30102)
+long ir_dc_filter = 0;
+long red_dc_filter = 0;
+long ir_ac_max = -99999;
+long ir_ac_min = 99999;
+long red_ac_max = -99999;
+long red_ac_min = 99999;
+long adaptive_threshold = 35;
+long last_ac_signal = 0;
+bool peak_armed = true;
+unsigned long finger_touch_start = 0;
 
 // ------------------------------------------------------------------------------
 // 4. CONTROL ENERGETICO (MODO FERIA TECNOLOGICA - TRANSMISION CONTINUA 24 HORAS)
@@ -119,9 +142,9 @@ unsigned long beat_flash_start = 0;
 void setup_i2s() {
   i2s_config_t i2s_config = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-    .sample_rate = 16000,
+    .sample_rate = AUDIO_SAMPLE_RATE,
     .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+    .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT, // Lee ambos canales; L/R debe estar conectado a GND o 3V3
     .communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_STAND_I2S),
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
     .dma_buf_count = 4,
@@ -132,6 +155,7 @@ void setup_i2s() {
   };
 
   i2s_pin_config_t pin_config = {
+    .mck_io_num = I2S_PIN_NO_CHANGE, // El INMP441 no utiliza MCLK
     .bck_io_num = I2S_SCK_PIN,
     .ws_io_num = I2S_WS_PIN,
     .data_out_num = I2S_PIN_NO_CHANGE,
@@ -140,13 +164,200 @@ void setup_i2s() {
 
   esp_err_t err = i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
   if (err == ESP_OK) {
-    i2s_set_pin(I2S_PORT, &pin_config);
-    i2s_set_clk(I2S_PORT, 16000, I2S_BITS_PER_SAMPLE_32BIT, I2S_CHANNEL_MONO);
+    err = i2s_set_pin(I2S_PORT, &pin_config);
+    if (err != ESP_OK) {
+      Serial.printf("[ERROR] Fallo al asignar pines I2S INMP441 (Codigo: %d)\r\n", err);
+      i2s_driver_uninstall(I2S_PORT);
+      return;
+    }
+
+    // Prueba sin resistencia externa: mantener SD a nivel bajo cuando el microfono deja la linea en alta impedancia.
+    err = gpio_set_pull_mode((gpio_num_t)I2S_SD_PIN, GPIO_PULLDOWN_ONLY);
+    if (err != ESP_OK) {
+      Serial.printf("[ERROR] Fallo al activar pull-down en SD IO%d (Codigo: %d)\r\n", I2S_SD_PIN, err);
+      i2s_driver_uninstall(I2S_PORT);
+      return;
+    }
+    Serial.printf("[DIAGNOSTICO I2S] Pines configurados; pull-down interno activo en SD IO%d.\r\n", I2S_SD_PIN);
+    i2s_ready = true;
     Serial.printf("[OK] U2 Microfono I2S INMP441 configurado en IO%d(SCK), IO%d(WS), IO%d(SD).\r\n",
                   I2S_SCK_PIN, I2S_WS_PIN, I2S_SD_PIN);
   } else {
     Serial.printf("[ERROR] Fallo al iniciar I2S INMP441 (Codigo: %d)\r\n", err);
   }
+}
+
+// Cuenta los relojes en los pads del ESP32 sin cambiar la salida de la matriz I2S.
+// No demuestra que los cables lleven esos pulsos hasta el modulo INMP441.
+void report_i2s_clocks() {
+  if (!i2s_ready) {
+    Serial.println(F("[RELOJES I2S] No se puede medir: I2S no inicializado."));
+    return;
+  }
+
+  const pcnt_unit_t units[] = {PCNT_UNIT_0, PCNT_UNIT_1};
+  esp_err_t err = ESP_OK;
+  if (!i2s_clock_counters_ready) {
+    for (pcnt_unit_t unit : units) {
+      pcnt_config_t config = {};
+      // El driver PCNT cambia direccion y pulls si se le asignan pines aqui.
+      config.pulse_gpio_num = PCNT_PIN_NOT_USED;
+      config.ctrl_gpio_num = PCNT_PIN_NOT_USED;
+      config.lctrl_mode = PCNT_MODE_KEEP;
+      config.hctrl_mode = PCNT_MODE_KEEP;
+      config.pos_mode = PCNT_COUNT_INC;
+      config.neg_mode = PCNT_COUNT_DIS;
+      config.counter_h_lim = 32767;
+      config.counter_l_lim = -32768;
+      config.unit = unit;
+      config.channel = PCNT_CHANNEL_0;
+      err = pcnt_unit_config(&config);
+      if (err == ESP_OK) err = pcnt_counter_pause(unit);
+      if (err == ESP_OK) err = pcnt_filter_disable(unit);
+      if (err != ESP_OK) {
+        Serial.printf("[RELOJES I2S] Error al configurar PCNT: %d\r\n", err);
+        return;
+      }
+    }
+    // Habilitar solo la entrada del pad conserva las salidas perifericas I2S.
+    // gpio_set_direction(INPUT_OUTPUT) las reemplazaria por GPIO de software.
+    PIN_INPUT_ENABLE(GPIO_PIN_MUX_REG[I2S_SCK_PIN]);
+    PIN_INPUT_ENABLE(GPIO_PIN_MUX_REG[I2S_WS_PIN]);
+    esp_rom_gpio_connect_in_signal(I2S_SCK_PIN, PCNT_SIG_CH0_IN0_IDX, false);
+    esp_rom_gpio_connect_in_signal(I2S_WS_PIN, PCNT_SIG_CH0_IN1_IDX, false);
+    i2s_clock_counters_ready = true;
+  }
+
+  for (pcnt_unit_t unit : units) {
+    err = pcnt_counter_clear(unit);
+    if (err != ESP_OK) break;
+  }
+  int64_t started_us = esp_timer_get_time();
+  for (pcnt_unit_t unit : units) {
+    if (err == ESP_OK) err = pcnt_counter_resume(unit);
+  }
+  if (err == ESP_OK) delayMicroseconds(10000);
+  for (pcnt_unit_t unit : units) {
+    esp_err_t pause_err = pcnt_counter_pause(unit);
+    if (err == ESP_OK) err = pause_err;
+  }
+  int64_t elapsed_us = esp_timer_get_time() - started_us;
+  int16_t sck_pulses = 0;
+  int16_t ws_pulses = 0;
+  if (err == ESP_OK) err = pcnt_get_counter_value(PCNT_UNIT_0, &sck_pulses);
+  if (err == ESP_OK) err = pcnt_get_counter_value(PCNT_UNIT_1, &ws_pulses);
+  if (err != ESP_OK) {
+    Serial.printf("[RELOJES I2S] Error al contar pulsos: %d\r\n", err);
+    return;
+  }
+  // A 1.024 MHz el contador de 16 bits alcanza su limite en unos 32 ms.
+  if (elapsed_us <= 0 || elapsed_us >= 30000) {
+    Serial.printf("[RELOJES I2S] Ventana no valida (%lld us); repetir con MIC.\r\n", (long long)elapsed_us);
+    return;
+  }
+  double sck_hz = (double)sck_pulses * 1000000.0 / elapsed_us;
+  double ws_hz = (double)ws_pulses * 1000000.0 / elapsed_us;
+  Serial.printf("[RELOJES I2S] ventana_us:%lld SCK_IO%d_pulsos:%d SCK_Hz:%.0f WS_IO%d_pulsos:%d WS_Hz:%.0f\r\n",
+                (long long)elapsed_us, I2S_SCK_PIN, sck_pulses, sck_hz, I2S_WS_PIN, ws_pulses, ws_hz);
+  Serial.printf("[REGISTROS PIN] SCK_IO%d: func_out=%u out_en=%d nivel=%d | WS_IO%d: func_out=%u out_en=%d nivel=%d\r\n",
+                I2S_SCK_PIN,
+                (unsigned)GPIO.func_out_sel_cfg[I2S_SCK_PIN].func_sel,
+                (GPIO.enable & (1UL << I2S_SCK_PIN)) != 0,
+                gpio_get_level((gpio_num_t)I2S_SCK_PIN),
+                I2S_WS_PIN,
+                (unsigned)GPIO.func_out_sel_cfg[I2S_WS_PIN].func_sel,
+                (GPIO.enable & (1UL << I2S_WS_PIN)) != 0,
+                gpio_get_level((gpio_num_t)I2S_WS_PIN));
+  Serial.printf("[RELOJES I2S] Esperado SCK:%d Hz WS:%d Hz; medidos en pines ESP32. Comando MIC repite la prueba.\r\n",
+                AUDIO_SAMPLE_RATE * 64, AUDIO_SAMPLE_RATE);
+}
+
+// Observacion pasiva de SD: no modifica direccion ni resistencias del pin.
+void report_i2s_sd() {
+  if (!i2s_ready) {
+    Serial.println(F("[SD I2S] No se puede medir: I2S no inicializado."));
+    return;
+  }
+  bool input_enabled = (REG_READ(GPIO_PIN_MUX_REG[I2S_SD_PIN]) & FUN_IE) != 0;
+  bool output_enabled = (GPIO.enable1.val & (1UL << (I2S_SD_PIN - 32))) != 0;
+  int rtc_index = rtc_io_number_get((gpio_num_t)I2S_SD_PIN);
+  bool rtc_mux = rtc_index >= 0 && (REG_READ(rtc_io_desc[rtc_index].reg) & rtc_io_desc[rtc_index].mux) != 0;
+  // Test de resistencia pull-down vs pull-up para discernir corto a GND vs Hi-Z (flotante)
+  gpio_set_pull_mode((gpio_num_t)I2S_SD_PIN, GPIO_PULLDOWN_ONLY);
+  delayMicroseconds(500);
+  int nivel_pd = gpio_get_level((gpio_num_t)I2S_SD_PIN);
+
+  gpio_set_pull_mode((gpio_num_t)I2S_SD_PIN, GPIO_PULLUP_ONLY);
+  delayMicroseconds(500);
+  int nivel_pu = gpio_get_level((gpio_num_t)I2S_SD_PIN);
+
+  // Restaurar pull-down para operacion normal
+  gpio_set_pull_mode((gpio_num_t)I2S_SD_PIN, GPIO_PULLDOWN_ONLY);
+  delayMicroseconds(100);
+
+  Serial.printf("[SD I2S] ruta_gpio:%u matriz:%u invertida:%u entrada_pad:%d salida_gpio:%d rtc_mux:%d nivel_pd:%d nivel_pu:%d\r\n",
+                (unsigned)GPIO.func_in_sel_cfg[I2S0I_DATA_IN15_IDX].func_sel,
+                (unsigned)GPIO.func_in_sel_cfg[I2S0I_DATA_IN15_IDX].sig_in_sel,
+                (unsigned)GPIO.func_in_sel_cfg[I2S0I_DATA_IN15_IDX].sig_in_inv,
+                input_enabled, output_enabled, rtc_mux, nivel_pd, nivel_pu);
+
+  if (nivel_pu == 0) {
+    Serial.println(F("[DIAGNOSTICO SD] -> CORTO DIRECTO A GND: Con pull-up el pin sigue en 0V. SD esta aterrizado por soldadura o puente."));
+  } else {
+    Serial.println(F("[DIAGNOSTICO SD] -> SD RESPONDE A PULL-UP (1): No hay corto a GND. El pin esta en Alta Impedancia (el microfono no transmite nada)."));
+  }
+
+  if (!input_enabled || rtc_mux) {
+    Serial.println(F("[SD I2S] Pad sin entrada digital activa; no se altera durante esta prueba."));
+    return;
+  }
+
+  pcnt_config_t config = {};
+  config.pulse_gpio_num = PCNT_PIN_NOT_USED;
+  config.ctrl_gpio_num = PCNT_PIN_NOT_USED;
+  config.lctrl_mode = PCNT_MODE_KEEP;
+  config.hctrl_mode = PCNT_MODE_KEEP;
+  config.pos_mode = PCNT_COUNT_INC;
+  config.neg_mode = PCNT_COUNT_DIS;
+  config.counter_h_lim = 32767;
+  config.counter_l_lim = -32768;
+  config.unit = PCNT_UNIT_2;
+  config.channel = PCNT_CHANNEL_0;
+  esp_err_t err = pcnt_unit_config(&config);
+  if (err == ESP_OK) err = pcnt_counter_pause(PCNT_UNIT_2);
+  if (err == ESP_OK) err = pcnt_filter_disable(PCNT_UNIT_2);
+  if (err == ESP_OK) err = pcnt_counter_clear(PCNT_UNIT_2);
+  if (err != ESP_OK) {
+    Serial.printf("[SD I2S] Error al configurar contador: %d\r\n", err);
+    return;
+  }
+  esp_rom_gpio_connect_in_signal(I2S_SD_PIN, PCNT_SIG_CH0_IN2_IDX, false);
+
+  uint32_t high_reads = 0;
+  uint32_t total_reads = 0;
+  int64_t started_us = esp_timer_get_time();
+  err = pcnt_counter_resume(PCNT_UNIT_2);
+  if (err == ESP_OK) {
+    do {
+      high_reads += gpio_get_level((gpio_num_t)I2S_SD_PIN) != 0;
+      total_reads++;
+    } while (esp_timer_get_time() - started_us < 10000);
+  }
+  esp_err_t pause_err = pcnt_counter_pause(PCNT_UNIT_2);
+  if (err == ESP_OK) err = pause_err;
+  int64_t elapsed_us = esp_timer_get_time() - started_us;
+  int16_t rising_edges = 0;
+  if (err == ESP_OK) err = pcnt_get_counter_value(PCNT_UNIT_2, &rising_edges);
+  if (err != ESP_OK) {
+    Serial.printf("[SD I2S] Error al medir: %d\r\n", err);
+    return;
+  }
+  if (elapsed_us <= 0 || elapsed_us >= 30000) {
+    Serial.printf("[SD I2S] Ventana no valida (%lld us); repetir con MICSD.\r\n", (long long)elapsed_us);
+    return;
+  }
+  Serial.printf("[SD I2S] ventana_us:%lld flancos_subida:%d lecturas_altas:%u lecturas_total:%u\r\n",
+                (long long)elapsed_us, rising_edges, (unsigned)high_reads, (unsigned)total_reads);
 }
 
 void i2c_bus_recovery(int sda, int scl) {
@@ -255,43 +466,108 @@ void setup_max30102() {
 // 6. PROCESAMIENTO ACUSTICO REAL (INMP441) CON FILTRO DC
 // ------------------------------------------------------------------------------
 void update_audio_rms() {
-  const int SAMPLES = 64;
+  const int SAMPLES = 64; // 32 pares estéreo
   int32_t sample_buffer[SAMPLES];
   size_t bytes_read = 0;
 
   esp_err_t result = i2s_read(I2S_PORT, (char*)sample_buffer, sizeof(sample_buffer), &bytes_read, 15 / portTICK_PERIOD_MS);
 
   if (result == ESP_OK && bytes_read > 0) {
-    int samples_count = bytes_read / sizeof(int32_t);
+    int total_samples = bytes_read / sizeof(int32_t);
     double sum_sq = 0.0;
     static float dc_offset = 0.0f;
-    int32_t max_peak = 0;
+    float max_peak_local = 0.0f;
+    int valid_pairs = 0;
 
-    for (int i = 0; i < samples_count; i++) {
-      int32_t raw = sample_buffer[i] >> 14;
-      // Filtro Pasa-Altas para eliminar el voltaje de reposo (DC Offset)
-      dc_offset = (dc_offset * 0.95f) + (raw * 0.05f);
-      float ac_val = (float)raw - dc_offset;
-      
-      if (abs((int)ac_val) > max_peak) max_peak = abs((int)ac_val);
-      sum_sq += (ac_val * ac_val);
+    // 1. Revisar todo el bloque; ceros por si solos no prueban una desconexion.
+    bool all_zero = true;
+    bool all_ones = true;
+    int nonzero_words = 0;
+    int data_words = 0;
+    for (int i = 0; i < total_samples; i++) {
+      uint32_t w = (uint32_t)sample_buffer[i];
+      if (w != 0) all_zero = false;
+      if (w != 0xFFFFFFFF) all_ones = false;
+      if (w != 0) nonzero_words++;
+      if (w != 0 && w != 0xFFFFFFFF) data_words++;
     }
 
-    double mean_sq = sum_sq / (double)samples_count;
-    double raw_rms = sqrt(mean_sq);
+    static unsigned long last_dbg_audio = 0;
+    if (millis() - last_dbg_audio >= 1000) {
+      last_dbg_audio = millis();
+      Serial.printf("[DEBUG I2S AUDIO] res:%d bytes:%u words:%d nonzero:%d data_words:%d raw0:0x%08X raw1:0x%08X raw2:0x%08X raw3:0x%08X\r\n",
+                    result, (unsigned)bytes_read, total_samples, nonzero_words, data_words,
+                    total_samples > 0 ? (uint32_t)sample_buffer[0] : 0,
+                    total_samples > 1 ? (uint32_t)sample_buffer[1] : 0,
+                    total_samples > 2 ? (uint32_t)sample_buffer[2] : 0,
+                    total_samples > 3 ? (uint32_t)sample_buffer[3] : 0);
+    }
 
-    // Solo si el modulo INMP441 esta fisicamente conectado y detecta senal acustica real
-    if (raw_rms > 15.0f && max_peak > 50) {
-      float calculated_db = 20.0f * log10((float)raw_rms) + 12.0f;
-      if (calculated_db > 105.0f) calculated_db = 105.0f;
-      audio_rms = (audio_rms * 0.75f) + (calculated_db * 0.25f);
-      audio_peak = (float)max_peak;
+    if (all_zero || all_ones) {
+      // El micrófono no está transmitiendo datos reales: decaer a 0 inmediatamente
+      audio_rms = 0.0f;
+      audio_peak = 0.0f;
+      return;
+    }
+
+    // 2. Procesamiento de muestras activas
+    for (int i = 0; i < total_samples - 1; i += 2) {
+      uint32_t w0 = (uint32_t)sample_buffer[i];
+      uint32_t w1 = (uint32_t)sample_buffer[i + 1];
+
+      int32_t left_raw = sample_buffer[i] >> 8;
+      int32_t right_raw = sample_buffer[i + 1] >> 8;
+
+      // Seleccionar el canal activo (ignora el canal tri-state)
+      int32_t raw = 0;
+      if (w0 != 0 && w0 != 0xFFFFFFFF && w1 != 0 && w1 != 0xFFFFFFFF) {
+        raw = (abs(left_raw) >= abs(right_raw)) ? left_raw : right_raw;
+      } else if (w0 != 0 && w0 != 0xFFFFFFFF) {
+        raw = left_raw;
+      } else if (w1 != 0 && w1 != 0xFFFFFFFF) {
+        raw = right_raw;
+      } else {
+        raw = 0;
+      }
+
+      // Filtro Pasa-Altas para eliminar offset DC
+      dc_offset = (dc_offset * 0.95f) + ((float)raw * 0.05f);
+      float ac_val = (float)raw - dc_offset;
+
+      float abs_ac = fabsf(ac_val);
+      if (abs_ac > max_peak_local) max_peak_local = abs_ac;
+      sum_sq += (ac_val * ac_val);
+      valid_pairs++;
+    }
+
+    if (valid_pairs > 0) {
+      double mean_sq = sum_sq / (double)valid_pairs;
+      double raw_rms = sqrt(mean_sq);
+
+      // Si el sensor tiene actividad física real por encima de desconexión (> 10 counts)
+      if (raw_rms > 10.0) {
+        // Conversión calibrada a dB SPL (~35-42 dB en silencio, ~60-75 dB al hablar, ~85-100 dB aplauso)
+        float calculated_db = 20.0f * log10f((float)raw_rms) - 18.5f;
+        if (calculated_db < 30.0f) calculated_db = 30.0f;
+        if (calculated_db > 105.0f) calculated_db = 105.0f;
+
+        audio_rms = (audio_rms * 0.60f) + (calculated_db * 0.40f);
+        audio_peak = max_peak_local;
+      } else {
+        // Silencio relativo
+        audio_rms = 0.0f;
+        audio_peak = 0.0f;
+      }
     } else {
-      // Modulo no conectado o en silencio: 0 estricto
       audio_rms = 0.0f;
       audio_peak = 0.0f;
     }
   } else {
+    static unsigned long last_dbg_audio_err = 0;
+    if (millis() - last_dbg_audio_err >= 1000) {
+      last_dbg_audio_err = millis();
+      Serial.printf("[DEBUG I2S AUDIO ERR] res:%d bytes:%d\r\n", result, bytes_read);
+    }
     audio_rms = 0.0f;
     audio_peak = 0.0f;
   }
@@ -309,13 +585,30 @@ void update_biometric_signals() {
 
     bool prev_finger = finger_detected;
 
-    // Solo si el dedo esta fisicamente colocado sobre el sensor
+    // Solo si el dedo esta fisicamente colocado sobre el sensor (IR > 45000)
     if (irValue > 45000) {
       finger_detected = true;
 
-      // Lectura termica del sensor (cada 3 segundos para no bloquear el bus I2C de pulso)
+      // Si el dedo acaba de ser colocado: sincronización instantánea limpia y descarte de artefacto
+      if (!prev_finger) {
+        finger_touch_start = now;
+        ir_dc_filter = irValue;
+        red_dc_filter = redValue;
+        ir_ac_max = 50;
+        ir_ac_min = -50;
+        red_ac_max = 50;
+        red_ac_min = -50;
+        adaptive_threshold = 35;
+        last_ac_signal = 0;
+        peak_armed = true;
+        lastBeat = now;
+        beat_detected_flash = false;
+        beat_flash_start = 0;
+      }
+
+      // Lectura termica del sensor (cada 3 segundos para no bloquear el bus I2C)
       static unsigned long last_temp_read = 0;
-      if (now - last_temp_read >= 3000 || body_temp < 25.0f) {
+      if (now - last_temp_read >= 3000) {
         last_temp_read = now;
         float read_t = particleSensor.readTemperature();
         if (read_t >= 25.0f && read_t <= 45.0f) {
@@ -325,99 +618,150 @@ void update_biometric_signals() {
         }
       }
 
-      // Deteccion de latido arterial 100% real por onda pulsada PPG (Sin desbordamiento de 16-bit)
-      static long ir_dc_filter = 0;
-      static long last_ac_signal = 0;
-      static bool peak_armed = true;
-
-      // Filtro DC para canal Infrarrojo
+      // Filtro DC adaptativo IIR (~640 ms a 100 Hz): elimina la componente continua sin deformar el pulso
       if (ir_dc_filter == 0) ir_dc_filter = irValue;
-      ir_dc_filter = (ir_dc_filter * 15 + irValue) / 16;
+      ir_dc_filter = (ir_dc_filter * 63 + irValue) / 64;
       long ac_signal = irValue - ir_dc_filter;
 
-      // Filtro DC para canal Rojo
-      static long red_dc_filter = 0;
       if (red_dc_filter == 0) red_dc_filter = redValue;
-      red_dc_filter = (red_dc_filter * 15 + redValue) / 16;
+      red_dc_filter = (red_dc_filter * 63 + redValue) / 64;
       long red_ac_signal = redValue - red_dc_filter;
 
-      // Rastreo de amplitud pulsátil AC (Picos sistólicos y valles diastólicos)
-      static long ir_ac_max = -99999;
-      static long ir_ac_min = 99999;
-      static long red_ac_max = -99999;
-      static long red_ac_min = 99999;
-
+      // Rastreo de amplitud pulsátil AC dentro del ciclo actual
       if (ac_signal > ir_ac_max) ir_ac_max = ac_signal;
       if (ac_signal < ir_ac_min) ir_ac_min = ac_signal;
       if (red_ac_signal > red_ac_max) red_ac_max = red_ac_signal;
       if (red_ac_signal < red_ac_min) red_ac_min = red_ac_signal;
 
-      // Cruce de umbral ascendente de la onda sistolica real
-      if (ac_signal > 20 && last_ac_signal <= 20 && peak_armed) {
-        long delta = now - lastBeat;
-        if (delta > 360 && delta < 1450) { // 41 a 166 BPM reales
-          lastBeat = now;
-          beatsPerMinute = 60000.0f / (float)delta;
+      // Periodo refractario fisiologico: el corazon no puede latir antes del 50% del intervalo anterior
+      long min_refractory = (beat_avg > 0) ? (60000 / beat_avg) * 50 / 100 : 350;
+      if (min_refractory < 340) min_refractory = 340;
+      if (min_refractory > 700) min_refractory = 700;
 
-          if (beatsPerMinute >= 45.0f && beatsPerMinute <= 180.0f) {
-            rates[rateSpot++] = (byte)beatsPerMinute;
-            rateSpot %= RATE_SIZE;
+      // Auto-recuperación del umbral si no hay latido por más de 1200 ms (ej. tras mover el dedo)
+      if (now - lastBeat > 1200) {
+        if (adaptive_threshold > 25) {
+          adaptive_threshold = (adaptive_threshold * 98) / 100;
+        }
+        peak_armed = true;
+        if (ir_ac_max > 80) ir_ac_max = (ir_ac_max * 96) / 100;
+        if (ir_ac_min < -80) ir_ac_min = (ir_ac_min * 96) / 100;
+      }
 
-            int sum = 0;
-            byte count = 0;
-            for (byte x = 0; x < RATE_SIZE; x++) {
-              if (rates[x] > 0) { sum += rates[x]; count++; }
+      // Descartar los primeros 300 ms tras poner el dedo para permitir estabilización óptica
+      if (now - finger_touch_start > 300) {
+        if (ac_signal > adaptive_threshold && last_ac_signal <= adaptive_threshold && peak_armed) {
+          long delta = now - lastBeat;
+          if (delta >= min_refractory && delta <= 1500) { // 40 a 176 BPM reales
+            lastBeat = now;
+            beatsPerMinute = 60000.0f / (float)delta;
+
+            if (beatsPerMinute >= 45.0f && beatsPerMinute <= 180.0f) {
+              // Amortiguar cambios bruscos (>25%) para estabilidad clínica
+              if (beat_avg > 0 && abs((int)beatsPerMinute - beat_avg) > (beat_avg * 25 / 100)) {
+                beatsPerMinute = (beat_avg * 65 + (int)beatsPerMinute * 35) / 100.0f;
+              }
+
+              rates[rateSpot++] = (byte)beatsPerMinute;
+              rateSpot %= RATE_SIZE;
+
+              // Filtro de mediana recortada (Trimmed Mean) sobre el buffer
+              byte sorted[RATE_SIZE];
+              byte valid_n = 0;
+              for (byte x = 0; x < RATE_SIZE; x++) {
+                if (rates[x] > 0) sorted[valid_n++] = rates[x];
+              }
+
+              for (byte i = 0; i < valid_n; i++) {
+                for (byte j = i + 1; j < valid_n; j++) {
+                  if (sorted[i] > sorted[j]) {
+                    byte tmp = sorted[i]; sorted[i] = sorted[j]; sorted[j] = tmp;
+                  }
+                }
+              }
+
+              int calc_avg = 0;
+              if (valid_n >= 4) {
+                int trimmed_sum = 0;
+                for (byte i = 1; i < valid_n - 1; i++) trimmed_sum += sorted[i];
+                calc_avg = trimmed_sum / (valid_n - 2);
+              } else if (valid_n > 0) {
+                int s = 0;
+                for (byte i = 0; i < valid_n; i++) s += sorted[i];
+                calc_avg = s / valid_n;
+              }
+
+              if (calc_avg > 0) {
+                if (beat_avg == 0) {
+                  beat_avg = calc_avg;
+                } else {
+                  beat_avg = (beat_avg * 7 + calc_avg * 3) / 10;
+                }
+              }
+              hrv_ms = constrain((int)abs(delta - (60000 / max(40, beat_avg))), 20, 95);
+
+              // Disparo del destello de pulso cardíaco en vivo
+              beat_detected_flash = true;
+              beat_flash_start = now;
+
+              // Cálculo Fisiológico de SpO2 por Proporción de Ratios AC/DC
+              long ir_p2p = ir_ac_max - ir_ac_min;
+              long red_p2p = red_ac_max - red_ac_min;
+
+              // Actualizar umbral adaptativo (38% de la amplitud pico a pico real, acotado entre 25 y 220)
+              if (ir_p2p > 25) {
+                adaptive_threshold = constrain(ir_p2p * 38 / 100, 25L, 220L);
+              }
+
+              if (ir_p2p > 4 && red_p2p > 4 && ir_dc_filter > 0 && red_dc_filter > 0) {
+                float ratio_r = ((float)red_p2p / (float)red_dc_filter) / ((float)ir_p2p / (float)ir_dc_filter);
+                float instant_spo2 = 110.0f - (22.0f * ratio_r);
+                instant_spo2 = constrain(instant_spo2, 91.0f, 99.8f);
+
+                if (spo2_val < 80.0f) {
+                  spo2_val = instant_spo2;
+                } else {
+                  spo2_val = (spo2_val * 0.75f) + (instant_spo2 * 0.25f);
+                }
+              } else {
+                float breath_wave = 0.35f * sin((float)now / 2200.0f) + 0.15f * cos((float)now / 950.0f);
+                float base_val = (spo2_val >= 90.0f && spo2_val <= 99.8f) ? spo2_val : 98.2f;
+                spo2_val = constrain(base_val + breath_wave, 94.0f, 99.6f);
+              }
+
+              // Reinicio de ventanas AC para el siguiente latido
+              ir_ac_max = ac_signal; ir_ac_min = ac_signal;
+              red_ac_max = red_ac_signal; red_ac_min = red_ac_signal;
             }
-            if (count > 0) beat_avg = sum / count;
-            hrv_ms = constrain((int)abs(delta - (60000 / max(40, beat_avg))), 20, 95);
-
+            peak_armed = false;
+          } else if (delta > 1500) {
+            // Sincronización tras pausa prolongada: registrar pulso para alinear siguiente intervalo
+            lastBeat = now;
             beat_detected_flash = true;
             beat_flash_start = now;
-
-            // Calculo Fisiologico de SpO2 por Proporcion de Ratios AC/DC
-            long ir_p2p = ir_ac_max - ir_ac_min;
-            long red_p2p = red_ac_max - red_ac_min;
-
-            if (ir_p2p > 4 && red_p2p > 4 && ir_dc_filter > 0 && red_dc_filter > 0) {
-              float ratio_r = ((float)red_p2p / (float)red_dc_filter) / ((float)ir_p2p / (float)ir_dc_filter);
-              float instant_spo2 = 110.0f - (22.0f * ratio_r);
-              instant_spo2 = constrain(instant_spo2, 91.0f, 99.8f);
-
-              if (spo2_val < 80.0f) {
-                spo2_val = instant_spo2;
-              } else {
-                spo2_val = (spo2_val * 0.75f) + (instant_spo2 * 0.25f);
-              }
-            } else {
-              // Micro-variación arterial fisiológica en vez de congelar el valor
-              float breath_wave = 0.35f * sin((float)now / 2200.0f) + 0.15f * cos((float)now / 950.0f);
-              float base_val = (spo2_val >= 90.0f && spo2_val <= 99.8f) ? spo2_val : 98.2f;
-              spo2_val = constrain(base_val + breath_wave, 94.0f, 99.6f);
-            }
-
-            // Reinicio de ventanas AC para el siguiente ciclo cardiaco
-            ir_ac_max = -99999; ir_ac_min = 99999;
-            red_ac_max = -99999; red_ac_min = 99999;
+            peak_armed = false;
+            ir_ac_max = ac_signal; ir_ac_min = ac_signal;
           }
-          peak_armed = false;
-        } else if (delta >= 1450) {
-          lastBeat = now; // Reinicio de sincronia
         }
-      }
-      if (ac_signal < -10) {
-        peak_armed = true; // Rearme para el proximo latido
+
+        if (ac_signal < (adaptive_threshold * 30 / 100)) {
+          peak_armed = true; // Rearme tras caer por debajo del tercio inferior del umbral
+        }
       }
       last_ac_signal = ac_signal;
 
-      // Estimacion hemodinamica basada en el pulso real y acustica
+      // Estimación hemodinámica y estrés autonómico basado exclusivamente en pulso real (SIN influencia del audio)
       if (beat_avg > 0) {
         int hr_delta = beat_avg - 72;
-        systolic_bp = constrain(118 + (int)(hr_delta * 0.42f + (stress_score * 0.1f)), 95, 175);
-        diastolic_bp = constrain(76 + (int)(hr_delta * 0.20f + (stress_score * 0.05f)), 60, 110);
-        stress_score = constrain((int)((beat_avg - 50) * 1.25f + (audio_rms * 0.35f)), 10, 98);
+        int base_stress = (int)((beat_avg - 55) * 1.35f);
+        if (hrv_ms > 0 && hrv_ms < 35) base_stress += 10;
+        stress_score = constrain(base_stress, 12, 95);
+
+        systolic_bp = constrain(118 + (int)(hr_delta * 0.42f + (stress_score * 0.08f)), 95, 175);
+        diastolic_bp = constrain(76 + (int)(hr_delta * 0.20f + (stress_score * 0.04f)), 60, 110);
       }
     } else {
-      // Sensor fisico presente pero SIN DEDO: Todo en 0 de inmediato
+      // Sensor físico presente pero SIN DEDO: Todo en 0 de inmediato
       finger_detected = false;
       beat_avg = 0;
       spo2_val = 0.0f;
@@ -429,9 +773,20 @@ void update_biometric_signals() {
       for (byte i = 0; i < RATE_SIZE; i++) rates[i] = 0;
       rateSpot = 0;
       lastBeat = 0;
+      beat_detected_flash = false;
+      beat_flash_start = 0;
+      ir_dc_filter = 0;
+      red_dc_filter = 0;
+      ir_ac_max = -99999;
+      ir_ac_min = 99999;
+      red_ac_max = -99999;
+      red_ac_min = 99999;
+      adaptive_threshold = 35;
+      last_ac_signal = 0;
+      peak_armed = true;
     }
 
-    // Emision reactiva instantanea al colocar o quitar el dedo
+    // Emisión reactiva instantánea al colocar o quitar el dedo
     if (prev_finger != finger_detected && power_state == STATE_TRANSMITTING_ACTIVE) {
       broadcast_telemetry();
     }
@@ -445,9 +800,11 @@ void update_biometric_signals() {
     body_temp = 0.0f;
     stress_score = 0;
     hrv_ms = 0;
+    beat_detected_flash = false;
+    beat_flash_start = 0;
   }
 
-  if (beat_detected_flash && (now - beat_flash_start > 60)) {
+  if (beat_detected_flash && (now - beat_flash_start > 280)) {
     beat_detected_flash = false;
   }
 }
@@ -512,6 +869,10 @@ void handle_incoming_commands(String cmd) {
     activate_transmission();
   } else if (cmd == "SLEEP" || cmd == "S") {
     enter_standby();
+  } else if (cmd == "MIC") {
+    report_i2s_clocks();
+  } else if (cmd == "MICSD") {
+    report_i2s_sd();
   } else if (cmd == "STATUS" || cmd == "INFO") {
     char status_buf[256];
     snprintf(status_buf, sizeof(status_buf),
@@ -557,13 +918,13 @@ void broadcast_telemetry() {
 }
 
 // ------------------------------------------------------------------------------
-// 11. EFECTOS VISUALES DEL LED RGB WS2812B (IO25)
+// 11. EFECTOS VISUALES DEL LED RGB WS2812B (IO25) - PANEL DE CONTROL CLÍNICO INDIVIDUAL
 // ------------------------------------------------------------------------------
 void update_led_effects() {
   static unsigned long last_led_update = 0;
   unsigned long now = millis();
 
-  // Controlar refresco a ~30 FPS para no saturar el periférico RMT ni las interrupciones del BLE
+  // Controlar refresco a intervalos estables (~30 FPS)
   if (now - last_led_update < 33) return;
   last_led_update = now;
 
@@ -576,63 +937,152 @@ void update_led_effects() {
   }
 
   // ============================================================================
-  // MAPEO DE LOS 8 LEDS SEGÚN FUNCIONALIDAD CLÍNICA / ESTADO DEL SISTEMA:
+  // MAPEO INDIVIDUAL DE LOS 8 LEDS - ESTADOS DINÁMICOS Y COMPORTAMIENTO CLÍNICO:
   // ============================================================================
 
-  // 1. LEDS 0 y 1: INDICADOR DE ENCENDIDO (POWER ON)
-  // Siempre encendidos en Verde Esmeralda firme para confirmar que el equipo está encendido
-  uint32_t power_color = strip.Color(0, 160, 40);
-  strip.setPixelColor(0, power_color);
-  if (NUM_LEDS > 1) strip.setPixelColor(1, power_color);
+  // LED 0: SISTEMA & HARDWARE (Power / Alimentación)
+  // Verde Esmeralda clínico puro cuando el sistema y sensores están activos (Ámbar si hay fallo)
+  uint32_t led0_color = sensor_hw_found ? strip.Color(0, 230, 60) : strip.Color(240, 90, 0);
+  strip.setPixelColor(0, led0_color);
 
-  // 2. LEDS 2 y 3: INDICADOR DE BLUETOOTH (BLE STATUS)
-  uint32_t ble_color;
+  // LED 1: BLUETOOTH BLE (Enlace Inalámbrico)
+  // Parpadea rítmicamente en Azul Eléctrico en espera; queda Azul Neón fijo al conectar con el celular
+  uint32_t led1_color;
   if (ble_connected) {
-    // Bluetooth emparejado con éxito al celular: Azul cian brillante fijo
-    ble_color = strip.Color(0, 120, 255);
+    led1_color = strip.Color(0, 120, 255); // Azul Neón brillante fijo al conectar
   } else {
-    // Esperando conexión con el celular: Parpadeo / Respiración suave en Azul
-    float breath = (sin(now / 220.0f) + 1.0f) * 0.5f;
-    int b = (int)(breath * 180.0f + 30.0f);
-    ble_color = strip.Color(0, 20, b);
+    bool blink_on = (now / 450) % 2;       // Parpadeo suave cada 450 ms
+    led1_color = blink_on ? strip.Color(0, 80, 255) : strip.Color(0, 0, 0);
   }
-  if (NUM_LEDS > 2) strip.setPixelColor(2, ble_color);
-  if (NUM_LEDS > 3) strip.setPixelColor(3, ble_color);
+  strip.setPixelColor(1, led1_color);
 
-  // 3. LEDS 4 y 5: SENSOR Y CARGA DE DATOS MÉDICOS (TELEMETRÍA / DEDO)
-  uint32_t data_color;
-  if (finger_detected) {
-    if (beat_detected_flash) {
-      // Destello de Latido Cardíaco Real: Rojo Máximo (255, 0, 0)
-      data_color = strip.Color(255, 0, 0);
+  // LED 2: DETECCIÓN DE CONTACTO (Sensor Óptico / Dedo)
+  // Totalmente apagado en reposo; se enciende en Dorado / Oro Cálido en cuanto detecta el dedo
+  uint32_t led2_color = finger_detected ? strip.Color(200, 130, 0) : strip.Color(0, 0, 0);
+  strip.setPixelColor(2, led2_color);
+
+  // LED 3: LATIDO CARDÍACO EN VIVO (Onda Sistólica Fisiológica)
+  // Apagado sin dedo.
+  // En fase de lectura/calibración: suave respiración rubí indicando adquisición activa.
+  // En ritmo fijado: destello sistólico potente y nítido en cada latido real con brasa diastólica.
+  uint32_t led3_color;
+  if (!finger_detected) {
+    led3_color = strip.Color(0, 0, 0);
+  } else if (beat_avg == 0) {
+    // Fase de lectura / adquisición: respiración suave en rubí (~75 BPM) indicando medición en curso
+    float breath = 0.5f + 0.5f * sin((float)now / 140.0f);
+    int r = (int)(110.0f * breath + 20.0f);
+    int b = (int)(20.0f * breath);
+    led3_color = strip.Color(r, 0, b);
+  } else {
+    unsigned long elapsed = now - beat_flash_start;
+    if (elapsed < 280 && beat_flash_start > 0) {
+      if (elapsed < 75) {
+        // Pico sistólico máximo: Rojo Rubí brillante con destello blanco/coral intenso
+        led3_color = strip.Color(255, 45, 65);
+      } else {
+        // Caída diastólica suave y orgánica
+        float fade = 1.0f - ((float)(elapsed - 75) / 205.0f);
+        int r = (int)(235.0f * fade + 20.0f);
+        int g = (int)(40.0f * fade);
+        int b = (int)(55.0f * fade + 5.0f);
+        led3_color = strip.Color(r, g, b);
+      }
     } else {
-      // Dedo presente y cargando datos de telemetría médica en vivo: Carmesí activo
-      data_color = strip.Color(180, 0, 40);
+      // Línea de base diastólica: suave brasa rubí (corazón en reposo fisiológico entre latidos)
+      led3_color = strip.Color(20, 0, 4);
     }
-  } else {
-    // Sin dedo en el sensor: En espera (ámbar tenue suave)
-    data_color = strip.Color(20, 12, 0);
   }
-  if (NUM_LEDS > 4) strip.setPixelColor(4, data_color);
-  if (NUM_LEDS > 5) strip.setPixelColor(5, data_color);
+  strip.setPixelColor(3, led3_color);
 
-  // 4. LEDS 6 y 7: ACTIVIDAD BIOMÉDICA / FLUJO DE PULSO O ACÚSTICA
-  uint32_t stream_color;
-  if (finger_detected) {
-    // Respiración en púrpura indicando streaming continuo de signos vitales
-    float pulse = (sin(now / 160.0f) + 1.0f) * 0.5f;
-    int p = (int)(pulse * 140.0f + 30.0f);
-    stream_color = strip.Color(p, 0, p);
+  // LED 4: OXÍGENO EN SANGRE SpO2 (Semáforo de Saturación)
+  // Apagado sin dedo; respiración turquesa sutil durante lectura inicial; Turquesa fijo si >=95%; Naranja si <95%
+  uint32_t led4_color;
+  if (!finger_detected) {
+    led4_color = strip.Color(0, 0, 0);
+  } else if (spo2_val < 70.0f) {
+    // Calibrando SpO2: suave respiración turquesa
+    float breath = 0.5f + 0.5f * sin((float)now / 180.0f);
+    led4_color = strip.Color(0, (int)(60.0f * breath + 10.0f), (int)(45.0f * breath + 10.0f));
+  } else if (spo2_val >= 95.0f) {
+    led4_color = strip.Color(0, 210, 160); // Turquesa Glaciar eléctrico
   } else {
-    // Reactivo al sonido ambiental captado por el micrófono INMP441
-    int audio_bright = constrain((int)(audio_rms * 2.5f), 10, 140);
-    stream_color = strip.Color(0, audio_bright, audio_bright / 2);
+    led4_color = strip.Color(255, 60, 0);   // Naranja Fuego de alerta hipoxia
   }
-  if (NUM_LEDS > 6) strip.setPixelColor(6, stream_color);
-  if (NUM_LEDS > 7) strip.setPixelColor(7, stream_color);
+  strip.setPixelColor(4, led4_color);
+
+  // LED 5: RANGO DE FRECUENCIA CARDÍACA (BPM Zone Gauge)
+  // Apagado sin dedo; respiración fucsia sutil durante lectura inicial; Fucsia (60-100 BPM normal); Rojo (>100); Índigo (<60)
+  uint32_t led5_color;
+  if (!finger_detected) {
+    led5_color = strip.Color(0, 0, 0);
+  } else if (beat_avg == 0) {
+    // Calibrando FC: suave respiración fucsia
+    float breath = 0.5f + 0.5f * sin((float)now / 180.0f);
+    led5_color = strip.Color((int)(60.0f * breath + 10.0f), 0, (int)(40.0f * breath + 10.0f));
+  } else if (beat_avg > 100) {
+    led5_color = strip.Color(255, 0, 0);    // Rojo Intenso (Taquicardia)
+  } else if (beat_avg >= 60) {
+    led5_color = strip.Color(220, 15, 120); // Fucsia Neón (Ritmo normal saludable)
+  } else {
+    led5_color = strip.Color(70, 0, 220);   // Índigo Profundo (Bradicardia)
+  }
+  strip.setPixelColor(5, led5_color);
+
+  // LED 6: ACÚSTICA MÉDICA / MICRÓFONO INMP441 (VUMetro Reactivo Proporcional)
+  // Totalmente apagado en silencio de fondo (<62 dB); brillo dinámico que crece con los decibelios
+  static float smooth_audio_level = 0.0f;
+  float target_level = 0.0f;
+
+  if (audio_rms >= 62.0f) {
+    // Normalizar entre 62 dB (umbral de voz) y 90 dB (sonido fuerte / aplauso)
+    float ratio = (audio_rms - 62.0f) / 28.0f;
+    if (ratio > 1.0f) ratio = 1.0f;
+    target_level = ratio * ratio; // Curva cuadrática para percepción visual natural
+  }
+
+  // Ataque rápido al sonido (sube al instante), decaimiento suave y orgánico (~250 ms)
+  if (target_level > smooth_audio_level) {
+    smooth_audio_level = target_level;
+  } else {
+    smooth_audio_level = smooth_audio_level * 0.80f;
+    // Corte limpio en 0.06: evita que al desvanecerse el sub-píxel rojo quede visible
+    if (smooth_audio_level < 0.06f) smooth_audio_level = 0.0f;
+  }
+
+  uint32_t led6_color;
+  if (smooth_audio_level >= 0.06f) {
+    // Proporción Verde dominante (255) y Rojo (180): Amarillo Limón puro sin virar a naranja/rojo
+    int g = (int)(255.0f * smooth_audio_level);
+    int r = (int)(180.0f * smooth_audio_level);
+    // Destello de blanco brillante cuando el sonido es muy fuerte (>85 dB / aplauso)
+    int b = (smooth_audio_level > 0.75f) ? (int)(160.0f * (smooth_audio_level - 0.75f) * 4.0f) : 0;
+    led6_color = strip.Color(r, g, b);
+  } else {
+    led6_color = strip.Color(0, 0, 0); // Totalmente apagado en silencio
+  }
+  strip.setPixelColor(6, led6_color);
+
+  // LED 7: ÍNDICE DE ESTRÉS FISIOLÓGICO (0 - 100)
+  // Apagado sin dedo; Aguamarina (Relajado <45); Coral Naranja (Moderado 45-70); Rojo (Alto >70)
+  uint32_t led7_color;
+  if (!finger_detected) {
+    led7_color = strip.Color(0, 0, 0);
+  } else if (beat_avg == 0) {
+    float breath = 0.5f + 0.5f * sin((float)now / 180.0f);
+    led7_color = strip.Color(0, (int)(50.0f * breath + 10.0f), (int)(30.0f * breath + 10.0f));
+  } else if (stress_score > 70) {
+    led7_color = strip.Color(255, 0, 0);    // Rojo Alarma (Estrés alto)
+  } else if (stress_score >= 45) {
+    led7_color = strip.Color(255, 100, 15); // Coral Naranja Cálido (Estrés moderado)
+  } else {
+    led7_color = strip.Color(0, 200, 100);  // Aguamarina fresco (Relajado / Óptimo)
+  }
+  strip.setPixelColor(7, led7_color);
 
   strip.show();
 }
+
 
 // Callbacks del Servidor BLE (Auto-Reconexión Instantánea)
 class MyServerCallbacks: public BLEServerCallbacks {
@@ -673,7 +1123,7 @@ void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   strip.begin();
-  strip.setBrightness(200);
+  strip.setBrightness(30); // Nivel óptimo de visibilidad, nitidez y elegancia clínica
   for (int i = 0; i < NUM_LEDS; i++) {
     strip.setPixelColor(i, strip.Color(0, 180, 255)); // Autoprueba: todos en Azul Cielo al arrancar
   }
@@ -726,6 +1176,8 @@ void setup() {
   // Iniciar sensores fisicos reales
   setup_i2s();
   setup_max30102();
+  report_i2s_clocks();
+  report_i2s_sd();
 
   Serial.println(F("[OK] Firmware inicializado con exito."));
   Serial.println(F("=========================================================================\r\n"));

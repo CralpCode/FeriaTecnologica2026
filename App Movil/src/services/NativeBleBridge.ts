@@ -8,6 +8,7 @@ export interface NativeBleService {
   ): Promise<{ success: boolean; message: string; deviceName?: string }>;
   disconnect(): Promise<void>;
   getConnected(): boolean;
+  sendCommand(cmd: string): Promise<boolean>;
 }
 
 export const nativeBle: NativeBleService = {
@@ -20,6 +21,9 @@ export const nativeBle: NativeBleService = {
   },
   async disconnect() {},
   getConnected() {
+    return false;
+  },
+  async sendCommand() {
     return false;
   },
 };

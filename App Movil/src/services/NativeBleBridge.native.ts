@@ -10,12 +10,35 @@ export interface NativeBleService {
   ): Promise<{ success: boolean; message: string; deviceName?: string }>;
   disconnect(): Promise<void>;
   getConnected(): boolean;
+  sendCommand(cmd: string): Promise<boolean>;
 }
 
 const SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
 const CHAR_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
 const HR_SERVICE_UUID = '0000180d-0000-1000-8000-00805f9b34fb';
 const HR_CHAR_UUID = '00002a37-0000-1000-8000-00805f9b34fb';
+
+// Codificador seguro ASCII a Base64 para Android / iOS
+function asciiToBase64(str: string): string {
+  const b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let result = '';
+  let i = 0;
+  while (i < str.length) {
+    const c1 = str.charCodeAt(i++);
+    const c2 = i < str.length ? str.charCodeAt(i++) : NaN;
+    const c3 = i < str.length ? str.charCodeAt(i++) : NaN;
+
+    const b1 = (c1 >> 2) & 0x3F;
+    const b2 = ((c1 & 0x3) << 4) | (isNaN(c2) ? 0 : (c2 >> 4) & 0x0F);
+    const b3 = isNaN(c2) ? 64 : (((c2 & 0x0F) << 2) | (isNaN(c3) ? 0 : (c3 >> 6) & 0x03));
+    const b4 = isNaN(c3) ? 64 : (c3 & 0x3F);
+
+    result += b64.charAt(b1) + b64.charAt(b2) +
+      (b3 === 64 ? '=' : b64.charAt(b3)) +
+      (b4 === 64 ? '=' : b64.charAt(b4));
+  }
+  return result;
+}
 
 // Decodificador seguro Base64 a UTF-8 para Android / iOS
 function base64ToUtf8(base64: string): string {
@@ -101,6 +124,37 @@ class NativeBleServiceImpl implements NativeBleService {
     } catch {}
     this.connectedDevice = null;
     this.packetBuffer = '';
+  }
+
+  public async sendCommand(cmd: string): Promise<boolean> {
+    if (!this.connectedDevice) {
+      console.warn('[Native BLE] No hay dispositivo conectado para enviar comando');
+      return false;
+    }
+    try {
+      const base64Val = asciiToBase64(cmd);
+      await this.connectedDevice.writeCharacteristicWithoutResponseForService(
+        SERVICE_UUID,
+        CHAR_UUID,
+        base64Val
+      );
+      console.log('[Native BLE] Comando BLE enviado con éxito:', cmd);
+      return true;
+    } catch (err) {
+      console.warn('[Native BLE] Error enviando comando withoutResponse, intentando con respuesta:', err);
+      try {
+        await this.connectedDevice.writeCharacteristicWithResponseForService(
+          SERVICE_UUID,
+          CHAR_UUID,
+          asciiToBase64(cmd)
+        );
+        console.log('[Native BLE] Comando BLE enviado con respuesta:', cmd);
+        return true;
+      } catch (fallbackErr) {
+        console.error('[Native BLE] Error definitivo al enviar comando BLE:', fallbackErr);
+        return false;
+      }
+    }
   }
 
   private parseOrBufferPacket(text: string): RawDevicePacket | null {

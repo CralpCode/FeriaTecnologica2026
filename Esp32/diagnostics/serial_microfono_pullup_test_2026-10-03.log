@@ -1,0 +1,215 @@
+ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:1184
+load:0x40078000,len:13232
+load:0x40080400,len:3028
+entry 0x400805e4
+
+=========================================================================
+  FERIA TECNOLOGICA - SPIROSCAN AI (ESP32 BIO-ACUSTICO REAL)             
+  [MODO: TELEMETRIA 100% FISICA DE SENSORES - SIN SIMULACIONES]          
+=========================================================================
+[*] Iniciando BLE: "SpiroScan-Band"...
+[OK] BLE activo y visible para Celular (Chrome) y PC (Edge/Chrome).
+[DIAGNOSTICO I2S] Pines configurados; pull-down interno activo en SD IO32.
+[OK] U2 Microfono I2S INMP441 configurado en IO14(SCK), IO15(WS), IO32(SD).
+[DIAGNOSTICO ELECTRICO] Nivel logico: P21=1 | P22=1 | P23=1 (1=Alto/Libre, 0=Bajo/Aterrizado)
+[DEBUG I2C] Sondeando Estandar ESP32 (P21=SDA, P22=SCL) -> Codigo I2C: 0 (0=ACK, 2=NACK, 5=Timeout)
+[OK] U1 Sensor MAX30102 DETECTADO Y CONFIGURADO [Estandar ESP32 (P21=SDA, P22=SCL) | SDA: IO21, SCL: IO22].
+[RELOJES I2S] ventana_us:10030 SCK_IO14_pulsos:10242 SCK_Hz:1021137 WS_IO15_pulsos:160 WS_Hz:15952
+[RELOJES I2S] Esperado SCK:1024000 Hz WS:16000 Hz; medidos en pines ESP32. Comando MIC repite la prueba.
+[SD I2S] ruta_gpio:32 matriz:1 invertida:0 entrada_pad:1 salida_gpio:0 rtc_mux:0 nivel_pd:0 nivel_pu:1
+[DIAGNOSTICO SD] -> SD RESPONDE A PULL-UP (1): No hay corto a GND. El pin esta en Alta Impedancia (el microfono no transmite nada).
+[SD I2S] ventana_us:10002 flancos_subida:0 lecturas_altas:0 lecturas_total:11570
+[OK] Firmware inicializado con exito.
+=========================================================================
+
+
+=========================================================================
+  >>> [SPIROSCAN ACTIVADO] Transmision activa iniciada (2 minutos)    <<<
+=========================================================================
+
+[DEBUG I2S AUDIO] res:0 bytes:256 words:64 nonzero:0 data_words:0 raw0:0x00000000 raw1:0x00000000 raw2:0x00000000 raw3:0x00000000
+[TELEMETRIA] FC:   0 BPM | SpO2:  0.0% | PA:   0/ 0 mmHg | Temp: 29.5 C | Estres:  0/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":0,"spo2":0.0,"systolic":0,"diastolic":0,"temperature":29.5,"stress":0,"hrv":0,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:   0 BPM | SpO2:  0.0% | PA:   0/ 0 mmHg | Temp: 29.5 C | Estres:  0/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":0,"spo2":0.0,"systolic":0,"diastolic":0,"temperature":29.5,"stress":0,"hrv":0,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:   0 BPM | SpO2:  0.0% | PA:   0/ 0 mmHg | Temp: 29.5 C | Estres:  0/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":0,"spo2":0.0,"systolic":0,"diastolic":0,"temperature":29.5,"stress":0,"hrv":0,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:   0 BPM | SpO2:  0.0% | PA:   0/ 0 mmHg | Temp: 29.5 C | Estres:  0/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":0,"spo2":0.0,"systolic":0,"diastolic":0,"temperature":29.5,"stress":0,"hrv":0,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:   0 BPM | SpO2:  0.0% | PA:   0/ 0 mmHg | Temp: 29.5 C | Estres:  0/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":0,"spo2":0.0,"systolic":0,"diastolic":0,"temperature":29.5,"stress":0,"hrv":0,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:   0 BPM | SpO2:  0.0% | PA:   0/ 0 mmHg | Temp: 29.5 C | Estres:  0/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":0,"spo2":0.0,"systolic":0,"diastolic":0,"temperature":29.5,"stress":0,"hrv":0,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC: 134 BPM | SpO2: 91.0% | PA: 153/93 mmHg | Temp: 29.5 C | Estres: 98/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":134,"spo2":91.0,"systolic":153,"diastolic":93,"temperature":29.5,"stress":98,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC: 134 BPM | SpO2: 91.0% | PA: 153/93 mmHg | Temp: 29.5 C | Estres: 98/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":134,"spo2":91.0,"systolic":153,"diastolic":93,"temperature":29.5,"stress":98,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC: 134 BPM | SpO2: 91.0% | PA: 153/93 mmHg | Temp: 29.5 C | Estres: 98/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":134,"spo2":91.0,"systolic":153,"diastolic":93,"temperature":29.5,"stress":98,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[DEBUG I2S AUDIO] res:0 bytes:256 words:64 nonzero:0 data_words:0 raw0:0x00000000 raw1:0x00000000 raw2:0x00000000 raw3:0x00000000
+[TELEMETRIA] FC: 134 BPM | SpO2: 91.0% | PA: 153/93 mmHg | Temp: 29.5 C | Estres: 98/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":134,"spo2":91.0,"systolic":153,"diastolic":93,"temperature":29.5,"stress":98,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC: 134 BPM | SpO2: 91.0% | PA: 153/93 mmHg | Temp: 29.5 C | Estres: 98/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":134,"spo2":91.0,"systolic":153,"diastolic":93,"temperature":29.5,"stress":98,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC: 134 BPM | SpO2: 91.0% | PA: 153/93 mmHg | Temp: 29.5 C | Estres: 98/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":134,"spo2":91.0,"systolic":153,"diastolic":93,"temperature":29.5,"stress":98,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC: 134 BPM | SpO2: 91.0% | PA: 153/93 mmHg | Temp: 29.5 C | Estres: 98/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":134,"spo2":91.0,"systolic":153,"diastolic":93,"temperature":29.5,"stress":98,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC: 134 BPM | SpO2: 91.0% | PA: 153/93 mmHg | Temp: 29.5 C | Estres: 98/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":134,"spo2":91.0,"systolic":153,"diastolic":93,"temperature":29.5,"stress":98,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  98 BPM | SpO2: 91.0% | PA: 134/84 mmHg | Temp: 29.5 C | Estres: 60/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":98,"spo2":91.0,"systolic":134,"diastolic":84,"temperature":29.5,"stress":60,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  98 BPM | SpO2: 91.0% | PA: 134/84 mmHg | Temp: 29.5 C | Estres: 60/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":98,"spo2":91.0,"systolic":134,"diastolic":84,"temperature":29.5,"stress":60,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  98 BPM | SpO2: 91.0% | PA: 134/84 mmHg | Temp: 29.5 C | Estres: 60/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":98,"spo2":91.0,"systolic":134,"diastolic":84,"temperature":29.5,"stress":60,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[DEBUG I2S AUDIO] res:0 bytes:256 words:64 nonzero:0 data_words:0 raw0:0x00000000 raw1:0x00000000 raw2:0x00000000 raw3:0x00000000
+[TELEMETRIA] FC:  98 BPM | SpO2: 91.0% | PA: 134/84 mmHg | Temp: 29.5 C | Estres: 60/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":98,"spo2":91.0,"systolic":134,"diastolic":84,"temperature":29.5,"stress":60,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  98 BPM | SpO2: 91.0% | PA: 134/84 mmHg | Temp: 29.5 C | Estres: 60/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":98,"spo2":91.0,"systolic":134,"diastolic":84,"temperature":29.5,"stress":60,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  96 BPM | SpO2: 91.0% | PA: 134/83 mmHg | Temp: 29.5 C | Estres: 57/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":96,"spo2":91.0,"systolic":134,"diastolic":83,"temperature":29.5,"stress":57,"hrv":33,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  96 BPM | SpO2: 91.0% | PA: 133/83 mmHg | Temp: 29.5 C | Estres: 57/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":96,"spo2":91.0,"systolic":133,"diastolic":83,"temperature":29.5,"stress":57,"hrv":33,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  96 BPM | SpO2: 91.0% | PA: 133/83 mmHg | Temp: 29.5 C | Estres: 57/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":96,"spo2":91.0,"systolic":133,"diastolic":83,"temperature":29.5,"stress":57,"hrv":33,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  96 BPM | SpO2: 91.0% | PA: 133/83 mmHg | Temp: 29.5 C | Estres: 57/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":96,"spo2":91.0,"systolic":133,"diastolic":83,"temperature":29.5,"stress":57,"hrv":33,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  96 BPM | SpO2: 91.0% | PA: 133/83 mmHg | Temp: 29.5 C | Estres: 57/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":96,"spo2":91.0,"systolic":133,"diastolic":83,"temperature":29.5,"stress":57,"hrv":33,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  96 BPM | SpO2: 91.0% | PA: 133/83 mmHg | Temp: 29.5 C | Estres: 57/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":96,"spo2":91.0,"systolic":133,"diastolic":83,"temperature":29.5,"stress":57,"hrv":33,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  92 BPM | SpO2: 91.0% | PA: 132/82 mmHg | Temp: 29.5 C | Estres: 52/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":92,"spo2":91.0,"systolic":132,"diastolic":82,"temperature":29.5,"stress":52,"hrv":71,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[DEBUG I2S AUDIO] res:0 bytes:256 words:64 nonzero:0 data_words:0 raw0:0x00000000 raw1:0x00000000 raw2:0x00000000 raw3:0x00000000
+[TELEMETRIA] FC:  92 BPM | SpO2: 91.0% | PA: 131/82 mmHg | Temp: 29.7 C | Estres: 52/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":92,"spo2":91.0,"systolic":131,"diastolic":82,"temperature":29.7,"stress":52,"hrv":71,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  92 BPM | SpO2: 91.0% | PA: 131/82 mmHg | Temp: 29.7 C | Estres: 52/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":92,"spo2":91.0,"systolic":131,"diastolic":82,"temperature":29.7,"stress":52,"hrv":71,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  92 BPM | SpO2: 91.0% | PA: 131/82 mmHg | Temp: 29.7 C | Estres: 52/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":92,"spo2":91.0,"systolic":131,"diastolic":82,"temperature":29.7,"stress":52,"hrv":71,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  92 BPM | SpO2: 91.0% | PA: 131/82 mmHg | Temp: 29.7 C | Estres: 52/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":92,"spo2":91.0,"systolic":131,"diastolic":82,"temperature":29.7,"stress":52,"hrv":71,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  92 BPM | SpO2: 91.0% | PA: 131/82 mmHg | Temp: 29.7 C | Estres: 52/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":92,"spo2":91.0,"systolic":131,"diastolic":82,"temperature":29.7,"stress":52,"hrv":71,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  78 BPM | SpO2: 91.0% | PA: 124/78 mmHg | Temp: 29.7 C | Estres: 35/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":78,"spo2":91.0,"systolic":124,"diastolic":78,"temperature":29.7,"stress":35,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  78 BPM | SpO2: 91.0% | PA: 124/78 mmHg | Temp: 29.7 C | Estres: 35/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":78,"spo2":91.0,"systolic":124,"diastolic":78,"temperature":29.7,"stress":35,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[DEBUG I2S AUDIO] res:0 bytes:256 words:64 nonzero:0 data_words:0 raw0:0x00000000 raw1:0x00000000 raw2:0x00000000 raw3:0x00000000
+[TELEMETRIA] FC:  78 BPM | SpO2: 91.0% | PA: 124/78 mmHg | Temp: 29.7 C | Estres: 35/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":78,"spo2":91.0,"systolic":124,"diastolic":78,"temperature":29.7,"stress":35,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  78 BPM | SpO2: 91.0% | PA: 124/78 mmHg | Temp: 29.7 C | Estres: 35/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":78,"spo2":91.0,"systolic":124,"diastolic":78,"temperature":29.7,"stress":35,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  78 BPM | SpO2: 91.0% | PA: 124/78 mmHg | Temp: 29.7 C | Estres: 35/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":78,"spo2":91.0,"systolic":124,"diastolic":78,"temperature":29.7,"stress":35,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  78 BPM | SpO2: 91.0% | PA: 124/78 mmHg | Temp: 29.7 C | Estres: 35/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":78,"spo2":91.0,"systolic":124,"diastolic":78,"temperature":29.7,"stress":35,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  83 BPM | SpO2: 91.0% | PA: 126/80 mmHg | Temp: 29.7 C | Estres: 41/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":83,"spo2":91.0,"systolic":126,"diastolic":80,"temperature":29.7,"stress":41,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  83 BPM | SpO2: 91.0% | PA: 126/80 mmHg | Temp: 29.7 C | Estres: 41/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":83,"spo2":91.0,"systolic":126,"diastolic":80,"temperature":29.7,"stress":41,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  83 BPM | SpO2: 91.0% | PA: 126/80 mmHg | Temp: 29.7 C | Estres: 41/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":83,"spo2":91.0,"systolic":126,"diastolic":80,"temperature":29.7,"stress":41,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  83 BPM | SpO2: 91.0% | PA: 126/80 mmHg | Temp: 29.7 C | Estres: 41/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":83,"spo2":91.0,"systolic":126,"diastolic":80,"temperature":29.7,"stress":41,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  83 BPM | SpO2: 91.0% | PA: 126/80 mmHg | Temp: 29.7 C | Estres: 41/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":83,"spo2":91.0,"systolic":126,"diastolic":80,"temperature":29.7,"stress":41,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[DEBUG I2S AUDIO] res:0 bytes:256 words:64 nonzero:0 data_words:0 raw0:0x00000000 raw1:0x00000000 raw2:0x00000000 raw3:0x00000000
+[TELEMETRIA] FC:  83 BPM | SpO2: 91.0% | PA: 126/80 mmHg | Temp: 29.7 C | Estres: 41/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":83,"spo2":91.0,"systolic":126,"diastolic":80,"temperature":29.7,"stress":41,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  83 BPM | SpO2: 91.0% | PA: 126/80 mmHg | Temp: 29.7 C | Estres: 41/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":83,"spo2":91.0,"systolic":126,"diastolic":80,"temperature":29.7,"stress":41,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  83 BPM | SpO2: 91.0% | PA: 126/80 mmHg | Temp: 29.7 C | Estres: 41/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":83,"spo2":91.0,"systolic":126,"diastolic":80,"temperature":29.7,"stress":41,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  83 BPM | SpO2: 91.0% | PA: 126/80 mmHg | Temp: 29.7 C | Estres: 41/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":83,"spo2":91.0,"systolic":126,"diastolic":80,"temperature":29.7,"stress":41,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  74 BPM | SpO2: 91.0% | PA: 121/77 mmHg | Temp: 29.7 C | Estres: 30/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":74,"spo2":91.0,"systolic":121,"diastolic":77,"temperature":29.7,"stress":30,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  74 BPM | SpO2: 91.0% | PA: 121/77 mmHg | Temp: 29.7 C | Estres: 30/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":74,"spo2":91.0,"systolic":121,"diastolic":77,"temperature":29.7,"stress":30,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  74 BPM | SpO2: 91.0% | PA: 121/77 mmHg | Temp: 29.7 C | Estres: 30/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":74,"spo2":91.0,"systolic":121,"diastolic":77,"temperature":29.7,"stress":30,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  74 BPM | SpO2: 91.0% | PA: 121/77 mmHg | Temp: 29.7 C | Estres: 30/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":74,"spo2":91.0,"systolic":121,"diastolic":77,"temperature":29.7,"stress":30,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[DEBUG I2S AUDIO] res:0 bytes:256 words:64 nonzero:0 data_words:0 raw0:0x00000000 raw1:0x00000000 raw2:0x00000000 raw3:0x00000000
+[TELEMETRIA] FC:  84 BPM | SpO2: 91.0% | PA: 127/80 mmHg | Temp: 30.0 C | Estres: 42/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":84,"spo2":91.0,"systolic":127,"diastolic":80,"temperature":30.0,"stress":42,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  84 BPM | SpO2: 91.0% | PA: 127/80 mmHg | Temp: 30.0 C | Estres: 42/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":84,"spo2":91.0,"systolic":127,"diastolic":80,"temperature":30.0,"stress":42,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  84 BPM | SpO2: 91.0% | PA: 127/80 mmHg | Temp: 30.0 C | Estres: 42/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":84,"spo2":91.0,"systolic":127,"diastolic":80,"temperature":30.0,"stress":42,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  84 BPM | SpO2: 91.0% | PA: 127/80 mmHg | Temp: 30.0 C | Estres: 42/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":84,"spo2":91.0,"systolic":127,"diastolic":80,"temperature":30.0,"stress":42,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  84 BPM | SpO2: 91.0% | PA: 127/80 mmHg | Temp: 30.0 C | Estres: 42/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":84,"spo2":91.0,"systolic":127,"diastolic":80,"temperature":30.0,"stress":42,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  84 BPM | SpO2: 91.0% | PA: 127/80 mmHg | Temp: 30.0 C | Estres: 42/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":84,"spo2":91.0,"systolic":127,"diastolic":80,"temperature":30.0,"stress":42,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  84 BPM | SpO2: 91.0% | PA: 127/80 mmHg | Temp: 30.0 C | Estres: 42/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":84,"spo2":91.0,"systolic":127,"diastolic":80,"temperature":30.0,"stress":42,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  84 BPM | SpO2: 91.0% | PA: 127/80 mmHg | Temp: 30.0 C | Estres: 42/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":84,"spo2":91.0,"systolic":127,"diastolic":80,"temperature":30.0,"stress":42,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[DEBUG I2S AUDIO] res:0 bytes:256 words:64 nonzero:0 data_words:0 raw0:0x00000000 raw1:0x00000000 raw2:0x00000000 raw3:0x00000000
+[TELEMETRIA] FC:  80 BPM | SpO2: 91.0% | PA: 125/79 mmHg | Temp: 30.0 C | Estres: 37/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":80,"spo2":91.0,"systolic":125,"diastolic":79,"temperature":30.0,"stress":37,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  80 BPM | SpO2: 91.0% | PA: 125/79 mmHg | Temp: 30.0 C | Estres: 37/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":80,"spo2":91.0,"systolic":125,"diastolic":79,"temperature":30.0,"stress":37,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  80 BPM | SpO2: 91.0% | PA: 125/79 mmHg | Temp: 30.0 C | Estres: 37/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":80,"spo2":91.0,"systolic":125,"diastolic":79,"temperature":30.0,"stress":37,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  80 BPM | SpO2: 91.0% | PA: 125/79 mmHg | Temp: 30.0 C | Estres: 37/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":80,"spo2":91.0,"systolic":125,"diastolic":79,"temperature":30.0,"stress":37,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  80 BPM | SpO2: 91.0% | PA: 125/79 mmHg | Temp: 30.0 C | Estres: 37/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":80,"spo2":91.0,"systolic":125,"diastolic":79,"temperature":30.0,"stress":37,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  84 BPM | SpO2: 91.0% | PA: 127/80 mmHg | Temp: 30.0 C | Estres: 42/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":84,"spo2":91.0,"systolic":127,"diastolic":80,"temperature":30.0,"stress":42,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  84 BPM | SpO2: 91.0% | PA: 127/80 mmHg | Temp: 30.0 C | Estres: 42/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":84,"spo2":91.0,"systolic":127,"diastolic":80,"temperature":30.0,"stress":42,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  84 BPM | SpO2: 91.0% | PA: 127/80 mmHg | Temp: 30.0 C | Estres: 42/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":84,"spo2":91.0,"systolic":127,"diastolic":80,"temperature":30.0,"stress":42,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  84 BPM | SpO2: 91.0% | PA: 127/80 mmHg | Temp: 30.0 C | Estres: 42/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":84,"spo2":91.0,"systolic":127,"diastolic":80,"temperature":30.0,"stress":42,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[DEBUG I2S AUDIO] res:0 bytes:256 words:64 nonzero:0 data_words:0 raw0:0x00000000 raw1:0x00000000 raw2:0x00000000 raw3:0x00000000
+[TELEMETRIA] FC:  84 BPM | SpO2: 91.0% | PA: 127/80 mmHg | Temp: 30.0 C | Estres: 42/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":84,"spo2":91.0,"systolic":127,"diastolic":80,"temperature":30.0,"stress":42,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  95 BPM | SpO2: 91.0% | PA: 133/83 mmHg | Temp: 30.0 C | Estres: 56/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":95,"spo2":91.0,"systolic":133,"diastolic":83,"temperature":30.0,"stress":56,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  95 BPM | SpO2: 91.0% | PA: 133/83 mmHg | Temp: 30.0 C | Estres: 56/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":95,"spo2":91.0,"systolic":133,"diastolic":83,"temperature":30.0,"stress":56,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  95 BPM | SpO2: 91.0% | PA: 133/83 mmHg | Temp: 30.0 C | Estres: 56/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":95,"spo2":91.0,"systolic":133,"diastolic":83,"temperature":30.0,"stress":56,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  95 BPM | SpO2: 91.0% | PA: 133/83 mmHg | Temp: 30.0 C | Estres: 56/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":95,"spo2":91.0,"systolic":133,"diastolic":83,"temperature":30.0,"stress":56,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  95 BPM | SpO2: 91.0% | PA: 133/83 mmHg | Temp: 30.0 C | Estres: 56/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":95,"spo2":91.0,"systolic":133,"diastolic":83,"temperature":30.0,"stress":56,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  95 BPM | SpO2: 91.0% | PA: 133/83 mmHg | Temp: 30.0 C | Estres: 56/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":95,"spo2":91.0,"systolic":133,"diastolic":83,"temperature":30.0,"stress":56,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  95 BPM | SpO2: 91.0% | PA: 133/83 mmHg | Temp: 30.0 C | Estres: 56/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":95,"spo2":91.0,"systolic":133,"diastolic":83,"temperature":30.0,"stress":56,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[DEBUG I2S AUDIO] res:0 bytes:256 words:64 nonzero:0 data_words:0 raw0:0x00000000 raw1:0x00000000 raw2:0x00000000 raw3:0x00000000
+[TELEMETRIA] FC:  95 BPM | SpO2: 91.0% | PA: 133/83 mmHg | Temp: 30.1 C | Estres: 56/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":95,"spo2":91.0,"systolic":133,"diastolic":83,"temperature":30.1,"stress":56,"hrv":20,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  78 BPM | SpO2: 91.0% | PA: 126/80 mmHg | Temp: 30.1 C | Estres: 35/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":78,"spo2":91.0,"systolic":126,"diastolic":80,"temperature":30.1,"stress":35,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  78 BPM | SpO2: 91.0% | PA: 124/78 mmHg | Temp: 30.1 C | Estres: 35/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":78,"spo2":91.0,"systolic":124,"diastolic":78,"temperature":30.1,"stress":35,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  78 BPM | SpO2: 91.0% | PA: 124/78 mmHg | Temp: 30.1 C | Estres: 35/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":78,"spo2":91.0,"systolic":124,"diastolic":78,"temperature":30.1,"stress":35,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  78 BPM | SpO2: 91.0% | PA: 124/78 mmHg | Temp: 30.1 C | Estres: 35/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":78,"spo2":91.0,"systolic":124,"diastolic":78,"temperature":30.1,"stress":35,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  78 BPM | SpO2: 91.0% | PA: 124/78 mmHg | Temp: 30.1 C | Estres: 35/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":78,"spo2":91.0,"systolic":124,"diastolic":78,"temperature":30.1,"stress":35,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  90 BPM | SpO2: 91.0% | PA: 130/82 mmHg | Temp: 30.1 C | Estres: 50/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":90,"spo2":91.0,"systolic":130,"diastolic":82,"temperature":30.1,"stress":50,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[TELEMETRIA] FC:  90 BPM | SpO2: 91.0% | PA: 130/82 mmHg | Temp: 30.1 C | Estres: 50/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":90,"spo2":91.0,"systolic":130,"diastolic":82,"temperature":30.1,"stress":50,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[DEBUG I2S AUDIO] res:0 bytes:256 words:64 nonzero:0 data_words:0 raw0:0x00000000 raw1:0x00000000 raw2:0x00000000 raw3:0x00000000
+[TELEMETRIA] FC:  90 BPM | SpO2: 91.0% | PA: 130/82 mmHg | Temp: 30.1 C | Estres: 50/100 | Audio:  0.0 dB | Dedo: SI | BLE: ESPERANDO
+{"bpm":90,"spo2":91.0,"systolic":130,"diastolic":82,"temperature":30.1,"stress":50,"hrv":95,"audio_rms":0.00,"audio_peak":0.00,"finger":true,"test":false,"device_id":"ESP32-BIO-01"}
+[
