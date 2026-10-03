@@ -1,5 +1,5 @@
 import { API_CONFIG, getSessionId } from '../config/api';
-import { VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange } from '../types/vitals';
+import { VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange, AcousticAnalysisResult } from '../types/vitals';
 
 const ZERO_VITALS: VitalSigns = {
   heartRate: 0,
@@ -130,6 +130,7 @@ class ApiService {
         anomaliesDetected: data.anomaliesDetected || [],
         confidence: data.confidence || 95,
         timestamp: data.timestamp || new Date().toISOString(),
+        acoustic_analysis: data.acoustic_analysis || null,
       };
     } catch (error) {
       return {
@@ -142,7 +143,23 @@ class ApiService {
         anomaliesDetected: [],
         confidence: 90,
         timestamp: new Date().toISOString(),
+        acoustic_analysis: null,
       };
+    }
+  }
+
+  async classifyAudio(features: Record<string, number>, sessionId?: string): Promise<AcousticAnalysisResult | null> {
+    try {
+      const sid = sessionId || getSessionId();
+      const response = await fetch(`${this.baseUrl}${API_CONFIG.ENDPOINTS.AI_AUDIO_CLASSIFY}`, {
+        method: 'POST',
+        headers: this.defaultHeaders,
+        body: JSON.stringify({ features, session_id: sid }),
+      });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
     }
   }
 

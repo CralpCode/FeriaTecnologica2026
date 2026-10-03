@@ -23,6 +23,7 @@ export const AIAssistantScreen: React.FC = () => {
     '¿Cómo están mis pulsaciones actuales?',
     '¿Mi oxigenación SpO2 es normal?',
     '¿Qué significa mi presión arterial?',
+    '¿Detectas ruidos pulmonares o sibilancias en mi auscultación?',
     'Dame una recomendación de bienestar completa',
   ];
 

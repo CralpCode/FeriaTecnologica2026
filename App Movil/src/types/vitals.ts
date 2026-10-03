@@ -27,6 +27,15 @@ export interface VitalsHistoryPoint {
   stressLevel: number;
 }
 
+export interface AcousticAnalysisResult {
+  prediction: string;             // "Normal" | "Patologico (Sibilancias/Crepitantes)"
+  is_abnormal: number;            // 0 (sano) | 1 (anomalía adventicia)
+  confidence: number;             // Certeza estadística del modelo (0 a 100%)
+  probability_abnormal?: number;   // Probabilidad sigmoidea (0.0 a 1.0)
+  model_name?: string;             // "Logistic Regression (L2)"
+  score_icbhi?: number;           // Métrica de benchmark clínico (ej. 61.22%)
+}
+
 export interface AIAnalysisReport {
   id: string;
   timestamp: string;
@@ -37,6 +46,7 @@ export interface AIAnalysisReport {
   recommendations: string[];
   anomaliesDetected: string[];
   confidence: number;           // Porcentaje de certeza del modelo IA
+  acoustic_analysis?: AcousticAnalysisResult | null; // Diagnóstico del clasificador ICBHI
 }
 
 export interface ChatMessage {
