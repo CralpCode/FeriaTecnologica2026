@@ -43,6 +43,9 @@ interface VitalsContextProps {
   connectDirectBluetooth: () => Promise<{ success: boolean; message: string; deviceName?: string }>;
   disconnectAllDevices: () => void;
   wakeDevice: () => Promise<boolean>;
+  startCardiacScan: () => Promise<boolean>;
+  startPulmonaryScan: () => Promise<boolean>;
+  stopScan: () => Promise<boolean>;
 }
 
 const ABSOLUTE_ZERO_VITALS: VitalSigns = {
@@ -381,6 +384,18 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     return await deviceBridge.wakeDevice();
   }, []);
 
+  const startCardiacScan = useCallback(async (): Promise<boolean> => {
+    return await deviceBridge.startCardiacScan();
+  }, []);
+
+  const startPulmonaryScan = useCallback(async (): Promise<boolean> => {
+    return await deviceBridge.startPulmonaryScan();
+  }, []);
+
+  const stopScan = useCallback(async (): Promise<boolean> => {
+    return await deviceBridge.stopScan();
+  }, []);
+
   const loadInitialData = useCallback(async () => {
     try {
       const hist = await apiService.getVitalsHistory(selectedRange);
@@ -496,6 +511,9 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         connectDirectBluetooth,
         disconnectAllDevices,
         wakeDevice,
+        startCardiacScan,
+        startPulmonaryScan,
+        stopScan,
       }}
     >
       {children}

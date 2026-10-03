@@ -2,7 +2,7 @@
   "expo": {
     "name": "SpiroScan AI",
     "slug": "vitalsync-ai",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -10,7 +10,7 @@
       "supportsTablet": true
     },
     "android": {
-      "versionCode": 4,
+      "versionCode": 5,
       "package": "com.spiroscan.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",

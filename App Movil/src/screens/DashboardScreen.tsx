@@ -32,7 +32,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onNavigateToPulmonary,
   onNavigateToCharts,
 }) => {
-  const { vitals, aiReport, wakeDevice } = useVitals();
+  const { vitals, aiReport, wakeDevice, startCardiacScan: startCardiacScanBle, stopScan } = useVitals();
 
   const isLive = vitals.heartRate > 0;
 
@@ -108,11 +108,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     setScanState('completed');
   }, []);
 
-  const startCardiacScan = useCallback(async () => {
-    // Despertar hardware ESP32 por BLE si estuviera en reposo
-    try {
-      await wakeDevice();
-    } catch {}
+  const startCardiacScan = useCallback(async (sendBleCommand: boolean = true) => {
+    if (sendBleCommand) {
+      try {
+        await startCardiacScanBle();
+      } catch {}
+    }
 
     setScanResult(null);
     scanSamplesRef.current = [];
@@ -139,13 +140,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         finishCardiacScan();
       }
     }, 1000);
-  }, [wakeDevice, progressAnim, finishCardiacScan]);
+  }, [startCardiacScanBle, progressAnim, finishCardiacScan]);
+
+  // Sincronización reactiva si se presiona el botón físico K1 (Corazón IO17) en el ESP32
+  useEffect(() => {
+    if (vitals.scan_mode === 'cardiac' && scanState !== 'scanning') {
+      console.log('[Dashboard] Botón físico K1 (Corazón) presionado en ESP32: Sincronizando interfaz...');
+      startCardiacScan(false);
+    }
+  }, [vitals.scan_mode, scanState, startCardiacScan]);
 
   const cancelCardiacScan = useCallback(() => {
     if (scanTimerRef.current) clearInterval(scanTimerRef.current);
     progressAnim.stopAnimation();
     setScanState('idle');
-  }, [progressAnim]);
+    try {
+      stopScan();
+    } catch {}
+  }, [progressAnim, stopScan]);
 
   useEffect(() => {
     return () => {
@@ -216,15 +228,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 <Text style={styles.cardiacPillText}>PROTOCOLO ESTANDARIZADO 20s</Text>
               </View>
             </View>
-            <Text style={styles.cardiacActionTitle}>Chequeo Cardíaco Acotado</Text>
+            <Text style={styles.cardiacActionTitle}>Chequeo Cardíaco Acotado (20s)</Text>
             <Text style={styles.cardiacActionSub}>
-              Muestrea y promedia con rigor clínico ritmo cardíaco, SpO2 y tensión durante 20 segundos evitando lecturas infinitas.
+              Muestrea y promedia con rigor clínico ritmo cardíaco, SpO2 y tensión durante 20s. Actívalo con este botón o pulsando el botón físico K1 (IO17) en tu pulsera.
             </Text>
           </View>
           <TouchableOpacity
             style={styles.cardiacStartBtn}
             activeOpacity={0.85}
-            onPress={startCardiacScan}
+            onPress={() => startCardiacScan(true)}
           >
             <MaterialCommunityIcons name="heart-pulse" size={22} color="#FFFFFF" />
             <Text style={styles.cardiacStartBtnText}>Iniciar Chequeo Cardíaco (20s)</Text>
@@ -328,7 +340,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <TouchableOpacity
               style={styles.repeatBtn}
               activeOpacity={0.85}
-              onPress={startCardiacScan}
+              onPress={() => startCardiacScan(true)}
             >
               <Ionicons name="refresh" size={16} color="#FFFFFF" />
               <Text style={styles.repeatBtnText}>Repetir Chequeo (20s)</Text>
@@ -358,7 +370,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           <TouchableOpacity
             style={styles.retryBtn}
             activeOpacity={0.85}
-            onPress={startCardiacScan}
+            onPress={() => startCardiacScan(true)}
           >
             <Ionicons name="refresh" size={16} color="#FFFFFF" />
             <Text style={styles.retryBtnText}>Reintentar Chequeo Cardíaco (20s)</Text>

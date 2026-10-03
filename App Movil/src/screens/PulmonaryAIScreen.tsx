@@ -26,7 +26,7 @@ interface PulmonarySessionResult {
 }
 
 export const PulmonaryAIScreen: React.FC = () => {
-  const { vitals, isBackendOnline, wakeDevice } = useVitals();
+  const { vitals, isBackendOnline, wakeDevice, startPulmonaryScan: startPulmonaryScanBle, stopScan } = useVitals();
 
   const [report, setReport] = useState<PulmonaryReport | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -108,13 +108,14 @@ export const PulmonaryAIScreen: React.FC = () => {
   }, [pulseAnim]);
 
   // Manejador del Protocolo de Auscultación Guiada de 20 Segundos
-  const startAuscultationProtocol = async () => {
+  const startAuscultationProtocol = async (sendBleCommand: boolean = true) => {
     if (isProtocolRunning) return;
 
-    // 1. Despertar hardware ESP32 por BLE
-    try {
-      await wakeDevice();
-    } catch {}
+    if (sendBleCommand) {
+      try {
+        await startPulmonaryScanBle();
+      } catch {}
+    }
 
     pulmonarySamplesRef.current = [];
     setIsProtocolRunning(true);
@@ -222,6 +223,14 @@ export const PulmonaryAIScreen: React.FC = () => {
       }
     }, 1000);
   };
+
+  // Sincronización reactiva si se presiona el botón físico K2 (Pulmón IO16) en el ESP32
+  useEffect(() => {
+    if (vitals.scan_mode === 'pulmonary' && !isProtocolRunning) {
+      console.log('[Pulmonary] Botón físico K2 (Pulmón) presionado en ESP32: Sincronizando protocolo...');
+      startAuscultationProtocol(false);
+    }
+  }, [vitals.scan_mode, isProtocolRunning]);
 
   useEffect(() => {
     return () => {
@@ -468,7 +477,7 @@ export const PulmonaryAIScreen: React.FC = () => {
         </View>
 
         <Text style={styles.protocolDesc}>
-          Prueba estandarizada de 20 segundos para aislar y clasificar ruidos adventicios (sibilancias, crepitantes o estridor) mediante IA.
+          Prueba estandarizada de 20 segundos para aislar y clasificar ruidos adventicios. Puedes iniciarla aquí o pulsando el botón físico K2 (IO16) en tu pulsera.
         </Text>
 
         {/* Escenario Activo Durante la Prueba */}
@@ -547,7 +556,7 @@ export const PulmonaryAIScreen: React.FC = () => {
             <TouchableOpacity
               style={styles.startProtocolBtn}
               activeOpacity={0.8}
-              onPress={startAuscultationProtocol}
+              onPress={() => startAuscultationProtocol(true)}
             >
               <Ionicons name="refresh" size={18} color="#FFFFFF" />
               <Text style={styles.startProtocolBtnText}>Repetir Auscultación (20s)</Text>
@@ -557,7 +566,7 @@ export const PulmonaryAIScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.startProtocolBtn}
             activeOpacity={0.8}
-            onPress={startAuscultationProtocol}
+            onPress={() => startAuscultationProtocol(true)}
           >
             <MaterialCommunityIcons name="play-circle-outline" size={22} color="#FFFFFF" />
             <Text style={styles.startProtocolBtnText}>Iniciar Auscultación Pulmonar (20s)</Text>

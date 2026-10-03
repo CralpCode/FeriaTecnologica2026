@@ -73,11 +73,23 @@ bool i2s_clock_counters_ready = false;
 int active_i2c_sda = I2C_SDA_PIN;
 int active_i2c_scl = I2C_SCL_PIN;
 
-// Interfaz de Usuario y Actuadores
-#define BUTTON_PIN         17   // Pulsador K1 (con Pull-up interno)
+// Interfaz de Usuario y Actuadores (Dos Botones Fisicos con Pull-Up Interno a GND)
+#define BUTTON_HEART_PIN   17   // Pulsador K1: Chequeo Cardiaco Acotado (20s)
+#define BUTTON_LUNG_PIN    16   // Pulsador K2: Auscultacion Pulmonar Acotada (20s)
+#define BUTTON_PIN         17   // Compatibilidad K1
 #define WS2812_PIN         25   // LED RGB WS2812B (LED1)
 #define ONBOARD_LED_PIN    2    // LED Azul interno de la placa
 #define NUM_LEDS           8    // Tira/Barra de 8 LEDs RGB direccionables
+
+// Modos y Temporizacion de Escaneos Acotados (Cero bucles infinitos)
+enum ScanMode {
+  SCAN_NONE = 0,
+  SCAN_CARDIAC = 1,
+  SCAN_PULMONARY = 2
+};
+ScanMode active_scan_mode = SCAN_NONE;
+unsigned long scan_start_ms = 0;
+const unsigned long SCAN_DURATION_MS = 20000; // 20 segundos estandarizados
 
 Adafruit_NeoPixel strip(NUM_LEDS, WS2812_PIN, NEO_GRB + NEO_KHZ800);
 MAX30105 particleSensor;
@@ -840,22 +852,89 @@ void enter_standby() {
   Serial.println(F("=========================================================================\r\n"));
 }
 
-void check_button() {
-  static int last_btn_state = HIGH;
-  static unsigned long btn_press_time = 0;
-  int current_state = digitalRead(BUTTON_PIN);
+void start_cardiac_scan() {
+  active_scan_mode = SCAN_CARDIAC;
+  scan_start_ms = millis();
+  activate_transmission();
+  Serial.println(F("\r\n========================================================================="));
+  Serial.println(F("  >>> [BOTON K1 IO17] INICIANDO CHEQUEO CARDIACO (20 SEGUNDOS)       <<<"));
+  Serial.println(F("  >>> Monitoreo de FC, SpO2, PTT y HRV con promedio estadistico.     <<<"));
+  Serial.println(F("=========================================================================\r\n"));
 
-  if (last_btn_state == HIGH && current_state == LOW) {
-    btn_press_time = millis();
-  } else if (last_btn_state == LOW && current_state == HIGH) {
-    unsigned long duration = millis() - btn_press_time;
-    if (duration > 50) {
-      // Cualquier pulsacion del boton K1 reactiva la transmision de 2 minutos
-      activate_transmission();
+  // Destello rapido Magenta/Rubi en la tira LED
+  for (int i = 0; i < NUM_LEDS; i++) {
+    strip.setPixelColor(i, strip.Color(255, 10, 80));
+  }
+  strip.show();
+}
+
+void start_pulmonary_scan() {
+  active_scan_mode = SCAN_PULMONARY;
+  scan_start_ms = millis();
+  activate_transmission();
+  Serial.println(F("\r\n========================================================================="));
+  Serial.println(F("  >>> [BOTON K2 IO16] INICIANDO AUSCULTACION PULMONAR (20 SEGUNDOS)  <<<"));
+  Serial.println(F("  >>> Analisis bio-acustico INMP441 + clasificacion espectral IA.    <<<"));
+  Serial.println(F("=========================================================================\r\n"));
+
+  // Destello rapido Cian/Turquesa en la tira LED
+  for (int i = 0; i < NUM_LEDS; i++) {
+    strip.setPixelColor(i, strip.Color(0, 210, 220));
+  }
+  strip.show();
+}
+
+void update_scan_status() {
+  if (active_scan_mode != SCAN_NONE) {
+    unsigned long elapsed = millis() - scan_start_ms;
+    if (elapsed >= SCAN_DURATION_MS) {
+      Serial.println(F("\r\n========================================================================="));
+      Serial.printf("  >>> [FIN DE ESCANEO] %s completado con exito (20s). <<<\r\n",
+                    active_scan_mode == SCAN_CARDIAC ? "Chequeo Cardiaco" : "Auscultacion Pulmonar");
+      Serial.println(F("=========================================================================\r\n"));
+
+      // Destello clinico verde de confirmacion de finalizacion en los 8 LEDs
+      for (int i = 0; i < NUM_LEDS; i++) {
+        strip.setPixelColor(i, strip.Color(0, 255, 60));
+      }
+      strip.show();
+      delay(250);
+
+      active_scan_mode = SCAN_NONE;
     }
   }
+}
 
-  last_btn_state = current_state;
+void check_buttons() {
+  // 1. Boton K1 (GPIO 17): Chequeo Cardiaco (20 segundos)
+  static int last_heart_state = HIGH;
+  static unsigned long heart_press_time = 0;
+  int current_heart_state = digitalRead(BUTTON_HEART_PIN);
+
+  if (last_heart_state == HIGH && current_heart_state == LOW) {
+    heart_press_time = millis();
+  } else if (last_heart_state == LOW && current_heart_state == HIGH) {
+    unsigned long duration = millis() - heart_press_time;
+    if (duration > 40) {
+      start_cardiac_scan();
+    }
+  }
+  last_heart_state = current_heart_state;
+
+  // 2. Boton K2 (GPIO 16): Auscultacion Pulmonar (20 segundos)
+  static int last_lung_state = HIGH;
+  static unsigned long lung_press_time = 0;
+  int current_lung_state = digitalRead(BUTTON_LUNG_PIN);
+
+  if (last_lung_state == HIGH && current_lung_state == LOW) {
+    lung_press_time = millis();
+  } else if (last_lung_state == LOW && current_lung_state == HIGH) {
+    unsigned long duration = millis() - lung_press_time;
+    if (duration > 40) {
+      start_pulmonary_scan();
+    }
+  }
+  last_lung_state = current_lung_state;
 }
 
 // ------------------------------------------------------------------------------
@@ -867,6 +946,13 @@ void handle_incoming_commands(String cmd) {
 
   if (cmd == "WAKE" || cmd == "W" || cmd == "ACTIVE") {
     activate_transmission();
+  } else if (cmd == "SCAN_CARD" || cmd == "CARD" || cmd == "HEART" || cmd == "CORAZON") {
+    start_cardiac_scan();
+  } else if (cmd == "SCAN_PULM" || cmd == "PULM" || cmd == "LUNG" || cmd == "PULMON") {
+    start_pulmonary_scan();
+  } else if (cmd == "STOP_SCAN" || cmd == "STOP") {
+    active_scan_mode = SCAN_NONE;
+    Serial.println(F("[ESCANEO] Escaneo detenido manualmente."));
   } else if (cmd == "SLEEP" || cmd == "S") {
     enter_standby();
   } else if (cmd == "MIC") {
@@ -874,12 +960,14 @@ void handle_incoming_commands(String cmd) {
   } else if (cmd == "MICSD") {
     report_i2s_sd();
   } else if (cmd == "STATUS" || cmd == "INFO") {
+    const char* scan_str = (active_scan_mode == SCAN_CARDIAC) ? "cardiac" :
+                           ((active_scan_mode == SCAN_PULMONARY) ? "pulmonary" : "none");
     char status_buf[256];
     snprintf(status_buf, sizeof(status_buf),
-             "{\"device\":\"%s\",\"ble_connected\":%s,\"sensor_hw\":%s,\"uptime_s\":%lu,\"i2c_sda\":%d,\"i2c_scl\":%d}",
+             "{\"device\":\"%s\",\"ble_connected\":%s,\"sensor_hw\":%s,\"uptime_s\":%lu,\"i2c_sda\":%d,\"i2c_scl\":%d,\"scan_mode\":\"%s\"}",
              BLE_DEVICE_NAME, ble_connected ? "true" : "false",
              sensor_hw_found ? "true" : "false", millis() / 1000,
-             active_i2c_sda, active_i2c_scl);
+             active_i2c_sda, active_i2c_scl, scan_str);
     if (ble_connected && pTelemetryCharacteristic) {
       pTelemetryCharacteristic->setValue(status_buf);
       pTelemetryCharacteristic->notify();
@@ -892,11 +980,28 @@ void handle_incoming_commands(String cmd) {
 // 10. TRANSMISION DE TELEMETRIA (BLE & SERIAL USB) - 100% REAL
 // ------------------------------------------------------------------------------
 void broadcast_telemetry() {
-  char json_payload[280];
+  const char* scan_str = "none";
+  int scan_remaining = 0;
+  bool scan_active = false;
+
+  if (active_scan_mode == SCAN_CARDIAC) {
+    scan_str = "cardiac";
+    scan_active = true;
+    unsigned long elapsed = millis() - scan_start_ms;
+    scan_remaining = (elapsed < SCAN_DURATION_MS) ? ((SCAN_DURATION_MS - elapsed) / 1000) : 0;
+  } else if (active_scan_mode == SCAN_PULMONARY) {
+    scan_str = "pulmonary";
+    scan_active = true;
+    unsigned long elapsed = millis() - scan_start_ms;
+    scan_remaining = (elapsed < SCAN_DURATION_MS) ? ((SCAN_DURATION_MS - elapsed) / 1000) : 0;
+  }
+
+  char json_payload[320];
   snprintf(json_payload, sizeof(json_payload),
-           "{\"bpm\":%d,\"spo2\":%.1f,\"systolic\":%d,\"diastolic\":%d,\"temperature\":%.1f,\"stress\":%d,\"hrv\":%d,\"audio_rms\":%.2f,\"audio_peak\":%.2f,\"finger\":%s,\"test\":false,\"device_id\":\"ESP32-BIO-01\"}",
+           "{\"bpm\":%d,\"spo2\":%.1f,\"systolic\":%d,\"diastolic\":%d,\"temperature\":%.1f,\"stress\":%d,\"hrv\":%d,\"audio_rms\":%.2f,\"audio_peak\":%.2f,\"finger\":%s,\"scan_mode\":\"%s\",\"scan_sec\":%d,\"scan_active\":%s,\"test\":false,\"device_id\":\"ESP32-BIO-01\"}",
            beat_avg, spo2_val, systolic_bp, diastolic_bp, body_temp, stress_score, hrv_ms,
-           audio_rms, audio_peak, finger_detected ? "true" : "false");
+           audio_rms, audio_peak, finger_detected ? "true" : "false",
+           scan_str, scan_remaining, scan_active ? "true" : "false");
 
   // 1. Envio por BLE (Directo a Google Chrome / Edge en Celular y PC sin cables)
   if (ble_connected && pTelemetryCharacteristic != NULL) {
@@ -911,9 +1016,9 @@ void broadcast_telemetry() {
   }
 
   // 2. Envio a Consola Serial USB (115200 baud)
-  Serial.printf("[TELEMETRIA] FC: %3d BPM | SpO2: %4.1f%% | PA: %3d/%2d mmHg | Temp: %4.1f C | Estres: %2d/100 | Audio: %4.1f dB | Dedo: %s | BLE: %s\r\n",
+  Serial.printf("[TELEMETRIA] FC: %3d BPM | SpO2: %4.1f%% | PA: %3d/%2d mmHg | Temp: %4.1f C | Estres: %2d/100 | Audio: %4.1f dB | Dedo: %s | Modo: %s (%ds)\r\n",
                 beat_avg, spo2_val, systolic_bp, diastolic_bp, body_temp, stress_score, audio_rms,
-                finger_detected ? "SI" : "NO", ble_connected ? "CONECTADO" : "ESPERANDO");
+                finger_detected ? "SI" : "NO", scan_str, scan_remaining);
   Serial.println(json_payload);
 }
 
@@ -1084,6 +1189,18 @@ void update_led_effects() {
 }
 
 
+// Callbacks para recepcion de comandos BLE desde la App Movil (WAKE, SCAN_CARD, SCAN_PULM)
+class TelemetryCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      std::string val = pCharacteristic->getValue();
+      if (val.length() > 0) {
+        String cmd = String(val.c_str());
+        Serial.printf("[BLE RX] Comando recibido: %s\r\n", cmd.c_str());
+        handle_incoming_commands(cmd);
+      }
+    }
+};
+
 // Callbacks del Servidor BLE (Auto-Reconexión Instantánea)
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
@@ -1120,7 +1237,9 @@ void setup() {
   Serial.println(F("  [MODO: TELEMETRIA 100% FISICA DE SENSORES - SIN SIMULACIONES]          "));
   Serial.println(F("========================================================================="));
 
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  // Configuracion de Botones Fisicos con Pull-Up Interno a GND
+  pinMode(BUTTON_HEART_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_LUNG_PIN, INPUT_PULLUP);
 
   strip.begin();
   strip.setBrightness(30); // Nivel óptimo de visibilidad, nitidez y elegancia clínica
@@ -1137,13 +1256,16 @@ void setup() {
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
-  // 1. Servicio SpiroScan Telemetría Completa (JSON)
+  // 1. Servicio SpiroScan Telemetría Completa (JSON) - Bidireccional
   BLEService *pService = pServer->createService(SERVICE_UUID);
   pTelemetryCharacteristic = pService->createCharacteristic(
                       CHARACTERISTIC_UUID,
-                      BLECharacteristic::PROPERTY_READ   |
+                      BLECharacteristic::PROPERTY_READ     |
+                      BLECharacteristic::PROPERTY_WRITE    |
+                      BLECharacteristic::PROPERTY_WRITE_NR |
                       BLECharacteristic::PROPERTY_NOTIFY
                     );
+  pTelemetryCharacteristic->setCallbacks(new TelemetryCallbacks());
   pTelemetryCharacteristic->addDescriptor(new BLE2902());
   pService->start();
 
@@ -1188,8 +1310,9 @@ void setup() {
 void loop() {
   unsigned long current_millis = millis();
 
-  // 1. Lectura del Boton K1 (Despertar / Reactivar transmision)
-  check_button();
+  // 1. Lectura de Botones Fisicos K1 (Corazon) y K2 (Pulmon)
+  check_buttons();
+  update_scan_status();
 
   // 2. Comandos desde Consola Serial USB
   if (Serial.available()) {

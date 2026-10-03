@@ -386,6 +386,21 @@ class DeviceBridgeService {
     return await this.sendCommand('WAKE');
   }
 
+  public async startCardiacScan(): Promise<boolean> {
+    console.log('[DeviceBridge] Activando escaneo cardiaco acotado en ESP32 (SCAN_CARD)...');
+    return await this.sendCommand('SCAN_CARD');
+  }
+
+  public async startPulmonaryScan(): Promise<boolean> {
+    console.log('[DeviceBridge] Activando auscultacion pulmonar en ESP32 (SCAN_PULM)...');
+    return await this.sendCommand('SCAN_PULM');
+  }
+
+  public async stopScan(): Promise<boolean> {
+    console.log('[DeviceBridge] Deteniendo escaneo en ESP32 (STOP_SCAN)...');
+    return await this.sendCommand('STOP_SCAN');
+  }
+
   public handleIncomingRawData(raw: RawDevicePacket) {
     // Si el usuario desconectó el dispositivo, ignorar paquetes residuales inmediatamente
     if (!this.isConnected) {
@@ -441,6 +456,8 @@ class DeviceBridgeService {
       timestamp: new Date().toISOString(),
       device_connected: true,
       finger: isFingerPresent,
+      scan_mode: raw.scan_mode || 'none',
+      scan_sec: raw.scan_sec !== undefined ? raw.scan_sec : 0,
     };
 
     this.notifyVitalsListeners(updatedVitals);

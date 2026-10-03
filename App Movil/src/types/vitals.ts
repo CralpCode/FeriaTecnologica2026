@@ -15,6 +15,8 @@ export interface VitalSigns {
   timestamp: string;            // ISO Date String
   device_connected?: boolean;   // Enlace activo con el ESP32
   finger?: boolean;             // Dedo detectado sobre el sensor
+  scan_mode?: 'cardiac' | 'pulmonary' | 'none'; // Modo de escaneo activo (disparado por boton fisico o app)
+  scan_sec?: number;            // Segundos restantes del escaneo
 }
 
 export interface VitalsHistoryPoint {
@@ -96,4 +98,6 @@ export interface RawDevicePacket {
   audio_peak: number;
   finger?: boolean;
   device_id?: string;
+  scan_mode?: 'cardiac' | 'pulmonary' | 'none';
+  scan_sec?: number;
 }
