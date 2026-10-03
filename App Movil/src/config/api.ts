@@ -1,4 +1,15 @@
-export const DEFAULT_CLOUD_BACKEND = 'https://antecedently-unsuppositive-teressa.ngrok-free.dev';
+export const PRIMARY_BACKEND_URL = 'https://ralph-physically-territories-gamma.trycloudflare.com';
+
+// Mecanismo de alta disponibilidad y tolerancia a fallos con múltiples endpoints ordenados por prioridad
+export const BACKEND_FALLBACK_URLS: string[] = [
+  'https://ralph-physically-territories-gamma.trycloudflare.com', // 1. Principal Cloudflare actual
+  'https://basin-appreciate-studio-freebsd.trycloudflare.com',    // 2. Respaldo Cloudflare secundario
+  'https://antecedently-unsuppositive-teressa.ngrok-free.dev',    // 3. Respaldo túnel Ngrok
+  'http://192.168.1.163:8000',                                    // 4. Respaldo LAN local
+  'http://localhost:8000',                                        // 5. Respaldo Localhost
+];
+
+export const DEFAULT_CLOUD_BACKEND = PRIMARY_BACKEND_URL;
 export const DEFAULT_LOCAL_LAN = 'http://192.168.1.163:8000';
 
 let memoryCustomUrl: string | null = null;
@@ -31,7 +42,7 @@ const getDynamicBaseUrl = () => {
   // 2. Entorno Web en navegador
   if (typeof window !== 'undefined' && window.location && window.location.hostname) {
     if (window.location.hostname.includes('trycloudflare.com')) {
-      return DEFAULT_CLOUD_BACKEND;
+      return PRIMARY_BACKEND_URL;
     }
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
       return 'http://localhost:8000';
@@ -40,7 +51,7 @@ const getDynamicBaseUrl = () => {
   }
 
   // 3. Entorno Nativo / APK móvil (acceso remoto global por defecto)
-  return process.env.EXPO_PUBLIC_API_URL || DEFAULT_CLOUD_BACKEND;
+  return process.env.EXPO_PUBLIC_API_URL || PRIMARY_BACKEND_URL;
 };
 
 export const getSessionId = (): string => {
@@ -90,6 +101,7 @@ export const API_CONFIG = {
     HISTORY: '/api/vitals/history',
     TELEMETRY: '/api/telemetry',
     AI_ANALYZE: '/api/ai/vitals/analyze',
+    AI_PULMONARY_ANALYZE: '/api/ai/pulmonary/analyze',
     AI_CHAT: '/api/ai/chat',
     AI_GENERATE: '/api/ai/llm/generate',
     DEVICE_STATUS: '/api/device/status',

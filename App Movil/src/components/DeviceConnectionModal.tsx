@@ -14,7 +14,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useVitals } from '../context/VitalsContext';
 import { deviceBridge } from '../services/DeviceBridgeService';
-import { DEFAULT_CLOUD_BACKEND, DEFAULT_LOCAL_LAN } from '../config/api';
+import { DEFAULT_CLOUD_BACKEND, DEFAULT_LOCAL_LAN, PRIMARY_BACKEND_URL, BACKEND_FALLBACK_URLS } from '../config/api';
 
 interface DeviceConnectionModalProps {
   visible: boolean;
@@ -288,22 +288,73 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
                   : 'Sin conexión a internet o backend inactivo. Consulta tus signos vitales en tiempo real directamente por Bluetooth.'}
               </Text>
 
-              {/* Selector Rápido de Backend */}
+              {/* Selector Rápido de Backend con Tolerancia a Fallos */}
               <View style={styles.backendPresetContainer}>
                 <TouchableOpacity
                   style={[
                     styles.presetBtn,
-                    backendUrl === DEFAULT_CLOUD_BACKEND && styles.presetBtnActive,
+                    backendUrl === PRIMARY_BACKEND_URL && styles.presetBtnActive,
                   ]}
-                  onPress={() => updateBackendUrl(DEFAULT_CLOUD_BACKEND)}
+                  onPress={() => updateBackendUrl(PRIMARY_BACKEND_URL)}
                 >
                   <MaterialCommunityIcons
-                    name="cloud-outline"
+                    name="cloud-check"
                     size={14}
-                    color={backendUrl === DEFAULT_CLOUD_BACKEND ? '#FFFFFF' : '#334155'}
+                    color={backendUrl === PRIMARY_BACKEND_URL ? '#FFFFFF' : '#0D9488'}
                   />
-                  <Text style={[styles.presetBtnText, backendUrl === DEFAULT_CLOUD_BACKEND && styles.presetBtnTextActive]}>
-                    Túnel Cloudflare
+                  <Text style={[styles.presetBtnText, backendUrl === PRIMARY_BACKEND_URL && styles.presetBtnTextActive]}>
+                    Cloudflare (Principal)
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.presetBtn,
+                    backendUrl === BACKEND_FALLBACK_URLS[1] && styles.presetBtnActive,
+                  ]}
+                  onPress={() => updateBackendUrl(BACKEND_FALLBACK_URLS[1])}
+                >
+                  <MaterialCommunityIcons
+                    name="shield-sync-outline"
+                    size={14}
+                    color={backendUrl === BACKEND_FALLBACK_URLS[1] ? '#FFFFFF' : '#334155'}
+                  />
+                  <Text style={[styles.presetBtnText, backendUrl === BACKEND_FALLBACK_URLS[1] && styles.presetBtnTextActive]}>
+                    Respaldo Cloudflare
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.presetBtn,
+                    backendUrl === BACKEND_FALLBACK_URLS[2] && styles.presetBtnActive,
+                  ]}
+                  onPress={() => updateBackendUrl(BACKEND_FALLBACK_URLS[2])}
+                >
+                  <MaterialCommunityIcons
+                    name="shield-outline"
+                    size={14}
+                    color={backendUrl === BACKEND_FALLBACK_URLS[2] ? '#FFFFFF' : '#334155'}
+                  />
+                  <Text style={[styles.presetBtnText, backendUrl === BACKEND_FALLBACK_URLS[2] && styles.presetBtnTextActive]}>
+                    Respaldo Ngrok
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.presetBtn,
+                    backendUrl === DEFAULT_LOCAL_LAN && styles.presetBtnActive,
+                  ]}
+                  onPress={() => updateBackendUrl(DEFAULT_LOCAL_LAN)}
+                >
+                  <MaterialCommunityIcons
+                    name="wifi"
+                    size={14}
+                    color={backendUrl === DEFAULT_LOCAL_LAN ? '#FFFFFF' : '#334155'}
+                  />
+                  <Text style={[styles.presetBtnText, backendUrl === DEFAULT_LOCAL_LAN && styles.presetBtnTextActive]}>
+                    WiFi LAN (192.168.1.163)
                   </Text>
                 </TouchableOpacity>
 

@@ -39,6 +39,30 @@ export interface AIAnalysisReport {
   confidence: number;           // Porcentaje de certeza del modelo IA
 }
 
+export interface PulmonaryProbabilities {
+  normal: number;      // Patrón Eupneico (%)
+  asthma: number;      // Asma Bronquial / Sibilancias (%)
+  pneumonia: number;   // Neumonía / Infiltrados (%)
+  copd: number;        // EPOC / Obstrucción (%)
+  bronchitis: number;  // Bronquitis / Tos paroxística (%)
+}
+
+export interface PulmonaryReport {
+  id: string;
+  timestamp: string;
+  health_score: number;         // 0 a 100
+  status: VitalStatus;
+  primary_prediction: string;   // Diagnóstico principal
+  acoustic_decibels: number;    // Nivel RMS detectado por INMP441
+  acoustic_peak: number;        // Pico de amplitud acústica
+  spo2: number;                 // Saturación SpO2 correlacionada
+  heart_rate: number;           // Frecuencia cardíaca asociada
+  probabilities: PulmonaryProbabilities;
+  findings: string[];           // Hallazgos clínicos
+  recommendations: string[];    // Consejos preventivos y médicos
+  confidence: number;           // Confianza del análisis
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'ai';

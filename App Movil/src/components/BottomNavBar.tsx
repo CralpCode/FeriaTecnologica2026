@@ -1,9 +1,9 @@
-﻿import React from 'react';
+import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 
-export type TabScreen = 'dashboard' | 'charts' | 'ai';
+export type TabScreen = 'dashboard' | 'pulmonary' | 'charts' | 'ai';
 
 interface BottomNavBarProps {
   currentTab: TabScreen;
@@ -18,6 +18,12 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({ currentTab, onSelect
       label: 'Monitoreo',
       iconFamily: 'MaterialCommunityIcons',
       iconName: 'heart-pulse',
+    },
+    {
+      id: 'pulmonary' as TabScreen,
+      label: 'IA Pulmonar',
+      iconFamily: 'MaterialCommunityIcons',
+      iconName: 'lungs',
     },
     {
       id: 'charts' as TabScreen,
@@ -39,7 +45,11 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({ currentTab, onSelect
       <View style={styles.innerBar}>
         {tabs.map((tab) => {
           const isActive = currentTab === tab.id;
-          const activeColor = tab.id === 'ai' ? Colors.aiPurple : Colors.heartRate;
+          const activeColor = tab.id === 'ai' 
+            ? Colors.aiPurple 
+            : tab.id === 'pulmonary' 
+            ? '#0D9488' 
+            : Colors.heartRate;
 
           return (
             <TouchableOpacity

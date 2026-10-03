@@ -46,42 +46,57 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   const liveDotOpacity = useRef(new Animated.Value(0.4)).current;
 
   useEffect(() => {
-    let breathAnimation: Animated.CompositeAnimation;
+    let breathAnimation: Animated.CompositeAnimation | null = null;
+    const isHeart = finalIcon === 'heart-pulse' || title.toLowerCase().includes('cardíaco');
+    const numericBpm = isHeart ? (typeof value === 'number' ? value : parseInt(String(value), 10) || 0) : 0;
 
-    if (finalIcon === 'heart-pulse' || title.toLowerCase().includes('cardíaco')) {
-      // Latido cardíaco fisiológico bifásico (Lub-Dub ventricular) 100% continuo sin cortes ni saltos
-      breathAnimation = Animated.loop(
-        Animated.sequence([
-          // Primer latido sistólico (Lub)
-          Animated.timing(iconScale, {
-            toValue: 1.25,
-            duration: 140,
-            easing: Easing.out(Easing.quad),
-            useNativeDriver: true,
-          }),
-          Animated.timing(iconScale, {
-            toValue: 1.05,
-            duration: 120,
-            easing: Easing.in(Easing.quad),
-            useNativeDriver: true,
-          }),
-          // Segundo latido sistólico (Dub)
-          Animated.timing(iconScale, {
-            toValue: 1.20,
-            duration: 130,
-            easing: Easing.out(Easing.quad),
-            useNativeDriver: true,
-          }),
-          Animated.timing(iconScale, {
-            toValue: 1.0,
-            duration: 180,
-            easing: Easing.in(Easing.quad),
-            useNativeDriver: true,
-          }),
-          // Pausa diastólica de reposo fisiológico
-          Animated.delay(450),
-        ])
-      );
+    if (isHeart) {
+      if (numericBpm <= 0) {
+        // En reposo (sin dedo o sin pulso): escala fija en 1.0 sin latidos fantasma
+        iconScale.setValue(1);
+      } else {
+        // Ciclo adaptado exactamente a la frecuencia cardíaca real (60,000 / BPM)
+        const cycleDuration = Math.round(60000 / Math.max(45, Math.min(180, numericBpm)));
+        const lubRise = Math.round(cycleDuration * 0.12);
+        const lubFall = Math.round(cycleDuration * 0.10);
+        const dubRise = Math.round(cycleDuration * 0.11);
+        const dubFall = Math.round(cycleDuration * 0.15);
+        const pause = Math.max(50, cycleDuration - (lubRise + lubFall + dubRise + dubFall));
+
+        breathAnimation = Animated.loop(
+          Animated.sequence([
+            // Primer latido sistólico (Lub)
+            Animated.timing(iconScale, {
+              toValue: 1.25,
+              duration: lubRise,
+              easing: Easing.out(Easing.quad),
+              useNativeDriver: true,
+            }),
+            Animated.timing(iconScale, {
+              toValue: 1.05,
+              duration: lubFall,
+              easing: Easing.in(Easing.quad),
+              useNativeDriver: true,
+            }),
+            // Segundo latido sistólico (Dub)
+            Animated.timing(iconScale, {
+              toValue: 1.20,
+              duration: dubRise,
+              easing: Easing.out(Easing.quad),
+              useNativeDriver: true,
+            }),
+            Animated.timing(iconScale, {
+              toValue: 1.0,
+              duration: dubFall,
+              easing: Easing.in(Easing.quad),
+              useNativeDriver: true,
+            }),
+            // Pausa diastólica adaptada al ritmo cardíaco medido
+            Animated.delay(pause),
+          ])
+        );
+        breathAnimation.start();
+      }
     } else {
       // Respiración suave y continua para otras métricas
       breathAnimation = Animated.loop(
@@ -100,6 +115,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
           }),
         ])
       );
+      breathAnimation.start();
     }
 
     const dotAnimation = Animated.loop(
@@ -119,14 +135,15 @@ export const MetricCard: React.FC<MetricCardProps> = ({
       ])
     );
 
-    breathAnimation.start();
     dotAnimation.start();
 
     return () => {
-      breathAnimation.stop();
+      if (breathAnimation) {
+        breathAnimation.stop();
+      }
       dotAnimation.stop();
     };
-  }, [finalIcon, title, iconScale, liveDotOpacity]);
+  }, [finalIcon, title, iconScale, liveDotOpacity, value]);
 
   const handlePressIn = () => {
     Animated.spring(pressScale, {

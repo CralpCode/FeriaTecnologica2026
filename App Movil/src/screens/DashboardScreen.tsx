@@ -1,6 +1,6 @@
-﻿import React from 'react';
+import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useVitals } from '../context/VitalsContext';
 import { MetricCard } from '../components/MetricCard';
@@ -9,11 +9,13 @@ import { AIInsightCard } from '../components/AIInsightCard';
 
 interface DashboardScreenProps {
   onNavigateToAI: () => void;
+  onNavigateToPulmonary?: () => void;
   onNavigateToCharts: () => void;
 }
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onNavigateToAI,
+  onNavigateToPulmonary,
   onNavigateToCharts,
 }) => {
   const { vitals, aiReport } = useVitals();
@@ -78,6 +80,34 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         <AIInsightCard report={aiReport} onAskAI={onNavigateToAI} />
       </TouchableOpacity>
 
+      {/* 2b. TARJETA DESTACADA: MÓDULO IA PULMONAR & AUSCULTACIÓN INMP441 */}
+      {onNavigateToPulmonary && (
+        <TouchableOpacity
+          activeOpacity={0.88}
+          onPress={onNavigateToPulmonary}
+          style={styles.pulmonaryBannerCard}
+        >
+          <View style={styles.pulmonaryBannerLeft}>
+            <View style={styles.pulmonaryIconCircle}>
+              <MaterialCommunityIcons name="lungs" size={24} color="#0D9488" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={styles.pulmonaryTagRow}>
+                <Text style={styles.pulmonaryTagText}>PREDICCIÓN NEUMOLÓGICA IA</Text>
+                <View style={styles.pulmonaryLiveDot} />
+              </View>
+              <Text style={styles.pulmonaryCardTitle}>Auscultación Pulmonar Digital</Text>
+              <Text style={styles.pulmonaryCardSub}>
+                {vitals.audio_rms ? `${vitals.audio_rms.toFixed(1)} dB RMS` : '0.0 dB'} · Detección de Asma, Neumonía y EPOC
+              </Text>
+            </View>
+          </View>
+          <View style={styles.pulmonaryArrowBtn}>
+            <Ionicons name="chevron-forward" size={18} color="#0D9488" />
+          </View>
+        </TouchableOpacity>
+      )}
+
       {/* 3. PARÁMETROS EN VIVO */}
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Métricas de Sensores Físicos</Text>
@@ -127,7 +157,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           subtitle="Algoritmo PTT"
         />
 
-        {/* Micrófono Bio-Acústico */}
+        {/* Micrófono Bio-Acústico (Acceso directo a IA Pulmonar) */}
         <MetricCard
           title="Micrófono Bio-Acústico"
           value={isLive && vitals.audio_rms ? vitals.audio_rms.toFixed(1) : '--'}
@@ -135,9 +165,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           status={audioStatus.status as any}
           statusText={audioStatus.text}
           icon="microphone"
-          color="#6366F1"
-          softColor="#EEF2FF"
-          subtitle="Audio I2S INMP441"
+          color="#0D9488"
+          softColor="#CCFBF1"
+          subtitle="Tocar para IA Pulmonar →"
+          onPress={onNavigateToPulmonary}
         />
 
         {/* Estrés Autonómico */}
@@ -206,5 +237,76 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
+  },
+  pulmonaryBannerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#99F6E4',
+    shadowColor: '#0D9488',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  pulmonaryBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
+  },
+  pulmonaryIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#F0FDFA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: '#CCFBF1',
+  },
+  pulmonaryTagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 2,
+  },
+  pulmonaryTagText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#0D9488',
+    letterSpacing: 0.5,
+  },
+  pulmonaryLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+  },
+  pulmonaryCardTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+  },
+  pulmonaryCardSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  pulmonaryArrowBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F0FDFA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#CCFBF1',
   },
 });

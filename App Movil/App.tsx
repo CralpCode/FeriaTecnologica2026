@@ -7,6 +7,7 @@ import { VitalsProvider, useVitals } from './src/context/VitalsContext';
 import { Header } from './src/components/Header';
 import { BottomNavBar, TabScreen } from './src/components/BottomNavBar';
 import { DashboardScreen } from './src/screens/DashboardScreen';
+import { PulmonaryAIScreen } from './src/screens/PulmonaryAIScreen';
 import { ChartsScreen } from './src/screens/ChartsScreen';
 import { AIAssistantScreen } from './src/screens/AIAssistantScreen';
 
@@ -30,9 +31,11 @@ const MainAppContent: React.FC = () => {
         {currentTab === 'dashboard' && (
           <DashboardScreen
             onNavigateToAI={() => setCurrentTab('ai')}
+            onNavigateToPulmonary={() => setCurrentTab('pulmonary')}
             onNavigateToCharts={() => setCurrentTab('charts')}
           />
         )}
+        {currentTab === 'pulmonary' && <PulmonaryAIScreen />}
         {currentTab === 'charts' && <ChartsScreen />}
         {currentTab === 'ai' && <AIAssistantScreen />}
       </View>
