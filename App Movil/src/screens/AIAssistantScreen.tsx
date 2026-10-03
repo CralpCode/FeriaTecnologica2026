@@ -23,6 +23,7 @@ export const AIAssistantScreen: React.FC = () => {
     '¿Cómo están mis pulsaciones actuales?',
     '¿Mi oxigenación SpO2 es normal?',
     '¿Qué resultado dio la auscultación?',
+    '¿Detectas ruidos pulmonares o sibilancias en mi auscultación?',
     'Resume esta sesión en pocas palabras',
     '¿Qué es SpiroScan y cómo funciona?',
   ];

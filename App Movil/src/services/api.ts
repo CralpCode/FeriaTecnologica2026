@@ -1,6 +1,6 @@
 import { API_CONFIG, getSessionId } from '../config/api';
 import {
-  VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange,
+  VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange, AcousticAnalysisResult,
   AuscultationFocus, AuscultationMode, RecordingResult, ClinicalAlert, FocusGuide, HeartModelInfo,
   SessionReport, TriageResult,
 } from '../types/vitals';
@@ -135,10 +135,26 @@ class ApiService {
         confidence: data.confidence ?? 0,
         method: data.method,
         timestamp: data.timestamp || new Date().toISOString(),
+        acoustic_analysis: data.acoustic_analysis || null,
       };
     } catch (error) {
       // Sin servidor no hay evaluación: se lanza el error para que el contexto use las reglas locales.
       throw error;
+    }
+  }
+
+  async classifyAudio(features: Record<string, number>, sessionId?: string): Promise<AcousticAnalysisResult | null> {
+    try {
+      const sid = sessionId || getSessionId();
+      const response = await fetch(`${this.baseUrl}${API_CONFIG.ENDPOINTS.AI_AUDIO_CLASSIFY}`, {
+        method: 'POST',
+        headers: this.defaultHeaders,
+        body: JSON.stringify({ features, session_id: sid }),
+      });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
     }
   }
 

@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
@@ -146,6 +146,47 @@ export const AIInsightCard: React.FC<AIInsightCardProps> = ({ report, onAskAI })
               <Text style={styles.recText}>{rec}</Text>
             </View>
           ))}
+        </View>
+      )}
+
+      {/* Auscultación Pulmonar Clínica (ICBHI Modelo IA) */}
+      {report.acoustic_analysis && (
+        <View
+          style={[
+            styles.acousticBox,
+            report.acoustic_analysis.is_abnormal ? styles.acousticBoxAlert : styles.acousticBoxNormal,
+          ]}
+        >
+          <View style={styles.acousticHeaderRow}>
+            <View style={styles.acousticTitleGroup}>
+              <MaterialCommunityIcons
+                name="stethoscope"
+                size={16}
+                color={report.acoustic_analysis.is_abnormal ? Colors.danger : Colors.success}
+              />
+              <Text style={styles.acousticTitle}>Auscultación Pulmonar (ICBHI IA)</Text>
+            </View>
+            <View
+              style={[
+                styles.acousticBadge,
+                {
+                  backgroundColor: report.acoustic_analysis.is_abnormal ? '#FEE2E2' : '#DCFCE7',
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.acousticBadgeText,
+                  { color: report.acoustic_analysis.is_abnormal ? '#B91C1C' : '#15803D' },
+                ]}
+              >
+                {report.acoustic_analysis.prediction}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.acousticDetailText}>
+            Certeza: {report.acoustic_analysis.confidence}% · Score ICBHI: {report.acoustic_analysis.score_icbhi || 61.22}% (Patient-Wise CV)
+          </Text>
         </View>
       )}
 
@@ -335,5 +376,49 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     flex: 1,
     textAlign: 'center',
+  },
+  acousticBox: {
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+  },
+  acousticBoxNormal: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
+  },
+  acousticBoxAlert: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  acousticHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  acousticTitleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  acousticTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginLeft: 6,
+  },
+  acousticBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  acousticBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  acousticDetailText: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+    marginTop: 2,
   },
 });

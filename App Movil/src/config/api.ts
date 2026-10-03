@@ -89,6 +89,7 @@ export const API_CONFIG = {
     HISTORY: '/api/vitals/history',
     TELEMETRY: '/api/telemetry',
     AI_ANALYZE: '/api/ai/vitals/analyze',
+    AI_AUDIO_CLASSIFY: '/api/ai/audio/classify',
     AI_CHAT: '/api/ai/chat',
     AI_GENERATE: '/api/ai/llm/generate',
     DEVICE_STATUS: '/api/device/status',

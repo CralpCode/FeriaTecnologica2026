@@ -28,6 +28,15 @@ export interface VitalsHistoryPoint {
   hrv?: number;
 }
 
+export interface AcousticAnalysisResult {
+  prediction: string;             // "Normal" | "Patologico (Sibilancias/Crepitantes)"
+  is_abnormal: number;            // 0 (sano) | 1 (anomalía adventicia)
+  confidence: number;             // Certeza estadística del modelo (0 a 100%)
+  probability_abnormal?: number;   // Probabilidad sigmoidea (0.0 a 1.0)
+  model_name?: string;             // "Logistic Regression (L2)"
+  score_icbhi?: number;           // Métrica de benchmark clínico (ej. 61.22%)
+}
+
 export interface AIAnalysisReport {
   id: string;
   timestamp: string;
@@ -39,6 +48,7 @@ export interface AIAnalysisReport {
   anomaliesDetected: string[];
   confidence: number;           // 0 cuando la evaluación es por reglas (no hay certeza de modelo)
   method?: string;
+  acoustic_analysis?: AcousticAnalysisResult | null; // Resultado del modelo base de pulmón (ICBHI)
 }
 
 export interface ChatMessage {

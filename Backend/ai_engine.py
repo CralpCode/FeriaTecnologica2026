@@ -51,6 +51,14 @@ def analyze_vitals_report(vitals: dict) -> dict:
     hr = vitals.get("heartRate", 0)
     spo2 = vitals.get("bloodOxygen", 0.0)
 
+    # Modelo base de pulmón (ICBHI): solo si alguien envía las 61 características ya calculadas.
+    acoustic = None
+    if vitals.get("audio_features"):
+        from ml import lung_baseline
+        acoustic = lung_baseline.classify_features(vitals["audio_features"])
+        if acoustic.get("prediction") == "no_disponible":
+            acoustic = None
+
     if hr == 0 and spo2 == 0.0:
         return {
             "id": str(uuid.uuid4())[:8],
@@ -63,6 +71,7 @@ def analyze_vitals_report(vitals: dict) -> dict:
             "anomaliesDetected": [],
             "confidence": 0,
             "method": "reglas",
+            "acoustic_analysis": acoustic,
         }
 
     anomalies = []
@@ -97,6 +106,13 @@ def analyze_vitals_report(vitals: dict) -> dict:
     else:
         recommendations.append("Saturación de oxígeno en rango normal (≥ 94 %).")
 
+    if acoustic and acoustic.get("is_abnormal") == 1:
+        anomalies.append(f"Posibles ruidos respiratorios anormales (modelo base: {acoustic['prediction']})")
+        recommendations.append("Es un tamizaje: se sugiere auscultación por personal de salud.")
+        if status != "critical":
+            status = "caution"
+        health_score -= 15
+
     health_score = max(20, min(100, health_score))
     title = "Monitoreo Estable" if status == "normal" else ("Parámetros Alterados" if status == "caution" else "Alerta")
     summary = f"Lecturas actuales: {hr} BPM, {spo2}% SpO2. Evaluación por reglas; no es un diagnóstico."
@@ -113,4 +129,5 @@ def analyze_vitals_report(vitals: dict) -> dict:
         # Reglas fijas: no hay un "porcentaje de certeza" que reportar.
         "confidence": 0,
         "method": "reglas",
+        "acoustic_analysis": acoustic,
     }
