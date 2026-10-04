@@ -23,6 +23,7 @@ BASE_RULES = (
     "6. Español claro y sin jerga, para un promotor de salud o una persona sin formación médica.\n"
     "7. Si hay 'patrón compatible con' una enfermedad, dilo SIEMPRE como sugerencia a confirmar por un médico, "
     "nunca como diagnóstico. Las características del soplo describen cómo suena, no su causa.\n"
+    "8. Nunca inventes cifras, umbrales ni porcentajes: si mencionas un número, debe aparecer tal cual en los datos.\n"
 )
 
 KNOWLEDGE_PATH = Path(__file__).resolve().parent / "knowledge" / "proyecto.md"
@@ -107,6 +108,7 @@ def alert_text(alert: dict) -> dict | None:
     prompt = (
         "Reescribe esta alerta generada por reglas para quien está usando el dispositivo.\n"
         f"Alerta: {json.dumps({k: alert[k] for k in ('type', 'severity', 'title', 'message', 'action', 'data')}, ensure_ascii=False)}\n"
+        "Usa solo los números que aparecen en la alerta (si no hay umbral en los datos, no menciones ninguno).\n"
         'Responde JSON: {"mensaje": "máximo 2 oraciones: qué pasó", "accion": "máximo 2 oraciones: qué hacer ahora"}'
     )
     try:

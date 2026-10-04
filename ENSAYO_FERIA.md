@@ -4,7 +4,7 @@ Hacerlo completo al menos una vez, con el mismo equipo y red que se usarán en l
 
 ## Antes de llegar
 - [ ] Rama aprobada y unida a `main` (Pull Request revisado por el equipo).
-- [ ] Mac cargada, con el cargador y Ollama con `qwen3:32b` descargado.
+- [ ] Mac cargada, con el cargador y Ollama con `qwen3-next-pro` (base de `spiroscan-qwen3next`) descargado.
 - [ ] Router o hotspot propio de **2.4 GHz** (no depender del WiFi de la feria).
 - [ ] `Esp32/spiroscan_config.h` con ese WiFi; firmware subido y `DIAG` sin errores (ver `Esp32/PRUEBAS_HARDWARE.md`).
 - [ ] Batería del ESP32 cargada; estetoscopio, fantoma y un oxímetro comercial para comparar.

@@ -30,7 +30,7 @@ Manual:
 python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-Configuración en `.env` (ver `.env.example`): `LLM_BASE_URL`, `LLM_MODEL` (por defecto `qwen3:32b`),
+Configuración en `.env` (ver `.env.example`): `LLM_BASE_URL`, `LLM_MODEL` (por defecto `spiroscan-qwen3next`, Qwen3-Next 80B; respaldo `qwen3:32b`),
 `HEART_MODEL_PATH`. Para usar Splash en lugar de Ollama basta con cambiar `LLM_BASE_URL`.
 
 El modelo `models/heart_cnn.pt` se entrena en la carpeta `IA/` (`train_heart.py`) y se copia aquí
