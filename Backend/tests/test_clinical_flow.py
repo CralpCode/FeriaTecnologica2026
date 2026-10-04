@@ -19,11 +19,18 @@ import ai_engine
 import llm_tasks
 from fastapi.testclient import TestClient
 import main
+import audio_service
+import reports
 
 
 class ClinicalFlowTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        # Audios e informes de prueba en carpetas temporales, nunca en Backend/recordings ni reports
+        for module, attr in ((audio_service, 'REC_DIR'), (reports, 'REPORT_DIR')):
+            patcher = patch.object(module, attr, Path(self.tmp.name))
+            patcher.start()
+            self.addCleanup(patcher.stop)
         database.DB_PATH = str(Path(self.tmp.name) / 'test.db')
         database.init_db()
         main._sessions_cache.clear()

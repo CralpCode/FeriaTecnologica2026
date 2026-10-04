@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +22,8 @@ import measurement_quality
 import alerts
 from fastapi.testclient import TestClient
 import main
+import audio_service
+import reports
 
 # Formato que envía el firmware original (Esp32.ino en e45fde1): sin indicadores de calidad.
 LEGACY = {"bpm": 72, "spo2": 98.2, "stress": 40, "hrv": 50, "audio_rms": 12.5, "audio_peak": 30.1,
@@ -30,6 +33,11 @@ LEGACY = {"bpm": 72, "spo2": 98.2, "stress": 40, "hrv": 50, "audio_rms": 12.5, "
 class Esp32InputTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        # Audios e informes de prueba en carpetas temporales, nunca en Backend/recordings ni reports
+        for module, attr in ((audio_service, 'REC_DIR'), (reports, 'REPORT_DIR')):
+            patcher = patch.object(module, attr, Path(self.tmp.name))
+            patcher.start()
+            self.addCleanup(patcher.stop)
         database.DB_PATH = str(Path(self.tmp.name) / 'test.db')
         database.init_db()
         main._sessions_cache.clear()
