@@ -1,6 +1,6 @@
 # 🚀 Backend API - SpiroScan (Feria Tecnológica)
 
-> **Actualización 2026-10-03:** el resumen clínico, informes y semáforo usan reglas trazables y resultados acústicos de la sesión. El LLM se conserva para guía de uso. SpO2, HRV y estrés no están disponibles como mediciones validadas en el firmware actualizado. [Informe completo](../docs/INFORME_MEJORAS_2026-10-03.md).
+> **Actualización 2026-10-03:** el resumen clínico, informes y semáforo usan reglas trazables y resultados acústicos de la sesión. El LLM (Qwen3-Next) redacta el chat, el resumen del informe y las alertas a partir de esos datos, con verificación de cifras. SpO2, HRV y estrés no están disponibles como mediciones validadas. [Informe completo](../docs/INFORME_MEJORAS_2026-10-03.md).
 
 
 Servidor en **Python + FastAPI + SQLite (WAL)** que corre en la Mac del equipo y concentra todo:
@@ -62,15 +62,16 @@ junto con su `heart_cnn.json` (umbral y métricas). `ml/features.py` debe ser id
 ---
 
 ## ⚠️ Qué mide y qué no mide el dispositivo
-- **Mide:** pulso y SpO2 (MAX30102), variabilidad entre latidos (HRV) y audio cardíaco (INMP441).
+- **Mide:** pulso (MAX30102) y audio cardíaco y pulmonar (INMP441).
+- **No usa todavía:** SpO2, variabilidad entre latidos (HRV) ni el "índice de estrés", hasta tener un cálculo calibrado y validado.
 - **No mide:** presión arterial ni temperatura corporal. Esos campos quedan en 0 por compatibilidad.
-- El "índice de estrés" es experimental y no está validado.
 
 ## Contexto y valoración orientativa
 
 - `GET/PUT /api/clinical/context/{session_id}`: edad, reposo, altitud, síntomas y antecedentes; `null` conserva desconocidos.
 - `GET /api/clinical/assessment/{session_id}`: hallazgos, posibilidades a confirmar, fuentes y limitaciones; sin probabilidades de enfermedad.
 - Telemetría: `source`, `heartRateValid`, `bloodOxygenValid`, `spo2Calibrated`, `signalQuality`, `sampleAgeMs`, `finger`. Datos sin procedencia/validez no se usan clínicamente.
-- Audio: `source` en `/api/audio/start` y `/api/audio/upload` (`real`, `simulated`, `unknown`). Por defecto `unknown`.
+- Telemetría del firmware original (sin esos campos): el servidor valida el pulso (dedo puesto, 30–220 BPM, estable en 3 lecturas) y no guarda SpO2, HRV ni estrés. Campos faltantes, raros o fuera de rango quedan vacíos y se informan en `avisos`; cuerpo no JSON → 422, más de 8 KB → 413.
+- Audio: `source` en `/api/audio/start` y `/api/audio/upload` (`real`, `simulated`, `unknown`). En `/api/audio/start` sin `source` se toma `real` (solo el dispositivo usa ese flujo); en `/api/audio/upload`, `unknown`. Un `finish` repetido devuelve el resultado guardado.
 - Exportaciones: especificar `session_id`; sin mezcla de sesiones ni puntuaciones de salud. PDF/HTML resumen la sesión; CSV/XLSX/PNG respetan el periodo solicitado.
 - Pruebas aisladas: `SPIROSCAN_DB_PATH` con base temporal y `SPIROSCAN_MDNS=0` para no anunciar el servidor de pruebas.

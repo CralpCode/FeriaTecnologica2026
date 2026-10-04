@@ -8,12 +8,13 @@ Prototipo de tamizaje cardiorrespiratorio con ESP32, MAX30102 e INMP441. El PDF 
 
 ## Datos disponibles
 
-- El firmware obtiene señales roja e infrarroja del MAX30102 y estima pulso, con controles de contacto, calidad, estabilización y caducidad.
+- El firmware actualizado obtiene señales roja e infrarroja del MAX30102 y estima pulso, con controles de contacto, calidad, estabilización y caducidad. El ESP32 de la feria puede tener todavía el firmware original, sin esos controles: en ese caso el servidor da el pulso por válido solo con el dedo puesto, entre 30 y 220 BPM y estable en 3 lecturas seguidas, y descarta la SpO2, la HRV y el estrés de ese firmware.
 - La SpO2 queda **no disponible**: el cálculo anterior incluía valores inventados y recortes. Se requiere implementar y validar un algoritmo calibrado para el sistema óptico completo. No se debe activar un indicador de calibración para saltar este requisito.
 - HRV, estrés, presión arterial, temperatura corporal y ECG no se presentan como mediciones válidas.
 - El INMP441 graba sonido. El nivel digital en dBFS no es presión sonora en dB SPL.
 - La edad, síntomas, reposo, altitud y antecedentes provienen de respuestas explícitas del usuario. Un dato no contestado permanece desconocido.
-- Las demostraciones no representan signos vitales del paciente ni se incorporan a la valoración clínica.
+- Los casos demo ICBHI son audios de pacientes de esa base pública, no de la persona medida. Entran al semáforo de su sesión siempre marcados DEMO y no aportan signos vitales.
+- La temperatura no se mide; la fiebre solo se registra como síntoma comunicado (Sí/No/No sé) en el formulario de Auscultación.
 
 ## IA acústica
 
@@ -25,7 +26,9 @@ El descriptor de características del soplo permanece desactivado: la auditoría
 
 ### Pulmones
 Con la base pública ICBHI 2017 (126 pacientes, 920 grabaciones) se entrenaron dos modelos de pulmón y se
-evaluaron con pacientes no vistos. Solo se muestra lo confiable:
+evaluaron con pacientes no vistos (partición por paciente del equipo; el archivo de partición oficial del
+challenge no está en la copia de trabajo, así que sus cifras no son comparables con el puntaje oficial).
+Solo se muestra lo confiable:
 - Sibilancias: SÍ se muestran. En grabaciones completas detecta ≈ 59 % de las que tienen sibilancias y
   reconoce ≈ 81 % de las normales (AUC ≈ 0.72).
 - Crepitantes: NO se muestran (AUC ≈ 0.53, casi como adivinar).
@@ -33,13 +36,15 @@ evaluaron con pacientes no vistos. Solo se muestra lo confiable:
   (acierto balanceado ≈ 47 %). Reconoce bien EPOC y sanos, pero falla en las demás.
 Es una sugerencia para referir, nunca un diagnóstico.
 
-Hay un modelo pulmonar base de regresión logística. Su puntaje ICBHI reportado por el autor no se volvió a verificar con el dataset completo. No hay pesos CNN pulmonares entrenados disponibles. Faltan los audios ICBHI y su partición oficial en la copia de trabajo; tener fichas clínicas no equivale a tener esos audios.
+Hay además un modelo pulmonar base de regresión logística (del equipo). Su puntaje ICBHI reportado por el autor no se volvió a verificar con el dataset completo. Los casos demo ICBHI usan este modelo base.
 
 ## Valoración orientativa
 
 Se combinan resultados acústicos, mediciones válidas y síntomas mediante reglas explícitas con fuentes FDA, NHLBI y NICE. Pueden sugerirse causas para investigar, con explicación y pruebas confirmatorias. No existe aquí una red multimodal validada ni porcentajes de enfermedad o de salud. Los síntomas de alarma tienen prioridad incluso si los sensores parecen normales.
 
-La API, el semáforo, los informes y el resumen clínico del asistente comparten este motor. Los textos clínicos son deterministas para evitar que un modelo generativo agregue datos. El LLM local conserva su función de guía de uso, separado de las decisiones clínicas.
+La API, el semáforo, los informes y el chat comparten este motor. Las secciones clínicas del informe son fijas (reglas). El modelo de lenguaje local (Qwen3-Next) redacta el chat, un resumen en lenguaje sencillo del informe y el texto de las alertas a partir de estos datos; no decide hallazgos ni enfermedades, y un texto con cifras que no están en los datos se descarta.
+
+Semáforo: ROJO si hay un síntoma de alarma o SpO2 calibrada menor de 90 %. AMARILLO si hay hallazgos (SpO2 calibrada menor de 94 %, pulso fuera de 45 a 120 BPM en un adulto en reposo, sonido cardíaco o pulmonar anormal) o síntomas comunicados. GRIS si faltan datos. VERDE solo sin hallazgos ni datos faltantes; hoy no se alcanza porque no hay SpO2 calibrada.
 
 ## Uso
 
