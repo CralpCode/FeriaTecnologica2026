@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -9,23 +9,27 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
-  TextInput,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
+import { useModalLayout } from '../hooks/useLayout';
 import { useDeviceConnection } from '../context/VitalsContext';
-import { DEFAULT_CLOUD_BACKEND, DEFAULT_LOCAL_LAN, PRIMARY_BACKEND_URL, BACKEND_FALLBACK_URLS } from '../config/api';
+import { deviceBridge } from '../services/DeviceBridgeService';
+import { DEFAULT_LOCAL_LAN } from '../config/api';
 
 interface DeviceConnectionModalProps {
   visible: boolean;
   onClose: () => void;
+  onOpenClinicalDemo?: () => void;
 }
 
-export const DeviceConnectionModalComponent: React.FC<DeviceConnectionModalProps> = ({ visible, onClose }) => {
+export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ visible, onClose, onOpenClinicalDemo }) => {
+  const modal = useModalLayout();
   const {
     connectedType,
     device,
     connectDirectBluetooth,
+    connectViaServer,
     disconnectAllDevices,
     isBackendOnline,
     backendUrl,
@@ -33,49 +37,41 @@ export const DeviceConnectionModalComponent: React.FC<DeviceConnectionModalProps
   } = useDeviceConnection();
 
   const [isConnecting, setIsConnecting] = useState(false);
-  const [connectSuccess, setConnectSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [customUrlInput, setCustomUrlInput] = useState(backendUrl || '');
-  const [isTestingUrl, setIsTestingUrl] = useState(false);
-  const [urlTestStatus, setUrlTestStatus] = useState<'online' | 'offline' | null>(null);
-  const scrollRef = useRef<any>(null);
-
-  useEffect(() => {
-    setCustomUrlInput(backendUrl || '');
-  }, [backendUrl]);
 
   const handleBluetoothConnect = async () => {
     setErrorMessage(null);
-    setConnectSuccess(false);
     setIsConnecting(true);
 
     try {
       const res = await connectDirectBluetooth();
       if (!res.success) {
         setErrorMessage(res.message);
-        setIsConnecting(false);
       } else {
-        setConnectSuccess(true);
-        setIsConnecting(false);
-        // Breve retardo para dar feedback visual y permitir al bus BLE estabilizarse sin colisión gráfica
-        setTimeout(() => {
-          setConnectSuccess(false);
-          onClose();
-        }, 600);
+        onClose();
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Error al conectar por Bluetooth.');
+    } finally {
       setIsConnecting(false);
     }
   };
 
-  if (!visible) return null;
+  const handleWifiConnect = async () => {
+    setErrorMessage(null);
+    setIsConnecting(true);
+    const res = await connectViaServer();
+    setIsConnecting(false);
+    if (res.success) onClose();
+    else setErrorMessage(res.message);
+  };
+
+  const isWebBleSupported = deviceBridge.isWebBluetoothSupported();
 
   return (
-    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
+    <Modal visible={visible} animationType={modal.animationType} transparent onRequestClose={onClose}>
+      <View style={[styles.modalOverlay, modal.overlay]}>
+        <View style={[styles.modalContent, modal.sheet]}>
           {/* Cabecera */}
           <View style={styles.header}>
             <View style={styles.headerTitleRow}>
@@ -92,7 +88,7 @@ export const DeviceConnectionModalComponent: React.FC<DeviceConnectionModalProps
                 />
               </View>
               <View>
-                <Text style={styles.headerTitle}>Gestor Bluetooth Directo</Text>
+                <Text style={styles.headerTitle}>Conexión del dispositivo</Text>
                 <Text style={styles.headerSubtitle}>
                   {connectedType !== 'none'
                     ? `● Enlazado a: ${device?.name || 'SpiroScan-Band'}`
@@ -129,6 +125,8 @@ export const DeviceConnectionModalComponent: React.FC<DeviceConnectionModalProps
                 >
                   {connectedType === 'direct_ble'
                     ? 'ENLACE DIRECTO BLUETOOTH BLE ACTIVO'
+                    : connectedType === 'demo_icbhi'
+                    ? 'BANCO DE PRUEBAS CLÍNICAS (ICBHI 2017)'
                     : connectedType !== 'none'
                     ? 'ENLAZADO A SPIROSCAN'
                     : 'DISPOSITIVO EN ESPERA (CERO ABSOLUTO)'}
@@ -139,7 +137,9 @@ export const DeviceConnectionModalComponent: React.FC<DeviceConnectionModalProps
                     { color: connectedType !== 'none' ? '#166534' : '#7F1D1D' },
                   ]}
                 >
-                  {connectedType !== 'none'
+                  {connectedType === 'demo_icbhi'
+                    ? 'Modo demostración: audio real de ICBHI 2017 con pulso y SpO2 de ejemplo.'
+                    : connectedType !== 'none'
                     ? 'Recibiendo telemetría física en tiempo real del sensor MAX30102.'
                     : 'Sincroniza directamente con tu pulsera SpiroScan por Bluetooth.'}
                 </Text>
@@ -163,15 +163,35 @@ export const DeviceConnectionModalComponent: React.FC<DeviceConnectionModalProps
             </View>
           )}
 
-          <ScrollView
-            ref={scrollRef}
-            style={styles.scrollArea}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={true}
-            nestedScrollEnabled={true}
-            keyboardShouldPersistTaps="handled"
-          >
-            <Text style={styles.sectionHeading}>DISPOSITIVO FÍSICO (BLE)</Text>
+          <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
+            <Text style={styles.sectionHeading}>ESP32 POR WIFI (RECOMENDADO)</Text>
+
+            <View style={[styles.deviceCard, connectedType === 'wokwi_wifi' && styles.deviceCardActive]}>
+              <View style={styles.deviceCardHeader}>
+                <View style={[styles.deviceIconWrapper, { backgroundColor: connectedType === 'wokwi_wifi' ? '#DCFCE7' : '#EFF6FF' }]}>
+                  <MaterialCommunityIcons name="wifi" size={22} color={connectedType === 'wokwi_wifi' ? '#16A34A' : Colors.primary} />
+                </View>
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={styles.deviceCardTitle}>SpiroScan por WiFi</Text>
+                  <Text style={styles.deviceCardSub}>El ESP32 envía pulso, SpO2 y audio a la Mac</Text>
+                  <Text style={styles.deviceCardBadgeText}>Funciona en cualquier celular con el navegador</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={[styles.actionBtnFull, styles.actionBtnConnect, isConnecting && { opacity: 0.7 }]}
+                disabled={isConnecting || connectedType === 'wokwi_wifi'}
+                onPress={handleWifiConnect}
+              >
+                <View style={styles.actionBtnContent}>
+                  <MaterialCommunityIcons name="wifi-check" size={18} color="#FFFFFF" />
+                  <Text style={[styles.actionBtnTextFull, styles.actionTextConnect]}>
+                    {connectedType === 'wokwi_wifi' ? 'Recibiendo datos del servidor' : 'Recibir datos en esta sesión'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.sectionHeading, { marginTop: 18 }]}>DISPOSITIVO FÍSICO (BLE)</Text>
 
             {/* Opción SpiroScan BLE Físico */}
             <View
@@ -215,14 +235,10 @@ export const DeviceConnectionModalComponent: React.FC<DeviceConnectionModalProps
               <TouchableOpacity
                 style={[
                   styles.actionBtnFull,
-                  connectSuccess
-                    ? { backgroundColor: '#16A34A' }
-                    : connectedType !== 'none'
-                    ? styles.actionBtnDisconnect
-                    : styles.actionBtnConnect,
-                  isConnecting && { opacity: 0.75 },
+                  connectedType !== 'none' ? styles.actionBtnDisconnect : styles.actionBtnConnect,
+                  isConnecting && { opacity: 0.7 },
                 ]}
-                disabled={isConnecting || connectSuccess}
+                disabled={isConnecting}
                 onPress={() => {
                   if (connectedType !== 'none') {
                     disconnectAllDevices();
@@ -232,17 +248,7 @@ export const DeviceConnectionModalComponent: React.FC<DeviceConnectionModalProps
                 }}
               >
                 {isConnecting ? (
-                  <View style={styles.actionBtnContent}>
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                    <Text style={styles.actionBtnTextFull}>Enlazando con SpiroScan...</Text>
-                  </View>
-                ) : connectSuccess ? (
-                  <View style={styles.actionBtnContent}>
-                    <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
-                    <Text style={[styles.actionBtnTextFull, { color: '#FFFFFF', fontWeight: '800' }]}>
-                      ¡Dispositivo Enlazado!
-                    </Text>
-                  </View>
+                  <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
                   <View style={styles.actionBtnContent}>
                     <MaterialCommunityIcons
@@ -289,263 +295,126 @@ export const DeviceConnectionModalComponent: React.FC<DeviceConnectionModalProps
               <View style={styles.guideRow}>
                 <Ionicons name="shield-checkmark" size={14} color="#2563EB" />
                 <Text style={styles.guideStep}>
-                  Cero cables ni servidores intermedios: conexión directa por radio BLE.
+                  Bluetooth web solo funciona en Chrome con https o localhost; en la feria usa la opción WiFi.
                 </Text>
               </View>
             </View>
 
-            {/* Botón Acordeón para Opciones Avanzadas de Servidor */}
-            <TouchableOpacity
-              style={styles.advancedToggleBtn}
-              activeOpacity={0.7}
-              onPress={() => {
-                setShowAdvanced((prev) => !prev);
-              }}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <MaterialCommunityIcons name="cog-outline" size={18} color="#64748B" />
-                <Text style={styles.advancedToggleBtnText}>Opciones Avanzadas (Servidores Backend)</Text>
-              </View>
-              <Ionicons
-                name={showAdvanced ? "chevron-up" : "chevron-down"}
-                size={18}
-                color="#64748B"
-              />
-            </TouchableOpacity>
+            {/* Sección de Servidor Backend y Nube */}
+            <Text style={[styles.sectionHeading, { marginTop: 18 }]}>SERVIDOR SPIROSCAN (MAC)</Text>
 
-            {showAdvanced && (
-              <View style={{ marginTop: 8 }}>
-                {/* Sección de Servidor Backend y Nube */}
-                <Text style={styles.sectionHeading}>NUBE & SERVIDOR BACKEND</Text>
-
-                <View style={styles.cloudConfigCard}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                      <MaterialCommunityIcons
-                        name={isBackendOnline ? 'server-network' : 'server-network-off'}
-                        size={20}
-                        color={isBackendOnline ? '#16A34A' : '#64748B'}
-                      />
-                      <Text style={styles.cloudCardTitle}>
-                        {isBackendOnline ? 'Servidor Conectado: EN LÍNEA' : 'Modo Autónomo / Sin Conexión'}
-                      </Text>
-                    </View>
-                    <View style={[styles.cloudPill, isBackendOnline ? styles.cloudPillOnline : styles.cloudPillOffline]}>
-                      <Text style={[styles.cloudPillText, { color: isBackendOnline ? '#15803D' : '#64748B' }]}>
-                        {isBackendOnline ? 'ACTIVO' : 'OFFLINE'}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <Text style={styles.cloudCardDesc}>
-                    {isBackendOnline
-                      ? 'Telemetría persistida en base de datos e inteligencia artificial médica disponible en la nube.'
-                      : 'Operando 100% autónomo por Bluetooth directo. La app visualiza y procesa los datos en vivo en el teléfono.'}
+            <View style={styles.cloudConfigCard}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                  <MaterialCommunityIcons
+                    name={isBackendOnline ? 'server-network' : 'server-network-off'}
+                    size={20}
+                    color={isBackendOnline ? '#16A34A' : '#64748B'}
+                  />
+                  <Text style={styles.cloudCardTitle}>
+                    {isBackendOnline ? 'Servidor: EN LÍNEA' : 'Servidor no disponible'}
                   </Text>
+                </View>
+                <View style={[styles.cloudPill, isBackendOnline ? styles.cloudPillOnline : styles.cloudPillOffline]}>
+                  <Text style={[styles.cloudPillText, { color: isBackendOnline ? '#15803D' : '#64748B' }]}>
+                    {isBackendOnline ? 'ACTIVO' : 'OFFLINE'}
+                  </Text>
+                </View>
+              </View>
 
-                  {/* Input Manual de URL con Botón de Prueba Rápido */}
-                  <Text style={styles.inputSectionLabel}>CONFIGURAR ENDPOINT DE BACKEND:</Text>
-                  <View style={styles.urlInputRow}>
-                    <TextInput
-                      style={styles.urlInput}
-                      value={customUrlInput}
-                      onChangeText={setCustomUrlInput}
-                      placeholder="http://192.168.1.X:8000 o https://tunel..."
-                      placeholderTextColor="#94A3B8"
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                    <TouchableOpacity
-                      style={[styles.applyUrlBtn, isTestingUrl && { opacity: 0.7 }]}
-                      disabled={isTestingUrl}
-                      onPress={async () => {
-                        setIsTestingUrl(true);
-                        setUrlTestStatus(null);
-                        const clean = customUrlInput.trim().replace(/\/+$/, '');
-                        updateBackendUrl(clean);
-                        if (!clean || clean === 'offline') {
-                          setIsTestingUrl(false);
-                          setUrlTestStatus('offline');
-                          return;
-                        }
-                        try {
-                          const controller = new AbortController();
-                          const timeout = setTimeout(() => controller.abort(), 2500);
-                          const res = await fetch(`${clean}/api/device/status`, { signal: controller.signal });
-                          clearTimeout(timeout);
-                          setUrlTestStatus(res.ok ? 'online' : 'offline');
-                        } catch {
-                          setUrlTestStatus('offline');
-                        } finally {
-                          setIsTestingUrl(false);
-                        }
-                      }}
-                    >
-                      {isTestingUrl ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <Text style={styles.applyUrlBtnText}>Aplicar</Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
+              <Text style={styles.cloudCardDesc}>
+                {isBackendOnline
+                  ? 'Sincronizando la telemetría con el servidor SpiroScan (base de datos, alertas e IA).'
+                  : 'No se encuentra la Mac. Revisa que start_server.sh esté corriendo y que estés en la misma red WiFi.'}
+              </Text>
 
-                  {urlTestStatus && (
-                    <Text
-                      style={[
-                        styles.urlStatusFeedback,
-                        { color: urlTestStatus === 'online' ? '#16A34A' : '#DC2626' },
-                      ]}
-                    >
-                      {urlTestStatus === 'online'
-                        ? '✓ Conexión establecida con el servidor con éxito.'
-                        : '✕ Servidor no responde en esta dirección. (Verifica IP/red).'}
+              {/* Selector Rápido de Backend */}
+              <View style={styles.backendPresetContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.presetBtn,
+                    backendUrl === DEFAULT_LOCAL_LAN && styles.presetBtnActive,
+                  ]}
+                  onPress={() => updateBackendUrl(DEFAULT_LOCAL_LAN)}
+                >
+                  <MaterialCommunityIcons
+                    name="server-network"
+                    size={14}
+                    color={backendUrl === DEFAULT_LOCAL_LAN ? '#FFFFFF' : '#334155'}
+                  />
+                  <Text style={[styles.presetBtnText, backendUrl === DEFAULT_LOCAL_LAN && styles.presetBtnTextActive]}>
+                    LAN local
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.presetBtn,
+                    (backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) && styles.presetBtnActive,
+                  ]}
+                  onPress={() => updateBackendUrl('http://localhost:8000')}
+                >
+                  <MaterialCommunityIcons
+                    name="laptop"
+                    size={14}
+                    color={(backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) ? '#FFFFFF' : '#334155'}
+                  />
+                  <Text
+                    style={[
+                      styles.presetBtnText,
+                      (backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) && styles.presetBtnTextActive,
+                    ]}
+                  >
+                    Este equipo
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.backendUrlLabel} numberOfLines={1}>
+                Endpoint: {backendUrl}
+              </Text>
+            </View>
+
+            <View>
+              {/* Sección Discreta de Demostración y Validación Clínica */}
+              {onOpenClinicalDemo && (
+                <View style={styles.demoSection}>
+                  <Text style={styles.sectionHeading}>BANCO DE PRUEBAS CLÍNICAS (ICBHI 2017)</Text>
+                  <View style={styles.demoCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                      <MaterialCommunityIcons name="flask-outline" size={18} color={Colors.aiPurple} style={{ marginRight: 6 }} />
+                      <Text style={styles.demoCardTitle}>Demostración con casos de ICBHI</Text>
+                    </View>
+                    <Text style={styles.demoCardDesc}>
+                      Prueba grabaciones de la base pública ICBHI 2017 (sano, sibilancias, crepitantes, neumonía) y compara lo que dice el modelo con la etiqueta real.
                     </Text>
-                  )}
-
-                  {/* Atajos Rápidos */}
-                  <Text style={[styles.inputSectionLabel, { marginTop: 12 }]}>PRESETS RÁPIDOS DE SERVIDOR:</Text>
-                  <View style={styles.backendPresetContainer}>
                     <TouchableOpacity
-                      style={[
-                        styles.presetBtn,
-                        backendUrl === PRIMARY_BACKEND_URL && styles.presetBtnActive,
-                      ]}
+                      style={styles.openDemoBtn}
                       onPress={() => {
-                        setCustomUrlInput(PRIMARY_BACKEND_URL);
-                        updateBackendUrl(PRIMARY_BACKEND_URL);
+                        onClose();
+                        onOpenClinicalDemo();
                       }}
+                      activeOpacity={0.8}
                     >
-                      <MaterialCommunityIcons
-                        name="cloud-check"
-                        size={14}
-                        color={backendUrl === PRIMARY_BACKEND_URL ? '#FFFFFF' : '#0D9488'}
-                      />
-                      <Text style={[styles.presetBtnText, backendUrl === PRIMARY_BACKEND_URL && styles.presetBtnTextActive]}>
-                        Cloudflare (Principal)
-                      </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.presetBtn,
-                        backendUrl === BACKEND_FALLBACK_URLS[1] && styles.presetBtnActive,
-                      ]}
-                      onPress={() => {
-                        setCustomUrlInput(BACKEND_FALLBACK_URLS[1]);
-                        updateBackendUrl(BACKEND_FALLBACK_URLS[1]);
-                      }}
-                    >
-                      <MaterialCommunityIcons
-                        name="shield-outline"
-                        size={14}
-                        color={backendUrl === BACKEND_FALLBACK_URLS[1] ? '#FFFFFF' : '#334155'}
-                      />
-                      <Text style={[styles.presetBtnText, backendUrl === BACKEND_FALLBACK_URLS[1] && styles.presetBtnTextActive]}>
-                        Túnel Ngrok (Respaldo)
-                      </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.presetBtn,
-                        backendUrl === DEFAULT_LOCAL_LAN && styles.presetBtnActive,
-                      ]}
-                      onPress={() => {
-                        setCustomUrlInput(DEFAULT_LOCAL_LAN);
-                        updateBackendUrl(DEFAULT_LOCAL_LAN);
-                      }}
-                    >
-                      <MaterialCommunityIcons
-                        name="wifi"
-                        size={14}
-                        color={backendUrl === DEFAULT_LOCAL_LAN ? '#FFFFFF' : '#334155'}
-                      />
-                      <Text style={[styles.presetBtnText, backendUrl === DEFAULT_LOCAL_LAN && styles.presetBtnTextActive]}>
-                        WiFi LAN (192.168.1.163)
-                      </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.presetBtn,
-                        (backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) && styles.presetBtnActive,
-                      ]}
-                      onPress={() => {
-                        setCustomUrlInput('http://localhost:8000');
-                        updateBackendUrl('http://localhost:8000');
-                      }}
-                    >
-                      <MaterialCommunityIcons
-                        name="laptop"
-                        size={14}
-                        color={(backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) ? '#FFFFFF' : '#334155'}
-                      />
-                      <Text
-                        style={[
-                          styles.presetBtnText,
-                          (backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) && styles.presetBtnTextActive,
-                        ]}
-                      >
-                        Docker Local
-                      </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.presetBtn,
-                        (backendUrl === 'offline' || !backendUrl) && styles.presetBtnActive,
-                      ]}
-                      onPress={() => {
-                        setCustomUrlInput('offline');
-                        updateBackendUrl('offline');
-                        setUrlTestStatus('offline');
-                      }}
-                    >
-                      <MaterialCommunityIcons
-                        name="bluetooth"
-                        size={14}
-                        color={(backendUrl === 'offline' || !backendUrl) ? '#FFFFFF' : '#334155'}
-                      />
-                      <Text style={[styles.presetBtnText, (backendUrl === 'offline' || !backendUrl) && styles.presetBtnTextActive]}>
-                        Modo Autónomo (100% BLE)
-                      </Text>
+                      <MaterialCommunityIcons name="stethoscope" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.openDemoBtnText}>Abrir Banco de Auscultación</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
-              </View>
-            )}
-      </ScrollView>
+              )}
+            </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>
   );
 };
 
-export const DeviceConnectionModal = React.memo(DeviceConnectionModalComponent);
-
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
     justifyContent: 'flex-end',
-  },
-  advancedToggleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginTop: 14,
-    marginBottom: 6,
-  },
-  advancedToggleBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#475569',
   },
   modalContent: {
     backgroundColor: '#FFFFFF',
@@ -553,11 +422,8 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     paddingHorizontal: 16,
     paddingTop: 18,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
-    height: '88%',
-    maxHeight: 740,
-    display: 'flex',
-    flexDirection: 'column',
+    paddingBottom: 28,
+    maxHeight: '92%',
   },
   header: {
     flexDirection: 'row',
@@ -665,54 +531,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   scrollArea: {
-    flex: 1,
     width: '100%',
-  },
-  scrollContent: {
-    paddingBottom: 36,
-  },
-  inputSectionLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#64748B',
-    marginTop: 10,
-    marginBottom: 6,
-    letterSpacing: 0.5,
-  },
-  urlInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  urlInput: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 12,
-    color: '#1E293B',
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-  },
-  applyUrlBtn: {
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  applyUrlBtnText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  urlStatusFeedback: {
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 6,
   },
   deviceCard: {
     backgroundColor: '#FFFFFF',
@@ -749,7 +568,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   deviceCardBadgeText: {
-    fontSize: 10,
+    fontSize: 11,
     color: '#2563EB',
     fontWeight: '700',
     marginTop: 2,
@@ -769,7 +588,7 @@ const styles = StyleSheet.create({
     borderColor: '#CBD5E1',
   },
   devicePillText: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '800',
   },
   actionBtnFull: {
@@ -859,7 +678,7 @@ const styles = StyleSheet.create({
     borderColor: '#CBD5E1',
   },
   cloudPillText: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '800',
   },
   cloudCardDesc: {
@@ -901,9 +720,121 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   backendUrlLabel: {
-    fontSize: 10,
+    fontSize: 11,
     color: '#94A3B8',
     marginTop: 8,
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  sessionCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  sessionCardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  sessionCardTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  sessionCardSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  newSessionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  newSessionBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  sessionListHeading: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  sessionChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    marginRight: 6,
+  },
+  sessionChipActive: {
+    backgroundColor: '#EFF6FF',
+    borderColor: Colors.primary,
+  },
+  sessionChipText: {
+    fontSize: 11,
+    color: '#475569',
+    fontWeight: '600',
+  },
+  sessionChipTextActive: {
+    color: Colors.primary,
+    fontWeight: '800',
+  },
+  livePulseDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#16A34A',
+  },
+  demoSection: {
+    marginTop: 18,
+    marginBottom: 6,
+  },
+  demoCard: {
+    backgroundColor: '#FAF5FF',
+    borderColor: '#E9D5FF',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+  },
+  demoCardTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6B21A8',
+  },
+  demoCardDesc: {
+    fontSize: 11,
+    color: '#64748B',
+    lineHeight: 16,
+    marginBottom: 10,
+  },
+  openDemoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.aiPurple,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  openDemoBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });

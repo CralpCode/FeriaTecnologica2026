@@ -48,12 +48,14 @@ def finite_number(value):
         return None
 
 
-def _value_in_range(metric, number):
+def _value_in_range(metric, number, audio_unit=None):
     if number is None:
         return False
     if metric == "bloodOxygen":
         return 0 < number <= 100
-    if metric in ("audio_rms", "audio_peak"):
+    if metric == "audio_rms":
+        return -200 <= number <= 0 if audio_unit == "dBFS" else number >= 0
+    if metric == "audio_peak":
         return number >= 0
     if metric == "hrv":
         return number >= 0
@@ -72,6 +74,8 @@ def normalize_reading(data: dict) -> dict:
     result = {key: data[key] for key in METADATA_FIELDS if data.get(key) is not None}
     version = data.get("v", data.get("telemetry_version", 0))
     source = str(data.get("source") or ("esp32" if version == 2 else "legacy_unverified"))
+    if data.get("test") is True:
+        source = "simulated"
     result["source"] = source
     supplied_validity = data.get("validity") or {}
     supplied_provenance = data.get("provenance") or {}
@@ -97,7 +101,7 @@ def normalize_reading(data: dict) -> dict:
         if data.get(flag) is False or supplied_validity.get(metric) is False:
             explicitly_valid = False
         supported = metric not in UNSUPPORTED_METRICS
-        valid = supported and explicitly_valid and _value_in_range(metric, number) and not inactive
+        valid = supported and explicitly_valid and _value_in_range(metric, number, data.get("audio_unit", data.get("audioUnit"))) and not inactive
         if metric in {"heartRate", "bloodOxygen", "hrv"}:
             valid = valid and data.get("finger") is not False and data.get("sensor_hw") is not False
         if metric in {"audio_rms", "audio_peak"}:

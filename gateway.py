@@ -12,6 +12,7 @@ al servidor Backend FastAPI (http://localhost:8000/api/telemetry).
 import sys
 import time
 import json
+import math
 
 try:
     import requests
@@ -24,12 +25,14 @@ try:
     import serial
     import serial.tools.list_ports as list_ports
 except ImportError:
-    print("[!] Error: pyserial no está instalado. Ejecuta: pip install pyserial")
-    sys.exit(1)
+    serial = None
+    list_ports = None
 
 BACKEND_URL = "http://localhost:8000/api/telemetry"
 
 def listar_puertos():
+    if list_ports is None:
+        raise RuntimeError("Falta pyserial. Instala pyserial para leer el dispositivo físico.")
     puertos = list(list_ports.comports())
     return puertos
 
@@ -71,6 +74,59 @@ def seleccionar_puerto():
     
     return opcion.upper()
 
+def normalizar_telemetria(packet):
+    """Preserva procedencia y nunca convierte firmware legado en datos validados."""
+    if not isinstance(packet, dict):
+        raise ValueError("La telemetría debe ser un objeto JSON")
+    packet = dict(packet)
+    if packet.get('v') == 2:
+        # El firmware compacto ya entrega calidad: conservar mascara, modos y temperatura del chip.
+        mask = packet.get('valid')
+        mask = mask if isinstance(mask, int) and not isinstance(mask, bool) and 0 <= mask <= 31 else 0
+        simulated = packet.get('test') is True or packet.get('source') == 'simulated'
+        active = not simulated and packet.get('power') != 'standby' and packet.get('finger') is not False
+        def numeric(key):
+            value = packet.get(key)
+            return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        packet.update({
+            'source': 'simulated' if simulated else packet.get('source', 'real'),
+            'test': simulated,
+            'heartRateValid': active and bool(mask & 1) and numeric('bpm') and packet['bpm'] > 0,
+            'bloodOxygenValid': active and bool(mask & 2) and numeric('spo2') and 0 < packet['spo2'] <= 100,
+            'spo2Calibrated': not simulated and packet.get('cal') is True,
+            'sampleAgeMs': 0,
+            'audioUnit': packet.get('audio_unit', 'relative_uncalibrated'),
+            'valid': mask,
+        })
+        packet['signalQuality'] = 'good' if packet['heartRateValid'] else 'unstable'
+        return packet
+    source = packet.get("source", "unknown")
+    if packet.get("test") is True:
+        source = "simulated"
+    if source not in {"real", "simulated", "unknown"}:
+        source = "unknown"
+    packet["source"] = source
+    packet["test"] = source == "simulated"
+    packet.setdefault("signalQuality", "unknown")
+    packet["spo2Calibrated"] = source == "real" and packet.get("spo2Calibrated") is True
+    age = packet.get("sampleAgeMs")
+    fresh = isinstance(age, (int, float)) and not isinstance(age, bool) and math.isfinite(age) and 0 <= age <= 250
+    acquired = source == "real" and fresh and packet.get("finger") is True and packet.get("signalQuality") == "good"
+    for value_key, valid_key in (("bpm", "heartRateValid"), ("spo2", "bloodOxygenValid")):
+        value = packet.get(value_key)
+        numeric = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        packet[valid_key] = acquired and numeric and value > 0 and packet.get(valid_key) is True
+        if value_key == "spo2":
+            packet[valid_key] = packet[valid_key] and packet["spo2Calibrated"] and value <= 100
+        # Values absent/nonfinite in old or corrupted packets are missing, not measurements.
+        if not numeric:
+            packet[value_key] = 0
+            packet[valid_key] = False
+    return packet
+
+def formato_medida(packet, key, valid_key, unit):
+    return f"{packet[key]:g} {unit}" if packet.get(valid_key) else "no disponible"
+
 def reenviar_al_backend(datos_json):
     try:
         if http_session:
@@ -94,6 +150,8 @@ def reenviar_al_backend(datos_json):
         return False
 
 def ejecutar_gateway(puerto_com, baudrate=115200):
+    if serial is None:
+        raise RuntimeError("Falta pyserial. Instala pyserial para leer el dispositivo físico.")
     print(f"\n[*] Abriendo enlace en {puerto_com} a {baudrate} baudios...")
     print(f"[*] Destino Backend: {BACKEND_URL}")
     print("[*] Presiona CTRL + C para detener.\n")
@@ -102,6 +160,7 @@ def ejecutar_gateway(puerto_com, baudrate=115200):
     while True:
         try:
             with serial.Serial(puerto_com, baudrate, timeout=0.1) as ser:
+                ser.reset_input_buffer()  # No reenviar muestras acumuladas antes de conectar.
                 print(f"[OK] ¡Conectado exitosamente al puerto {puerto_com}!")
                 print("[*] Esperando telemetría del ESP32...\n")
                 reintentos = 0
@@ -114,19 +173,18 @@ def ejecutar_gateway(puerto_com, baudrate=115200):
                     # Solo procesar líneas con formato JSON válido de telemetría
                     if linea.startswith("{") and linea.endswith("}") and "bpm" in linea:
                         try:
-                            packet = json.loads(linea)
-                            bpm = packet.get("bpm", 0)
-                            spo2 = packet.get("spo2", 0.0)
-                            sys_bp = packet.get("systolic", 0)
-                            dia_bp = packet.get("diastolic", 0)
-                            temp = packet.get("temperature", 0.0)
+                            packet = normalizar_telemetria(json.loads(linea))
+                            bpm = formato_medida(packet, "bpm", "heartRateValid", "BPM")
+                            spo2 = formato_medida(packet, "spo2", "bloodOxygenValid", "%")
                             dedo = "SI" if packet.get("finger", False) else "NO"
 
-                            ok = reenviar_al_backend(linea)
+                            ok = reenviar_al_backend(json.dumps(packet, allow_nan=False))
                             estado_backend = "-> Backend OK" if ok else "-> Backend [Error/Offline]"
 
-                            print(f"[SPIROSCAN] FC: {bpm:3d} BPM | SpO2: {spo2:4.1f}% | PA: {sys_bp:3d}/{dia_bp:2d} | Temp: {temp:4.1f}C | Dedo: {dedo:2s} | {estado_backend}")
-                        except json.JSONDecodeError:
+                            print(f"[SPIROSCAN] FC: {bpm} | SpO2: {spo2} | Origen: {packet['source']} | Dedo: {dedo} | {estado_backend}")
+                            # El HTTP puede tardar: volver a esperar una trama nueva, no una cola vieja.
+                            ser.reset_input_buffer()
+                        except (ValueError, TypeError):
                             pass
                     elif "[*]" in linea or "[OK]" in linea or "[TELEMETRIA]" in linea:
                         print(f"  [ESP32]: {linea}")

@@ -1,0 +1,4 @@
+Aqui van los archivos .wav de este paciente.
+Cuando tengas los audios descargados, vuelve a correr:
+  python3 organizar_por_categoria.py --etiquetas etiquetas_pacientes.csv --salida ICBHI_organizado --audios "ruta/a/tus/audios"
+y este script los va a copiar aqui automaticamente.

@@ -1,0 +1,22 @@
+Resumen de carpetas generadas (grupo de edad + enfermedad)
+============================================================
+
+Adulto_18-64__Bronchiectasis: 6 paciente(s)
+Adulto_18-64__COPD: 16 paciente(s)
+Adulto_mayor_65mas__Asthma: 1 paciente(s)
+Adulto_mayor_65mas__Bronchiectasis: 1 paciente(s)
+Adulto_mayor_65mas__COPD: 47 paciente(s)
+Adulto_mayor_65mas__Pneumonia: 5 paciente(s)
+Bebe_menos_1_ano__Bronchiolitis: 1 paciente(s)
+Bebe_menos_1_ano__Healthy: 5 paciente(s)
+Bebe_menos_1_ano__LRTI: 1 paciente(s)
+Bebe_menos_1_ano__URTI: 1 paciente(s)
+Desconocido__COPD: 1 paciente(s)
+Nino_Adolescente_1-17__Bronchiolitis: 5 paciente(s)
+Nino_Adolescente_1-17__Healthy: 21 paciente(s)
+Nino_Adolescente_1-17__LRTI: 1 paciente(s)
+Nino_Adolescente_1-17__Pneumonia: 1 paciente(s)
+Nino_Adolescente_1-17__URTI: 13 paciente(s)
+
+Total pacientes: 126
+Total carpetas de categoria: 16

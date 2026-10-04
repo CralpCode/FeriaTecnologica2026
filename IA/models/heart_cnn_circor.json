@@ -1,0 +1,51 @@
+{
+  "modelo": "HeartCNN",
+  "tarea": "audio cardíaco normal (0) vs anormal/soplo (1)",
+  "dataset": "circor",
+  "correccion_acustica": "sin_correccion",
+  "entrenado": "2026-09-29T14:51:57",
+  "umbral": 0.7866144776344299,
+  "criterio_umbral": "sensibilidad >= 0.85 en validación",
+  "features": {
+    "TARGET_SR": 2000,
+    "BAND_HZ": [
+      20.0,
+      600.0
+    ],
+    "WINDOW_S": 5.0,
+    "HOP_S": 2.5,
+    "N_FFT": 256,
+    "HOP_LENGTH": 64,
+    "N_MELS": 48,
+    "FMIN": 20.0,
+    "FMAX": 1000.0
+  },
+  "particiones": {
+    "train": 1849,
+    "val": 463,
+    "test": 578
+  },
+  "metricas_prueba": {
+    "n": 578,
+    "positivos": 100,
+    "umbral": 0.7866144776344299,
+    "sensibilidad": 0.83,
+    "especificidad": 0.9623430962343096,
+    "score_medio": 0.8961715481171548,
+    "auc": 0.9502510460251046,
+    "f1_macro": 0.8946107160532417,
+    "exactitud": 0.9394463667820069,
+    "matriz_confusion": {
+      "VN": 460,
+      "FP": 18,
+      "FN": 17,
+      "VP": 83
+    }
+  },
+  "advertencia": null,
+  "limitaciones": [
+    "Tamizaje: no diagnostica; sugiere referir a ecocardiograma.",
+    "PhysioNet 2016 no publica ID de paciente: la partición es por registro.",
+    "Validado solo con datasets públicos, no con pacientes."
+  ]
+}

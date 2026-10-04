@@ -3,8 +3,9 @@ import { VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange
 import { apiService } from '../services/api';
 import { API_CONFIG, setCustomBackendUrl, getCustomBackendUrl, getSessionId, setSessionId, generateNewSessionId } from '../config/api';
 import { deviceBridge } from '../services/DeviceBridgeService';
+import localDemoSamples from '../config/demoSamples.json';
 
-export type ConnectedDeviceType = 'none' | 'wokwi_wifi' | 'direct_ble';
+export type ConnectedDeviceType = 'none' | 'wokwi_wifi' | 'direct_ble' | 'demo_icbhi';
 
 export interface SessionInfo {
   session_id: string;
@@ -21,6 +22,11 @@ export interface DeviceConnectionContextProps {
   isBackendOnline: boolean;
   backendUrl: string;
   currentSessionId: string;
+  availableSessions: SessionInfo[];
+  createNewSession: (label?: string) => string;
+  switchSession: (sessionId: string) => void;
+  refreshSessionsList: () => Promise<void>;
+  connectViaServer: () => Promise<{ success: boolean; message: string }>;
   updateBackendUrl: (url: string) => void;
   connectToWokwiEmulator: () => void;
   connectDirectBluetooth: () => Promise<{ success: boolean; message: string; deviceName?: string }>;
@@ -57,6 +63,11 @@ interface VitalsContextProps extends DeviceConnectionContextProps {
   triggerScenario: (scenario: 'normal' | 'tachycardia' | 'hypertension' | 'hypoxia' | 'stress') => void;
   sendChatMessage: (text: string) => Promise<void>;
   refreshAllData: () => Promise<void>;
+  connectToWokwiEmulator: () => void;
+  connectViaServer: () => Promise<{ success: boolean; message: string }>;
+  connectDirectBluetooth: () => Promise<{ success: boolean; message: string; deviceName?: string }>;
+  disconnectAllDevices: () => void;
+  injectClinicalDemo: (sampleId: string) => Promise<boolean>;
 }
 
 const ABSOLUTE_ZERO_VITALS: VitalSigns = {
@@ -74,55 +85,24 @@ const ABSOLUTE_ZERO_VITALS: VitalSigns = {
   timestamp: new Date().toISOString(),
   device_connected: false,
   finger: false,
+  source: 'unknown',
+  heartRateValid: false,
+  bloodOxygenValid: false,
+  spo2Calibrated: false,
 };
 
-const generateLocalMedicalReport = (v: VitalSigns): AIAnalysisReport => {
-  const anomalies: string[] = [];
-  let status: 'normal' | 'caution' | 'critical' = 'normal';
-  let score = 96;
-
-  if (v.bloodOxygen > 0 && v.bloodOxygen < 90) {
-    anomalies.push(`Hipoxia Severa (SpO2 ${v.bloodOxygen.toFixed(1)}%)`);
-    status = 'critical';
-    score -= 40;
-  } else if (v.bloodOxygen > 0 && v.bloodOxygen < 95) {
-    anomalies.push(`SpO2 Límite (${v.bloodOxygen.toFixed(1)}%)`);
-    status = 'caution';
-    score -= 15;
-  }
-
-  if (v.heartRate > 100) {
-    anomalies.push(`Taquicardia (${v.heartRate} LPM)`);
-    if (status !== 'critical') status = 'caution';
-    score -= 15;
-  } else if (v.heartRate > 0 && v.heartRate < 50) {
-    anomalies.push(`Bradicardia (${v.heartRate} LPM)`);
-    if (status !== 'critical') status = 'caution';
-    score -= 15;
-  }
-
-  if (v.temperature > 38.0) {
-    anomalies.push(`Fiebre (${v.temperature.toFixed(1)}°C)`);
-    if (status !== 'critical') status = 'caution';
-    score -= 20;
-  }
-
-  return {
-    id: `local-diag-${Date.now()}`,
-    timestamp: new Date().toISOString(),
-    healthScore: Math.max(20, Math.min(100, score)),
-    status,
-    title: anomalies.length > 0 ? 'Alerta Clínica (Modo Local Offline)' : 'Signos Vitales Normales (Modo Local)',
-    summary: anomalies.length > 0
-      ? `Diagnóstico Local Autónomo: Se han detectado anomalías: ${anomalies.join(', ')}.`
-      : 'Diagnóstico Local Autónomo: Parámetros cardiopulmonares y acústicos dentro de rangos normales de seguridad.',
-    recommendations: anomalies.length > 0
-      ? ['Guarde reposo y respire pausadamente', 'Verifique la colocación del oxímetro', 'Consulte a un especialista si los valores persisten']
-      : ['Frecuencia y saturación estables', 'Monitoreo preventivo continuo activo'],
-    anomaliesDetected: anomalies,
-    confidence: 92,
-  };
-};
+const generateLocalMedicalReport = (_v: VitalSigns): AIAnalysisReport => ({
+  id: `unavailable-${Date.now()}`,
+  timestamp: new Date().toISOString(),
+  healthScore: null,
+  confidence: null,
+  status: 'insufficient_data',
+  title: 'Valoración no disponible',
+  summary: 'No hay conexión con el servicio de valoración. No se pueden inferir enfermedades ni descartar problemas con estos datos.',
+  recommendations: ['Revisa la conexión y completa los síntomas en Auscultación.', 'Si hay síntomas de alarma, busca atención médica sin esperar al sistema.'],
+  anomaliesDetected: [],
+  method: 'unavailable',
+});
 
 const VitalsContext = createContext<VitalsContextProps | undefined>(undefined);
 
@@ -138,7 +118,64 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [isChatLoading, setIsChatLoading] = useState<boolean>(false);
   const [isBackendOnline, setIsBackendOnline] = useState<boolean>(true);
   const [backendUrl, setBackendUrl] = useState<string>(API_CONFIG.BASE_URL);
-  const [currentSessionId] = useState<string>(getSessionId());
+  const [currentSessionId, setCurrentSessionId] = useState<string>(getSessionId());
+  const [availableSessions, setAvailableSessions] = useState<SessionInfo[]>([]);
+
+  const refreshSessionsList = useCallback(async () => {
+    try {
+      const list = await apiService.getSessionsList();
+      if (Array.isArray(list)) {
+        setAvailableSessions(list);
+      }
+    } catch {}
+  }, []);
+
+  const createNewSession = useCallback((label?: string): string => {
+    const newId = generateNewSessionId(label);
+    setCurrentSessionId(newId);
+    setIsChatLoading(false);
+    setVitals(ABSOLUTE_ZERO_VITALS);
+    setAiReport(null);
+    setHistory([]);
+    setChatMessages([
+      {
+        id: `init-${newId}`,
+        sender: 'ai',
+        text: `¡Hola! Sesión independiente iniciada [${newId}]. Monitoreando telemetría del ESP32.`,
+        timestamp: 'Ahora',
+      },
+    ]);
+    refreshSessionsList();
+    // El ESP32 (por WiFi) pasa a registrar en el paciente nuevo; si no, seguiría en el anterior.
+    apiService.linkDevice().catch(() => {});
+    return newId;
+  }, [refreshSessionsList]);
+
+  const switchSession = useCallback((sessionId: string) => {
+    if (!sessionId) return;
+    setSessionId(sessionId);
+    setCurrentSessionId(sessionId);
+    setIsChatLoading(false);
+    setVitals(ABSOLUTE_ZERO_VITALS);
+    setAiReport(null);
+    setHistory([]);
+    setChatMessages([
+      {
+        id: `init-${sessionId}`,
+        sender: 'ai',
+        text: `Cambiado a sesión [${sessionId}]. Cargando telemetría...`,
+        timestamp: 'Ahora',
+      },
+    ]);
+    apiService.getCurrentVitals().then((next) => { if (getSessionId() === sessionId) setVitals(next); }).catch(() => {});
+    apiService.getVitalsHistory(selectedRange).then((next) => { if (getSessionId() === sessionId) setHistory(next); }).catch(() => {});
+    apiService.linkDevice().catch(() => {});  // el ESP32 registra en el paciente abierto
+    refreshSessionsList();
+  }, [selectedRange, refreshSessionsList]);
+
+  useEffect(() => {
+    refreshSessionsList();
+  }, [refreshSessionsList]);
 
   const lastAiUpdateRef = useRef<number>(0);
   const lastHistoryAppendRef = useRef<number>(0);
@@ -156,7 +193,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     {
       id: 'init-msg',
       sender: 'ai',
-      text: `¡Hola! Soy tu asistente médico inteligente SpiroScan. Sesión activa: ${currentSessionId}. Monitoreando telemetría biomédica del ESP32.`,
+      text: `¡Hola! Soy el asistente de SpiroScan. Puedo explicarte los datos de esta sesión (${currentSessionId}); no doy diagnósticos.`,
       timestamp: 'Ahora',
     },
   ]);
@@ -231,6 +268,17 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           diastolicPressure: incomingVitals.diastolicPressure,
           temperature: incomingVitals.temperature,
           stressLevel: incomingVitals.stressLevel,
+          hrv: incomingVitals.hrv,
+          signalQuality: incomingVitals.signalQuality,
+          sampleAgeMs: incomingVitals.sampleAgeMs,
+          source: incomingVitals.source,
+          heartRateValid: incomingVitals.heartRateValid,
+          bloodOxygenValid: incomingVitals.bloodOxygenValid,
+          spo2Calibrated: incomingVitals.spo2Calibrated,
+          validity: incomingVitals.validity,
+          provenance: incomingVitals.provenance,
+          spo2_calibrated: incomingVitals.spo2_calibrated,
+          finger: incomingVitals.finger,
         };
         setHistory((prev) => {
           const updated = [...prev, newPoint];
@@ -241,12 +289,15 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       // Actualizar reporte médico (Nube si hay internet, o Motor Clínico Local si está offline)
       if (incomingVitals.heartRate > 0 && now - lastAiUpdateRef.current >= 8000) {
         lastAiUpdateRef.current = now;
+        const session = getSessionId();
         apiService.getAIAnalysis(incomingVitals)
           .then((report) => {
+            if (session !== getSessionId()) return;
             setAiReport(report);
             setIsBackendOnline(true);
           })
           .catch(() => {
+            if (session !== getSessionId()) return;
             setIsBackendOnline(false);
             setAiReport(generateLocalMedicalReport(incomingVitals));
           });
@@ -283,13 +334,15 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     if (!isStreaming) return;
 
     const interval = setInterval(async () => {
-      if (connectedTypeRef.current === 'direct_ble') return;
+      if (connectedTypeRef.current === 'direct_ble' || connectedTypeRef.current === 'demo_icbhi') return;
       if (userManualDisconnectRef.current || connectedTypeRef.current === 'none') return;
       if (isFetchingRef.current) return;
       isFetchingRef.current = true;
+      const session = getSessionId();
 
       try {
         const current = await apiService.getCurrentVitals();
+        if (session !== getSessionId()) return;
         setIsBackendOnline(true);
         
         const isFresh = current.timestamp ? (Date.now() - new Date(current.timestamp).getTime()) < 6000 : false;
@@ -304,25 +357,24 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         if (isDeviceActive && connectedTypeRef.current === 'wokwi_wifi') {
           setVitals(current);
           setDevice({
-            name: 'SpiroScan-Band (ESP32 WiFi/Sim)',
-            model: 'ESP32 Bio-Acústico (MAX30102 PPG)',
+            name: 'SpiroScan-Band (ESP32 por WiFi)',
+            model: 'ESP32 (MAX30102 + INMP441)',
             connected: true,
-            battery: 100,
+            battery: 0,
             lastSync: new Date().toISOString(),
-            firmwareVersion: 'v1.5.0 (Hardware Real)',
-            signalStrength: 'excellent',
+            firmwareVersion: 'WiFi vía servidor',
+            signalStrength: 'good',
           });
 
           const now = Date.now();
           if (now - lastAiUpdateRef.current >= 8000 || (current.heartRate > 120 && now - lastAiUpdateRef.current >= 3000)) {
             lastAiUpdateRef.current = now;
             apiService.getAIAnalysis(current)
-              .then(setAiReport)
-              .catch(() => setAiReport(generateLocalMedicalReport(current)));
+              .then((report) => { if (session === getSessionId()) setAiReport(report); })
+              .catch(() => { if (session === getSessionId()) setAiReport(generateLocalMedicalReport(current)); });
           }
         } else if (connectedTypeRef.current === 'wokwi_wifi' && !isDeviceActive) {
-          setConnectedType('none');
-          setDevice(null);
+          // Seguimos escuchando al servidor: el ESP32 puede estar sin dedo o encendiéndose.
           setVitals(ABSOLUTE_ZERO_VITALS);
         }
       } catch (err) {
@@ -358,6 +410,18 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     setConnectedType('wokwi_wifi');
   };
 
+  // ESP32 por WiFi: los datos llegan al servidor (la Mac) y la app los lee de ahí.
+  const connectViaServer = useCallback(async () => {
+    try {
+      await apiService.linkDevice();
+      userManualDisconnectRef.current = false;
+      setConnectedType('wokwi_wifi');
+      return { success: true, message: 'Recibiendo datos del ESP32 a través del servidor.' };
+    } catch (e: any) {
+      return { success: false, message: `No se pudo contactar al servidor: ${e?.message || e}` };
+    }
+  }, []);
+
   const disconnectAllDevices = useCallback(() => {
     userManualDisconnectRef.current = true;
     deviceBridge.disconnect();
@@ -391,13 +455,69 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     return await deviceBridge.powerOffDevice();
   }, []);
 
+  // 3. Inyección y Simulación Activa del Banco de Pruebas Clínicas ICBHI
+  // Banco de pruebas clínico (casos de ICBHI 2017). Los signos vitales son DATOS DE EJEMPLO
+  // y el resultado acústico SIEMPRE viene del modelo real en el servidor.
+  const injectClinicalDemo = useCallback(async (sampleId: string): Promise<boolean> => {
+    userManualDisconnectRef.current = false;
+    const sampleData = (localDemoSamples as any)[sampleId];
+    if (!sampleData) return false;
+
+    const nowIso = new Date().toISOString();
+    const timeLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    setConnectedType('demo_icbhi');
+    setAiReport(null);
+    setVitals({ ...ABSOLUTE_ZERO_VITALS, timestamp: nowIso, source: 'simulated' });
+    setDevice({
+      name: `Demo ICBHI (paciente #${sampleData.patient_id})`,
+      model: 'Datos de ejemplo',
+      connected: true,
+      battery: 0,
+      lastSync: nowIso,
+      firmwareVersion: 'Modo demostración',
+      signalStrength: 'good',
+    });
+
+    let modelText = 'No se pudo analizar: el servidor no está disponible.';
+    try {
+      const res = await apiService.injectDemoSample(sampleId);
+      if (res && res.report) {
+        setAiReport(res.report);
+        setIsBackendOnline(true);
+        const ac = res.report.acoustic_analysis;
+        if (ac) {
+          modelText = `Modelo base: ${ac.prediction} (salida acústica del modelo ${Math.round(ac.probability_abnormal * 100)} %).`;
+        }
+      }
+    } catch {
+      setIsBackendOnline(false);
+    }
+
+    const truth = sampleData.is_abnormal ? 'patológico' : 'normal';
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: `demo-msg-${Date.now()}`,
+        sender: 'ai',
+        text:
+          `[DEMO ICBHI] Caso del paciente #${sampleData.patient_id} (${sampleData.diagnosis}).\n` +
+          `• Etiqueta real del ciclo en ICBHI: ${sampleData.cycle_class_name} (${truth}).\n` +
+          `• ${modelText}\n` +
+          `• El audio pertenece a un conjunto de investigación; no es una medición del usuario. No se inventan pulso ni SpO2.`,
+        timestamp: timeLabel,
+      },
+    ]);
+    return true;
+  }, []);
+
   const loadInitialData = useCallback(async () => {
+    const session = getSessionId();
     try {
       const hist = await apiService.getVitalsHistory(selectedRange);
-      if (hist && hist.length > 0) {
-        setHistory(hist);
-        setIsBackendOnline(true);
-      }
+      if (session !== getSessionId()) return;
+      setHistory(hist ?? []);
+      setIsBackendOnline(true);
     } catch (e) {
       setIsBackendOnline(false);
     }
@@ -405,7 +525,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   useEffect(() => {
     loadInitialData();
-  }, [loadInitialData]);
+  }, [loadInitialData, currentSessionId]);
 
   const triggerScenario = useCallback(async (scenario: 'normal' | 'tachycardia' | 'hypertension' | 'hypoxia' | 'stress') => {
     setActiveScenario(scenario);
@@ -423,6 +543,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const sendChatMessage = useCallback(
     async (text: string) => {
       if (!text.trim()) return;
+      const session = getSessionId();
 
       const userMsg: ChatMessage = {
         id: `user-${Date.now()}`,
@@ -436,6 +557,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
       try {
         const replyText = await apiService.sendAIChatMessage(text, vitals);
+        if (session !== getSessionId()) return;
         setIsBackendOnline(true);
         const aiMsg: ChatMessage = {
           id: `ai-${Date.now()}`,
@@ -445,21 +567,9 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         };
         setChatMessages((prev) => [...prev, aiMsg]);
       } catch (error) {
+        if (session !== getSessionId()) return;
         setIsBackendOnline(false);
-        let localReply = `(Modo Local Autónomo - Sin Conexión al Backend)\n\n` +
-          `Operando directamente con el hardware ESP32 vía Bluetooth BLE:\n` +
-          `• Frecuencia Cardíaca: ${vitals.heartRate > 0 ? `${vitals.heartRate} LPM` : 'En espera de contacto'}\n` +
-          `• Saturación SpO2: ${vitals.bloodOxygen > 0 ? `${vitals.bloodOxygen.toFixed(1)}%` : 'En espera'}\n` +
-          `• Temperatura: ${vitals.temperature > 0 ? `${vitals.temperature.toFixed(1)}°C` : 'En espera'}\n` +
-          `• Nivel Sonoro Acústico: ${vitals.audio_rms.toFixed(1)} dB\n\n`;
-
-        if (vitals.heartRate === 0) {
-          localReply += 'Coloca tu dedo firmemente en el sensor MAX30102 para iniciar la adquisición.';
-        } else if (vitals.bloodOxygen < 90) {
-          localReply += '¡Atención!: Se detecta saturación baja (<90%). Respira pausadamente y solicita asistencia médica preventiva.';
-        } else {
-          localReply += 'Tus constantes biomédicas se encuentran estables.';
-        }
+        const localReply = 'El servidor no está disponible. No puedo valorar enfermedades ni afirmar que los datos sean normales. Reconecta y utiliza el formulario de valoración de esta sesión. Si hay síntomas de alarma, busca atención médica de inmediato.';
 
         const aiMsg: ChatMessage = {
           id: `ai-${Date.now()}`,
@@ -469,7 +579,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         };
         setChatMessages((prev) => [...prev, aiMsg]);
       } finally {
-        setIsChatLoading(false);
+        if (session === getSessionId()) setIsChatLoading(false);
       }
     },
     [vitals]
@@ -482,6 +592,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     isBackendOnline,
     backendUrl,
     currentSessionId,
+    availableSessions, createNewSession, switchSession, refreshSessionsList, connectViaServer,
     updateBackendUrl,
     connectToWokwiEmulator,
     connectDirectBluetooth,
@@ -498,6 +609,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     isBackendOnline,
     backendUrl,
     currentSessionId,
+    availableSessions, createNewSession, switchSession, refreshSessionsList, connectViaServer,
     updateBackendUrl,
     connectToWokwiEmulator,
     connectDirectBluetooth,
@@ -527,6 +639,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           triggerScenario,
           sendChatMessage,
           refreshAllData: loadInitialData,
+          injectClinicalDemo,
           ...connectionContextValue,
         }}
       >

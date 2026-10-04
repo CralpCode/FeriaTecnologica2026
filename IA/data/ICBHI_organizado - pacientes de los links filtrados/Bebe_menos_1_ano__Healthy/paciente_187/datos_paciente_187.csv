@@ -1,0 +1,10 @@
+Campo,Valor
+ID Paciente,187
+Edad (anos),0.5
+Grupo de edad,Bebe (<1 ano)
+Sexo,F
+Diagnostico,Healthy
+BMI adulto (kg/m2),
+Peso nino (kg),8.26
+Altura nino (cm),71
+Particion sugerida (train/validation),Entrenamiento

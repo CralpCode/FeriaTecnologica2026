@@ -49,6 +49,10 @@ web-build/
 node_modules/
 __pycache__/
 *.py[cod]
+.venv
+**/.venv
+venv/
+**/.venv/
 .env
 .env*.local
 .expo/
@@ -64,3 +68,26 @@ web-build/
 Thumbs.db
 .vscode/
 .idea/
+
+# ==========================================
+# Datos generados por el servidor (audios de pacientes e informes)
+# ==========================================
+Backend/recordings/
+Backend/reports/
+Esp32/spiroscan_config.h
+Backend/.public_url
+
+# ==========================================
+# IA: datasets pesados y caché (se descargan aparte; ver IA/INSTRUCCIONES_DATOS_IA.md)
+# ==========================================
+IA/data/training/
+IA/data/validation - pruebas realizadas/
+IA/data/circor/
+IA/data/cache/
+IA/data/**/*.wav
+IA/data/**/*.zip
+IA/data/icbhi/
+
+# Entorno aislado usado para validar la integracion
+.venv-integracion/
+Esp32/.cache/

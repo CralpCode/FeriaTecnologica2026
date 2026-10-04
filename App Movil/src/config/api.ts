@@ -40,13 +40,12 @@ const getDynamicBaseUrl = () => {
 
   // 2. Entorno Web en navegador
   if (typeof window !== 'undefined' && window.location && window.location.hostname) {
-    if (window.location.hostname.includes('trycloudflare.com')) {
-      return PRIMARY_BACKEND_URL;
+    // Servidor de desarrollo de Expo (puerto 8081): el backend está en el puerto 8000 del mismo equipo.
+    if (window.location.port === '8081') {
+      return `${window.location.protocol}//${window.location.hostname}:8000`;
     }
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return 'http://localhost:8000';
-    }
-    return `${window.location.protocol}//${window.location.hostname}:8000`;
+    // App servida por la propia Mac (http://spiroscan.local:8000, IP o túnel): mismo origen.
+    return window.location.origin;
   }
 
   // 3. Entorno Nativo / APK móvil (acceso remoto global por defecto)
@@ -94,19 +93,21 @@ export const API_CONFIG = {
     return getDynamicBaseUrl();
   },
   TIMEOUT_MS: 60000,
-  POLL_INTERVAL_MS: 120,
+  POLL_INTERVAL_MS: 1000,  // el ESP32 envía 1 lectura por segundo al servidor
   ENDPOINTS: {
     CURRENT_VITALS: '/api/vitals/current',
     HISTORY: '/api/vitals/history',
     TELEMETRY: '/api/telemetry',
     AI_ANALYZE: '/api/ai/vitals/analyze',
     AI_PULMONARY_ANALYZE: '/api/ai/pulmonary/analyze',
+    AI_AUDIO_CLASSIFY: '/api/ai/audio/classify',
     AI_CHAT: '/api/ai/chat',
     AI_GENERATE: '/api/ai/llm/generate',
     DEVICE_STATUS: '/api/device/status',
     DEVICE_SESSION: '/api/device/session',
     DEVICE_CONNECT: '/api/device/connect',
     DEVICE_DISCONNECT: '/api/device/disconnect',
+    DEVICE_LINK: '/api/device/link',
     SESSIONS: '/api/sessions',
     SESSIONS_CREATE: '/api/sessions/create',
   },

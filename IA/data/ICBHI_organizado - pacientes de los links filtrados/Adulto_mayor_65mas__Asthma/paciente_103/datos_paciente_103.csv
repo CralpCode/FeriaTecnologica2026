@@ -1,0 +1,10 @@
+Campo,Valor
+ID Paciente,103
+Edad (anos),70
+Grupo de edad,Adulto mayor (65+)
+Sexo,F
+Diagnostico,Asthma
+BMI adulto (kg/m2),33
+Peso nino (kg),
+Altura nino (cm),
+Particion sugerida (train/validation),Entrenamiento

@@ -96,6 +96,8 @@ bool cardiac_locked = false;                  // True tras detectar intervalos d
 unsigned long cardiac_wait_start_ms = 0;      // Tiempo de espera para colocar el dedo
 
 Adafruit_NeoPixel strip(NUM_LEDS, WS2812_PIN, NEO_GRB + NEO_KHZ800);
+#include "auscultacion.h"
+static volatile bool recording_requested = false;
 MAX30105 particleSensor;
 
 // ------------------------------------------------------------------------------
@@ -584,13 +586,9 @@ void update_audio_rms() {
 
       // Si el sensor tiene actividad física real por encima de desconexión (> 10 counts)
       if (raw_rms > 10.0) {
-        // Conversión calibrada a dB SPL (~35-42 dB en silencio, ~60-75 dB al hablar, ~85-100 dB aplauso)
-        float calculated_db = 20.0f * log10f((float)raw_rms) - 18.5f;
-        if (calculated_db < 30.0f) calculated_db = 30.0f;
-        if (calculated_db > 105.0f) calculated_db = 105.0f;
-
-        audio_rms = (audio_rms * 0.60f) + (calculated_db * 0.40f);
-        audio_peak = max_peak_local;
+        // Nivel digital referido a la escala completa de 24 bits; no es dB SPL calibrado.
+        audio_rms = 20.0f * log10f((float)raw_rms / 8388608.0f);
+        audio_peak = max_peak_local / 8388608.0f;
         audio_valid = true;
         audio_last_data_ms = millis();
       } else {
@@ -1307,8 +1305,12 @@ void check_buttons() {
     if (now - k2_down_time >= 1200) {
       k2_long_press_handled = true;
       k2_pending_single = false;
-      Serial.println(F("[BOTON K2] Pulsacion larga (>1.2s) detectada -> Alternando Modo Infinito / Reposo"));
-      handle_combo_press();
+      if (ausc_wifi_ready() && ausc_server_known()) {
+        recording_requested = true;
+        Serial.println(F("[BOTON K2] Pulsacion larga -> Grabacion de 15s (prepara el foco en la app)."));
+      } else {
+        handle_combo_press();
+      }
     }
   }
 
@@ -1378,7 +1380,17 @@ void handle_incoming_commands(String raw_cmd) {
 
   Serial.printf("[COMANDO RX] Procesando: \"%s\" (len: %d)\r\n", cmd.c_str(), cmd.length());
 
-  if (cmd.indexOf("WAKE") >= 0 || cmd == "W" || cmd == "ACTIVE" || cmd.indexOf("V0FLRQ") >= 0) {
+  if (cmd == "REC" || cmd == "GRABAR") {
+    recording_requested = true; // El HTTP se ejecuta en loop, no en el callback BLE.
+    return;
+  }
+  if (ausc_busy() && cmd != "STATUS" && cmd != "INFO") {
+    Serial.println(F("[AUSC] Grabacion en curso; espera el resultado antes de iniciar otro modo."));
+    return;
+  }
+  if (cmd == "DIAG") {
+    ausc_diag(sensor_hw_found, finger_detected, beat_avg, spo2_val);
+  } else if (cmd.indexOf("WAKE") >= 0 || cmd == "W" || cmd == "ACTIVE" || cmd.indexOf("V0FLRQ") >= 0) {
     activate_transmission();
     broadcast_telemetry();
   } else if (cmd.indexOf("SCAN_CARD") >= 0 || cmd.indexOf("U0NBTl9DQVJE") >= 0 || cmd.indexOf("CARD") >= 0 || cmd.indexOf("HEART") >= 0 || cmd.indexOf("CORAZON") >= 0) {
@@ -1456,17 +1468,17 @@ void broadcast_telemetry() {
   uint8_t valid_mask = 0;
   if (bpm_valid && beat_avg > 0) valid_mask |= 1;
   if (spo2_valid && spo2_val >= 70.0f) valid_mask |= 2;
-  if (hrv_valid && hrv_ms > 0) valid_mask |= 4;
-  if (chip_temp_valid && chip_temp > 0) valid_mask |= 8;
+  if (hrv_valid && hrv_ms >= 0) valid_mask |= 4;
+  if (chip_temp_valid) valid_mask |= 8;
   if (audio_valid) valid_mask |= 16;
 
   char json_payload[512];
   snprintf(json_payload, sizeof(json_payload),
-           "{\"v\":2,\"valid\":%d,\"bpm\":%d,\"spo2\":%.1f,\"systolic\":0,\"diastolic\":0,\"temperature\":%.1f,\"chip_temp\":%.1f,\"stress\":%d,\"hrv\":%d,\"audio_rms\":%.1f,\"audio_peak\":%.1f,\"finger\":%s,\"scan_mode\":\"%s\",\"scan_sec\":%d,\"scan_phase\":\"%s\",\"cardiac_locked\":%s,\"power\":\"%s\",\"cal\":false}\n",
+           "{\"v\":2,\"valid\":%d,\"bpm\":%d,\"spo2\":%.1f,\"systolic\":0,\"diastolic\":0,\"temperature\":%.1f,\"chip_temp\":%.1f,\"stress\":%d,\"hrv\":%d,\"audio_rms\":%.1f,\"audio_peak\":%.6f,\"finger\":%s,\"scan_mode\":\"%s\",\"scan_sec\":%d,\"scan_phase\":\"%s\",\"cardiac_locked\":%s,\"power\":\"%s\",\"cal\":false,\"audio_unit\":\"dBFS\"}\n",
            valid_mask,
            bpm_valid ? beat_avg : 0,
            spo2_valid ? spo2_val : 0.0f,
-           chip_temp_valid ? chip_temp : 0.0f,
+           0.0f,
            chip_temp_valid ? chip_temp : 0.0f,
            stress_score,
            hrv_valid ? hrv_ms : 0,
@@ -1497,6 +1509,7 @@ void broadcast_telemetry() {
                 audio_rms, (valid_mask & 16) ? 1 : 0,
                 finger_detected ? "SI" : "NO", scan_str, scan_remaining);
   Serial.print(json_payload);
+  ausc_send_telemetry(json_payload);
 }
 
 // ------------------------------------------------------------------------------
@@ -1509,6 +1522,7 @@ void update_led_effects() {
   // Controlar refresco a intervalos estables (~30 FPS)
   if (now - last_led_update < 33) return;
   last_led_update = now;
+  if (ausc_update_leds(NUM_LEDS)) return;
 
   if (power_state == STATE_STANDBY_SAVER) {
     // LED 0: Power / Alimentación (Verde Esmeralda fijo)
@@ -1773,6 +1787,7 @@ class MyServerCallbacks: public BLEServerCallbacks {
 // 12. SETUP & BUCLE PRINCIPAL (LOOP)
 // ------------------------------------------------------------------------------
 void setup() {
+  Serial.setTxBufferSize(1024);
   Serial.begin(115200);
   delay(300);
 
@@ -1851,6 +1866,7 @@ void setup() {
   setup_max30102();
   report_i2s_clocks();
   report_i2s_sd();
+  ausc_wifi_begin();
 
   Serial.println(F("[OK] Firmware inicializado con exito."));
   Serial.println(F("=========================================================================\r\n"));
@@ -1862,13 +1878,29 @@ void loop() {
   unsigned long current_millis = millis();
 
   // 1. Lectura de Botones Fisicos K1 (Corazon) y K2 (Pulmon)
-  check_buttons();
-  update_scan_status();
+  if (!ausc_busy()) {
+    check_buttons();
+    update_scan_status();
+  }
 
   // 2. Comandos desde Consola Serial USB
   if (Serial.available()) {
     String ser_cmd = Serial.readStringUntil('\n');
     handle_incoming_commands(ser_cmd);
+  }
+
+  ausc_net_maintain();
+  if (recording_requested && !ausc_busy()) {
+    recording_requested = false;
+    enter_standby();
+    ausc_start();
+  }
+  if (ausc_busy()) {
+    // I2S pertenece a la grabacion; nunca reutilizar lecturas opticas anteriores.
+    ausc_capture_step();
+    if (!ausc_busy()) reset_biometric_state(true);
+    update_led_effects();
+    return;
   }
 
   // 3. Procesamiento de Senales Biologicas y Acusticas 100% Reales (Aislamiento Estricto por Modo)
@@ -1877,6 +1909,7 @@ void loop() {
       update_biometric_signals();
       audio_rms = 0.0f;
       audio_peak = 0.0f;
+      audio_valid = false;
     } else if (active_scan_mode == SCAN_PULMONARY) {
       update_audio_rms();
       finger_detected = false;
@@ -1894,11 +1927,13 @@ void loop() {
       // Activo pero SCAN_NONE (ej. periodo de gracia de 30s para visualizar resultados)
       audio_rms = 0.0f;
       audio_peak = 0.0f;
+      audio_valid = false;
     }
   } else {
     // En reposo: microfono y sensor cardiaco en silencio absoluto
     audio_rms = 0.0f;
     audio_peak = 0.0f;
+    audio_valid = false;
   }
 
   // 4. Control de la ventana de transmision activa
@@ -1921,7 +1956,7 @@ void loop() {
     }
   } else if (power_state == STATE_STANDBY_SAVER) {
     // En reposo con BLE conectado: latido suave cada 2500 ms con power:standby
-    if (ble_connected && current_millis - previous_millis_telemetry >= 2500) {
+    if ((ble_connected || ausc_wifi_ready()) && current_millis - previous_millis_telemetry >= 2500) {
       previous_millis_telemetry = current_millis;
       broadcast_telemetry();
     }

@@ -1,0 +1,10 @@
+Campo,Valor
+ID Paciente,196
+Edad (anos),21
+Grupo de edad,Adulto (18-64)
+Sexo,F
+Diagnostico,Bronchiectasis
+BMI adulto (kg/m2),25.5
+Peso nino (kg),
+Altura nino (cm),
+Particion sugerida (train/validation),Entrenamiento

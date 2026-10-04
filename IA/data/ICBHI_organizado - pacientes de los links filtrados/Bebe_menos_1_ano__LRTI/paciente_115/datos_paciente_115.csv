@@ -1,0 +1,10 @@
+Campo,Valor
+ID Paciente,115
+Edad (anos),0.58
+Grupo de edad,Bebe (<1 ano)
+Sexo,M
+Diagnostico,LRTI
+BMI adulto (kg/m2),
+Peso nino (kg),7.14
+Altura nino (cm),64
+Particion sugerida (train/validation),Entrenamiento

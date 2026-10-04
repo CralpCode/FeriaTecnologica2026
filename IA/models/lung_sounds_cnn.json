@@ -1,0 +1,75 @@
+{
+  "tarea": "crepitantes y sibilancias (ICBHI 2017)",
+  "salidas": [
+    "crepitantes",
+    "sibilancias"
+  ],
+  "metricas_prueba": {
+    "crepitantes": {
+      "sensibilidad": 0.7194928684627575,
+      "especificidad": 0.41697761194029853,
+      "auc": 0.6056055893275303,
+      "umbral": 0.27070531249046326,
+      "n_positivos": 631,
+      "mostrar": false,
+      "umbral_grabacion": 0.6702315211296082,
+      "grabacion_completa": {
+        "sensibilidad": 0.5043478260869565,
+        "especificidad": 0.5052631578947369,
+        "auc": 0.5279633867276887,
+        "grabaciones": 210,
+        "positivas": 115,
+        "mostrar": false
+      }
+    },
+    "sibilancias": {
+      "sensibilidad": 0.7758620689655172,
+      "especificidad": 0.6920462270564242,
+      "auc": 0.7957230596122742,
+      "umbral": 0.2659114599227905,
+      "n_positivos": 232,
+      "mostrar": true,
+      "umbral_grabacion": 0.7714989185333252,
+      "grabacion_completa": {
+        "sensibilidad": 0.5862068965517241,
+        "especificidad": 0.8092105263157895,
+        "auc": 0.7172186932849364,
+        "grabaciones": 210,
+        "positivas": 58,
+        "mostrar": true
+      }
+    },
+    "icbhi": {
+      "sensibilidad": 0.5444305381727159,
+      "especificidad": 0.25442477876106195,
+      "puntaje": 0.39942765846688894,
+      "mostrar": true
+    }
+  },
+  "agregacion": "promedio de las 2 ventanas más altas de la grabación",
+  "particiones": {
+    "train": 4147,
+    "val": 1048,
+    "test": 1703
+  },
+  "entrenado": "2026-10-03T20:56:48",
+  "features": {
+    "TARGET_SR": 4000,
+    "BAND_HZ": [
+      100.0,
+      1800.0
+    ],
+    "WINDOW_S": 4.0,
+    "HOP_S": 2.0,
+    "N_FFT": 512,
+    "HOP_LENGTH": 128,
+    "N_MELS": 64,
+    "FMIN": 100.0,
+    "FMAX": 2000.0
+  },
+  "limitaciones": [
+    "Sugerencia de tamizaje, no diagnóstico.",
+    "ICBHI tiene pocos pacientes en varias clases; resultados orientativos.",
+    "Validado con grabaciones de estetoscopios clínicos, no con el dispositivo propio."
+  ]
+}

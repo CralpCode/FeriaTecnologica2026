@@ -13,14 +13,17 @@ export function readingExists(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-export function measurementValidity(vitals: MeasurementQuality | null | undefined, metric: VitalMetric): boolean {
-  return vitals?.validity?.[metric] === true;
+export function measurementValidity(vitals: MeasurementQuality | null | undefined, metric: VitalMetric): boolean;
+export function measurementValidity(vitals: VitalSigns, now?: number): { heartRate: boolean; bloodOxygen: boolean };
+export function measurementValidity(vitals: MeasurementQuality | null | undefined, metricOrNow?: VitalMetric | number) {
+  if (typeof metricOrNow === 'string') return vitals?.validity?.[metricOrNow] === true;
+  return clinicalValidity(vitals as VitalSigns, metricOrNow);
 }
 
 export function normalizeDevicePacket(raw: RawDevicePacket): VitalSigns {
   const mask = raw.v === 2 && Number.isInteger(raw.valid) && (raw.valid ?? -1) >= 0 ? raw.valid! : 0;
-  const opticalContact = raw.finger !== false;
-  const hasBit = (bit: number) => (mask & bit) !== 0;
+  const opticalContact = raw.finger !== false && raw.power !== 'standby' && raw.test !== true && raw.source !== 'simulated';
+  const hasBit = (bit: number) => raw.power !== 'standby' && raw.test !== true && raw.source !== 'simulated' && (mask & bit) !== 0;
   const validity: Record<VitalMetric, boolean> = {
     heartRate: opticalContact && hasBit(1) && readingExists(raw.bpm) && raw.bpm > 0,
     bloodOxygen: opticalContact && hasBit(2) && readingExists(raw.spo2) && raw.spo2 > 0 && raw.spo2 <= 100,
@@ -79,14 +82,24 @@ export function normalizeDevicePacket(raw: RawDevicePacket): VitalSigns {
     validity,
     provenance,
     spo2_calibrated: validity.bloodOxygen && raw.cal === true,
-    source: raw.source ?? (raw.v === 2 ? 'esp32' : 'legacy'),
+    source: raw.test === true || raw.source === 'simulated' ? 'simulated' : raw.v === 2 && (!raw.source || ['real', 'esp32', 'ble_hr'].includes(raw.source)) ? 'real' : raw.source ?? 'unknown',
+    heartRateValid: validity.heartRate,
+    bloodOxygenValid: validity.bloodOxygen,
+    spo2Calibrated: validity.bloodOxygen && raw.cal === true,
+    signalQuality: validity.heartRate || validity.bloodOxygen || validity.hrv ? 'good' : opticalContact ? 'unstable' : 'no_finger',
+    sampleAgeMs: raw.sampleAgeMs ?? raw.sample_age_ms ?? 0,
+    audioUnit: raw.audioUnit ?? raw.audio_unit ?? 'relative_uncalibrated',
   };
 }
 
 /** Canonical API readings need the same explicit quality checks as device packets. */
 export function normalizePublicVitals(vitals: Partial<VitalSigns>): VitalSigns {
-  const qualityPresent = vitals.validity !== undefined;
-  const has = (metric: VitalMetric) => measurementValidity(vitals, metric);
+  const qualityPresent = vitals.validity !== undefined || vitals.heartRateValid !== undefined;
+  const has = (metric: VitalMetric) => vitals.validity?.[metric] ?? (
+    metric === 'heartRate' ? vitals.heartRateValid === true :
+    metric === 'bloodOxygen' ? vitals.bloodOxygenValid === true :
+    (metric === 'audio_rms' || metric === 'audio_peak') ? vitals.audioUnit === 'dBFS' && readingExists(vitals[metric]) : false
+  );
   const mask =
     (has('heartRate') ? 1 : 0) |
     (has('bloodOxygen') ? 2 : 0) |
@@ -96,7 +109,9 @@ export function normalizePublicVitals(vitals: Partial<VitalSigns>): VitalSigns {
   const normalized = normalizeDevicePacket({
     v: qualityPresent ? 2 : undefined,
     valid: mask,
-    cal: vitals.spo2_calibrated === true,
+    cal: (vitals.spo2_calibrated ?? vitals.spo2Calibrated) === true,
+    audioUnit: vitals.audioUnit,
+    sampleAgeMs: vitals.sampleAgeMs,
     source: vitals.source,
     bpm: vitals.heartRate,
     spo2: vitals.bloodOxygen,
@@ -119,6 +134,7 @@ export function normalizePublicVitals(vitals: Partial<VitalSigns>): VitalSigns {
     ...normalized,
     timestamp: typeof vitals.timestamp === 'string' ? vitals.timestamp : normalized.timestamp,
     device_connected: vitals.device_connected,
+    signalQuality: vitals.signalQuality ?? normalized.signalQuality,
   };
 }
 
@@ -140,4 +156,56 @@ export function decodeHeartRateMeasurement(bytes: ArrayLike<number>): RawDeviceP
     bpm: validHeartRate ? bpm : 0,
     ...(contactSupported ? { finger: contactDetected } : {}),
   };
+}
+
+/** Missing provenance or quality metadata never becomes a valid clinical measurement. */
+function clinicalValidity(vitals: VitalSigns, now = Date.now()) {
+  const received = Date.parse(vitals.timestamp);
+  const elapsed = now - received;
+  const age = vitals.sampleAgeMs;
+  const fresh = Number.isFinite(received) && elapsed >= -1000 && elapsed <= 10000
+    && typeof age === 'number' && Number.isFinite(age) && age >= 0 && age + Math.max(0, elapsed) <= 10000;
+  const eligible = fresh && vitals.source === 'real' && vitals.signalQuality === 'good'
+    && vitals.device_connected !== false;
+  return {
+    heartRate: eligible && vitals.finger !== false && vitals.heartRateValid === true
+      && Number.isFinite(vitals.heartRate) && vitals.heartRate > 0,
+    bloodOxygen: eligible && vitals.finger === true && vitals.bloodOxygenValid === true && vitals.spo2Calibrated === true
+      && Number.isFinite(vitals.bloodOxygen) && vitals.bloodOxygen > 0 && vitals.bloodOxygen <= 100,
+  };
+}
+
+/** Indicadores que solo envía el firmware nuevo; si no llega ninguno, el paquete es del formato original. */
+const NEW_FORMAT_KEYS = ['v', 'valid', 'validity', 'source', 'heartRateValid', 'heart_rate_valid', 'bloodOxygenValid', 'spo2_valid',
+  'spo2Calibrated', 'spo2_calibrated', 'signalQuality', 'signal_quality', 'sampleAgeMs', 'sample_age_ms'];
+
+export function isLegacyPacket(raw: object): boolean {
+  return !NEW_FORMAT_KEYS.some((key) => key in raw);
+}
+
+/**
+ * Misma regla que el servidor (Backend/measurement_quality.py, validate_legacy) para el formato original:
+ * pulso válido solo con dedo puesto, entre 30 y 220 BPM y estable en las últimas 3 lecturas
+ * (máximo 15 s, rango de 20 BPM o menos). La SpO2 de ese formato nunca se usa.
+ */
+export class LegacyPulseValidator {
+  private recent: { t: number; bpm: number | null }[] = [];
+
+  check(bpm: unknown, finger: unknown, now = Date.now()): { stable: boolean; finger: boolean } {
+    const hasFinger = finger === true;
+    const value = typeof bpm === 'number' && Number.isFinite(bpm) ? bpm : null;
+    const plausible = hasFinger && value !== null && value >= 30 && value <= 220;
+    const last = this.recent[this.recent.length - 1];
+    if (last && now - last.t > 15000) this.recent = [];
+    this.recent = [...this.recent, { t: now, bpm: plausible ? value : null }].slice(-3);
+    const window = this.recent.filter((r) => now - r.t <= 15000).map((r) => r.bpm);
+    const values = window.filter((b): b is number => b !== null);
+    const stable = window.length >= 3 && values.length === window.length
+      && Math.max(...values) - Math.min(...values) <= 20;
+    return { stable, finger: hasFinger };
+  }
+
+  reset() {
+    this.recent = [];
+  }
 }

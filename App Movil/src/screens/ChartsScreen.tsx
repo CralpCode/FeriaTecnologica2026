@@ -7,7 +7,7 @@ import { TrendChart } from '../components/TrendChart';
 import { TimeRange } from '../types/vitals';
 import { ExportService } from '../services/exportService';
 
-type MetricFilter = 'heartRate' | 'bloodOxygen' | 'systolicPressure' | 'stressLevel';
+type MetricFilter = 'heartRate' | 'bloodOxygen' | 'hrv' | 'stressLevel';
 
 export const ChartsScreen: React.FC = () => {
   const { history, selectedRange, setSelectedRange, aiReport } = useVitals();
@@ -35,7 +35,7 @@ export const ChartsScreen: React.FC = () => {
       unit: 'BPM',
       color: Colors.heartRate,
       icon: 'heart-pulse',
-      info: 'Medido en vivo por el sensor óptico U1 MAX30102. Refleja la actividad del nódulo sinusal.',
+      info: 'Medido en vivo por el sensor óptico MAX30102 a partir de la onda de pulso (PPG).',
     },
     {
       id: 'bloodOxygen',
@@ -43,23 +43,23 @@ export const ChartsScreen: React.FC = () => {
       unit: '% SpO2',
       color: Colors.oxygen,
       icon: 'water-percent',
-      info: 'Saturación periférica de oxígeno calculada mediante espectrometría óptica (Rojo 660nm / IR 880nm).',
+      info: 'Saturación periférica de oxígeno por oximetría de pulso (luz roja 660 nm e infrarroja 880 nm).',
     },
     {
-      id: 'systolicPressure',
-      label: 'Presión Sistólica',
-      unit: 'mmHg',
+      id: 'hrv',
+      label: 'Variabilidad (HRV)',
+      unit: 'ms',
       color: Colors.pressure,
       icon: 'heart-flash',
-      info: 'Presión intravascular máxima estimada por algoritmo PTT (Pulse Transit Time).',
+      info: 'Variación del intervalo entre latidos detectados por el sensor óptico. Medición de referencia, no validada clínicamente.',
     },
     {
       id: 'stressLevel',
-      label: 'Estrés Autonómico',
+      label: 'Índice de Estrés (experimental)',
       unit: '/100',
       color: Colors.stress,
       icon: 'brain',
-      info: 'Índice de reactividad simpática y estrés calculado a partir de la variabilidad del pulso y ruido I2S.',
+      info: 'Índice experimental calculado en el firmware a partir del pulso y el nivel sonoro. No es una medición validada.',
     },
   ];
 
@@ -296,6 +296,9 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 36,
+    width: '100%',
+    maxWidth: 1000,
+    alignSelf: 'center',
   },
   rangeSelectorCard: {
     backgroundColor: '#FFFFFF',

@@ -1,32 +1,77 @@
-# 🚀 Backend API - SpiroScan IoT (Feria Tecnológica)
+# 🚀 Backend API - SpiroScan (Feria Tecnológica)
 
-Servidor backend en **Python + FastAPI + SQLite (WAL)** para ingesta de telemetría del ESP32 en tiempo real, almacenamiento persistente, análisis biométrico y conexión con la App Móvil.
+> **Actualización 2026-10-03:** el resumen clínico, informes y semáforo usan reglas trazables y resultados acústicos de la sesión. El LLM (Qwen3-Next) redacta el chat, el resumen del informe y las alertas a partir de esos datos, con verificación de cifras. SpO2, HRV y estrés no están disponibles como mediciones validadas. [Informe completo](../docs/INFORME_MEJORAS_2026-10-03.md).
+
+
+Servidor en **Python + FastAPI + SQLite (WAL)** que corre en la Mac del equipo y concentra todo:
+telemetría del ESP32, base de datos, **CNN de audio cardíaco** y **LLM local (Ollama)**.
+
+```
+ESP32 ──WiFi──► FastAPI (:8000) ──► SQLite (vitales, grabaciones, alertas, informes)
+                   ├─► CNN PyTorch  → soplo sí/no + probabilidad
+                   ├─► Reglas fijas → alertas (WebSocket /ws/live)
+                   └─► Qwen (Ollama) → redacta alertas, informes, chat y guía
+App Expo ──HTTP/WS──► FastAPI
+```
+
+**Regla de diseño:** el LLM solo *redacta*. Las alertas las deciden reglas fijas (`alerts.py`) y la CNN
+(`ml/classifier.py`). Si el LLM no responde, se usa un texto de plantilla.
 
 ---
 
-## ⚡ Cómo Iniciar el Backend
+## ⚡ Cómo iniciar el servidor (Mac)
 
-Ejecuta el script incluido:
-```powershell
-.\run.ps1
+Desde la raíz del repositorio:
+```bash
+./start_server.sh            # red local
+./start_server.sh --tunnel   # además, túnel de Cloudflare como respaldo por internet
 ```
-O manualmente:
-```powershell
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+El script inicia Ollama si hace falta, precarga el modelo, muestra la IP de la Mac y evita que se duerma.
+
+Manual:
+```bash
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+
+Configuración en `.env` (ver `.env.example`): `LLM_BASE_URL`, `LLM_MODEL` (por defecto `spiroscan-qwen3next`, Qwen3-Next 80B; respaldo `qwen3:32b`),
+`HEART_MODEL_PATH`. Para usar Splash en lugar de Ollama basta con cambiar `LLM_BASE_URL`.
+
+El modelo `models/heart_cnn.pt` se entrena en la carpeta `IA/` (`train_heart.py`) y se copia aquí
+junto con su `heart_cnn.json` (umbral y métricas). `ml/features.py` debe ser idéntico al de ese repo.
 
 ---
 
-## 📚 Documentación Interactiva de la API (Swagger UI)
+## 📚 Endpoints (documentación interactiva en `http://<IP>:8000/docs`)
 
-Una vez iniciado el servidor, abre tu navegador en:
-👉 **[http://localhost:8000/docs](http://localhost:8000/docs)**
+**Telemetría**
+- `POST /api/telemetry` · `GET /api/vitals/current` · `GET /api/vitals/history`
+- `WS /ws/live`: eventos `VITALS_UPDATE`, `ALERT`, `ALERT_UPDATED`, `RECORDING_ARMED`, `RECORDING_STARTED`, `RECORDING_RESULT`
 
-Podrás probar todos los endpoints interactivamente:
-- `POST /api/telemetry`: Recibe datos del ESP32 (BPM, SpO2, Audio RMS).
-- `GET /api/vitals/current`: Devuelve los signos vitales actuales para la App Móvil.
-- `GET /api/vitals/history`: Devuelve el historial de datos para las gráficas.
-- `POST /api/ai/vitals/analyze`: Genera el diagnóstico y reporte de IA.
-- `POST /api/ai/chat`: Responde preguntas del usuario sobre sus métricas.
-- `GET /api/device/status`: Información de batería y conexión del ESP32.
-- `WS /ws/live`: Canal WebSocket para transmisión en vivo.
+**Auscultación**
+- `POST /api/audio/arm` `{session_id, location}`: la app indica sesión y foco (AV, PV, TV, MV) de la próxima grabación
+- `POST /api/audio/start` → `POST /api/audio/chunk?recording_id=` (PCM int16) → `POST /api/audio/finish?recording_id=` (ESP32)
+- `POST /api/audio/upload` (WAV completo, para pruebas) · `GET /api/recordings` · `GET /api/model/heart`
+
+**Alertas, informes y guía**
+- `GET /api/alerts` · `POST /api/alerts/{id}/ack`
+- `POST /api/reports/session/{session_id}` → `GET /api/reports/{id}/pdf`
+- `POST /api/ai/chat` (responde solo con datos reales de la sesión) · `GET /api/guide/{foco}` · `POST /api/guide/ask`
+
+**Exportaciones:** `/api/export/pdf`, `/api/export/xlsx`, `/api/export/csv`, `/api/export/png`, `/api/export/report`
+
+---
+
+## ⚠️ Qué mide y qué no mide el dispositivo
+- **Mide:** pulso (MAX30102) y audio cardíaco y pulmonar (INMP441).
+- **No usa todavía:** SpO2, variabilidad entre latidos (HRV) ni el "índice de estrés", hasta tener un cálculo calibrado y validado.
+- **No mide:** presión arterial ni temperatura corporal. Esos campos quedan en 0 por compatibilidad.
+
+## Contexto y valoración orientativa
+
+- `GET/PUT /api/clinical/context/{session_id}`: edad, reposo, altitud, síntomas y antecedentes; `null` conserva desconocidos.
+- `GET /api/clinical/assessment/{session_id}`: hallazgos, posibilidades a confirmar, fuentes y limitaciones; sin probabilidades de enfermedad.
+- Telemetría: `source`, `heartRateValid`, `bloodOxygenValid`, `spo2Calibrated`, `signalQuality`, `sampleAgeMs`, `finger`. Datos sin procedencia/validez no se usan clínicamente.
+- Telemetría del firmware original (sin esos campos): el servidor valida el pulso (dedo puesto, 30–220 BPM, estable en 3 lecturas) y no guarda SpO2, HRV ni estrés. Campos faltantes, raros o fuera de rango quedan vacíos y se informan en `avisos`; cuerpo no JSON → 422, más de 8 KB → 413.
+- Audio: `source` en `/api/audio/start` y `/api/audio/upload` (`real`, `simulated`, `unknown`). En `/api/audio/start` sin `source` se toma `real` (solo el dispositivo usa ese flujo); en `/api/audio/upload`, `unknown`. Un `finish` repetido devuelve el resultado guardado.
+- Exportaciones: especificar `session_id`; sin mezcla de sesiones ni puntuaciones de salud. PDF/HTML resumen la sesión; CSV/XLSX/PNG respetan el periodo solicitado.
+- Pruebas aisladas: `SPIROSCAN_DB_PATH` con base temporal y `SPIROSCAN_MDNS=0` para no anunciar el servidor de pruebas.

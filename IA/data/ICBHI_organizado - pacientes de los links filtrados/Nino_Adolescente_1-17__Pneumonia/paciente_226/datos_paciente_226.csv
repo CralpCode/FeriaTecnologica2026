@@ -1,0 +1,10 @@
+Campo,Valor
+ID Paciente,226
+Edad (anos),4
+Grupo de edad,Nino/Adolescente (1-17)
+Sexo,M
+Diagnostico,Pneumonia
+BMI adulto (kg/m2),
+Peso nino (kg),16.7
+Altura nino (cm),103
+Particion sugerida (train/validation),Entrenamiento

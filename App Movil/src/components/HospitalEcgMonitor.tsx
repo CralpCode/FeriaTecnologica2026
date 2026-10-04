@@ -323,8 +323,8 @@ export const HospitalEcgMonitor: React.FC<HospitalEcgMonitorProps> = ({
       {/* Cabecera Técnica */}
       <View style={styles.monitorHeader}>
         <View style={styles.headerLeft}>
-          <Text style={[styles.leadText, { color: ecgColor }]}>DERIVACIÓN II (ECG)</Text>
-          <Text style={styles.specText}>25 mm/s • 10 mm/mV</Text>
+          <Text style={[styles.leadText, { color: ecgColor }]}>PULSO (MAX30102)</Text>
+          <Text style={styles.specText}>Animación ilustrativa al ritmo medido • no es un ECG</Text>
         </View>
 
         <View style={styles.headerRight}>
@@ -436,9 +436,9 @@ export const HospitalEcgMonitor: React.FC<HospitalEcgMonitorProps> = ({
 
       {/* Pie del Monitor */}
       <View style={styles.monitorFooter}>
-        <Text style={styles.footerInfo}>MUESTREO: I2C 400kHz • MAX30102</Text>
-        <Text style={[styles.footerRhythm, { color: isLive ? '#059669' : '#64748B' }]}>
-          {isLive ? (isAlert ? '⚠ ALERTA / TAQUICARDIA' : '✓ RITMO SINUSAL NORMAL') : 'STANDBY • EN ESPERA'}
+        <Text style={styles.footerInfo}>SENSOR ÓPTICO • MAX30102</Text>
+        <Text style={[styles.footerRhythm, { color: isLive ? (isAlert ? '#DC2626' : '#059669') : '#64748B' }]}>
+          {isLive ? (isAlert ? '⚠ PULSO FUERA DE RANGO' : '✓ PULSO DETECTADO') : 'STANDBY • EN ESPERA'}
         </Text>
       </View>
     </View>
@@ -469,9 +469,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+    marginRight: 8,
   },
   leadText: {
     fontSize: 11,
@@ -479,7 +480,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   specText: {
-    fontSize: 9,
+    fontSize: 11,
     color: '#64748B',
     fontWeight: '600',
   },
@@ -503,7 +504,7 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   liveStreamingText: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.3,
   },
@@ -532,13 +533,13 @@ const styles = StyleSheet.create({
     borderTopColor: '#F1F5F9',
   },
   footerInfo: {
-    fontSize: 9,
+    fontSize: 11,
     color: '#64748B',
     fontWeight: '600',
     letterSpacing: 0.5,
   },
   footerRhythm: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.5,
   },

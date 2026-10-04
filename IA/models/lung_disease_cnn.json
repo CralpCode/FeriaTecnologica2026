@@ -1,0 +1,124 @@
+{
+  "tarea": "patrón respiratorio compatible con enfermedad (ICBHI 2017)",
+  "clases": [
+    "EPOC",
+    "bronquiectasia",
+    "bronquiolitis",
+    "infección respiratoria",
+    "neumonía",
+    "sano"
+  ],
+  "metricas_prueba": {
+    "exactitud_balanceada_pacientes": 0.4743589743589744,
+    "azar": 0.16666666666666666,
+    "pacientes_prueba": 24,
+    "por_clase": {
+      "EPOC": {
+        "sensibilidad": 0.8461538461538461,
+        "pacientes_prueba": 13,
+        "mostrar": true
+      },
+      "bronquiectasia": {
+        "sensibilidad": 0.0,
+        "pacientes_prueba": 1,
+        "mostrar": false
+      },
+      "bronquiolitis": {
+        "sensibilidad": 0.0,
+        "pacientes_prueba": 1,
+        "mostrar": false
+      },
+      "infección respiratoria": {
+        "sensibilidad": 0.0,
+        "pacientes_prueba": 3,
+        "mostrar": false
+      },
+      "neumonía": {
+        "sensibilidad": 1.0,
+        "pacientes_prueba": 1,
+        "mostrar": false
+      },
+      "sano": {
+        "sensibilidad": 1.0,
+        "pacientes_prueba": 5,
+        "mostrar": true
+      }
+    },
+    "matriz_confusion": [
+      [
+        11,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        3
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        5
+      ]
+    ]
+  },
+  "mostrar": false,
+  "particiones": {
+    "train": 618,
+    "val": 91,
+    "test": 210
+  },
+  "entrenado": "2026-10-03T20:57:26",
+  "features": {
+    "TARGET_SR": 4000,
+    "BAND_HZ": [
+      100.0,
+      1800.0
+    ],
+    "WINDOW_S": 4.0,
+    "HOP_S": 2.0,
+    "N_FFT": 512,
+    "HOP_LENGTH": 128,
+    "N_MELS": 64,
+    "FMIN": 100.0,
+    "FMAX": 2000.0
+  },
+  "limitaciones": [
+    "Sugerencia de tamizaje, no diagnóstico.",
+    "ICBHI tiene pocos pacientes en varias clases; resultados orientativos.",
+    "Validado con grabaciones de estetoscopios clínicos, no con el dispositivo propio."
+  ]
+}

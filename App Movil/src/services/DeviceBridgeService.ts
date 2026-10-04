@@ -2,6 +2,9 @@ import { Platform } from 'react-native';
 import { API_CONFIG, getSessionId } from '../config/api';
 import { VitalSigns, RawDevicePacket } from '../types/vitals';
 import { nativeBle } from './NativeBleBridge';
+import { isLegacyPacket, LegacyPulseValidator, normalizeDevicePacket, decodeHeartRateMeasurement } from './measurementQuality';
+
+import { DevicePacketBuffer } from './DevicePacketBuffer';
 
 export { RawDevicePacket };
 
@@ -20,6 +23,8 @@ class DeviceBridgeService {
   private shouldAutoReconnect: boolean = true;
   private reconnectAttempts: number = 0;
   private smoothedBpm: number = 0;
+  private legacyPulse = new LegacyPulseValidator();
+  private packetBuffer = new DevicePacketBuffer();
 
   public getConnected(): boolean {
     if (Platform.OS !== 'web') {
@@ -231,8 +236,7 @@ class DeviceBridgeService {
       customChar.addEventListener('characteristicvaluechanged', (event: any) => {
         try {
           const str = textDecoder.decode(event.target.value);
-          const packet: RawDevicePacket = JSON.parse(str);
-          this.handleIncomingRawData(packet);
+          for (const packet of this.packetBuffer.push(str)) this.handleIncomingRawData(packet);
         } catch (e) {
           // Ignorar paquetes parciales si ocurren
         }
@@ -252,25 +256,9 @@ class DeviceBridgeService {
       hrChar.addEventListener('characteristicvaluechanged', (event: any) => {
         if (!subscribedCustom) {
           const value = event.target.value;
-          const flags = value.getUint8(0);
-          const bpm = flags & 0x01 ? value.getUint16(1, true) : value.getUint8(1);
-
-          const nowMs = Date.now();
-          const breathOffset = Math.sin(nowMs / 2400) * 0.45;
-          const dynamicSpo2 = bpm > 0 ? Number((98.2 + breathOffset).toFixed(1)) : 0;
-
-          this.handleIncomingRawData({
-            bpm: bpm,
-            spo2: dynamicSpo2,
-            systolic: bpm > 0 ? 118 : 0,
-            diastolic: bpm > 0 ? 76 : 0,
-            temperature: bpm > 0 ? 36.6 : 0,
-            stress: bpm > 0 ? Math.round(Math.max(10, Math.min(95, (bpm - 50) * 1.2))) : 0,
-            hrv: bpm > 0 ? 65 : 0,
-            audio_rms: 20.0,
-            audio_peak: 26.0,
-            finger: bpm > 0,
-          });
+          const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+          const packet = decodeHeartRateMeasurement(bytes);
+          if (packet) this.handleIncomingRawData(packet);
         }
       });
       console.log('[BLE Web] Canal Heart Rate estándar conectado.');
@@ -312,6 +300,8 @@ class DeviceBridgeService {
     this.isConnected = false;
     this.deviceName = null;
     this.smoothedBpm = 0;
+    this.legacyPulse.reset();
+    this.packetBuffer.clear();
 
     if (Platform.OS !== 'web') {
       nativeBle.disconnect().catch(() => {});
@@ -417,127 +407,24 @@ class DeviceBridgeService {
       return;
     }
 
-    const isFingerPresent = raw.finger !== undefined ? Boolean(raw.finger) : (Boolean(raw.bpm) && Number(raw.bpm) > 0);
-
-    const validMask = typeof raw.valid === 'number' ? raw.valid : null;
-    const isBpmValid = validMask !== null ? (validMask & 1) !== 0 : (isFingerPresent && (raw.bpm || 0) > 0);
-    const isSpo2Valid = validMask !== null ? (validMask & 2) !== 0 : (isFingerPresent && (raw.spo2 || 0) >= 70);
-    const isHrvValid = validMask !== null ? (validMask & 4) !== 0 : (isFingerPresent && (raw.hrv || 0) > 0);
-    const isChipTempValid = validMask !== null ? (validMask & 8) !== 0 : Boolean(raw.chip_temp || raw.temperature);
-    const isAudioValid = validMask !== null ? (validMask & 16) !== 0 : ((raw.audio_rms ?? 0) > 0);
-
-    // 1. Ritmo Cardíaco (BPM) 100% Medido físicamente
-    let finalHeartRate = 0;
-    if (isFingerPresent && (raw.bpm || 0) > 0) {
-      finalHeartRate = Math.round(raw.bpm!);
+    const legacy = isLegacyPacket(raw);
+    const check = legacy ? this.legacyPulse.check(raw.bpm, raw.finger) : null;
+    const explicit = raw.v === 2;
+    const heartValid = check ? check.stable : (raw.heartRateValid ?? raw.heart_rate_valid) === true;
+    const oxygenValid = !legacy && (raw.bloodOxygenValid ?? raw.spo2_valid) === true;
+    const updatedVitals = normalizeDevicePacket(explicit ? raw : {
+      ...raw, v: 2,
+      valid: (heartValid ? 1 : 0) | (oxygenValid ? 2 : 0)
+        | (raw.audioUnit === 'dBFS' && typeof raw.audio_rms === 'number' ? 16 : 0),
+      cal: !legacy && (raw.spo2Calibrated ?? raw.spo2_calibrated) === true,
+      source: raw.test === true ? 'simulated' : raw.source ?? (legacy ? 'real' : 'unknown'),
+    });
+    if (!explicit) {
+      updatedVitals.source = raw.test === true ? 'simulated' : legacy ? 'real' : raw.source ?? 'unknown';
+      updatedVitals.signalQuality = check ? (check.stable ? 'good' : check.finger ? 'unstable' : 'no_finger')
+        : raw.signalQuality ?? raw.signal_quality ?? null;
+      updatedVitals.sampleAgeMs = legacy ? 0 : raw.sampleAgeMs ?? raw.sample_age_ms ?? null;
     }
-
-    // 2. SpO2 Oxígeno en Sangre
-    let finalSpo2 = 0.0;
-    if (isFingerPresent && finalHeartRate > 0) {
-      if (raw.spo2 && raw.spo2 >= 70.0) {
-        finalSpo2 = Number(Number(raw.spo2).toFixed(1));
-      } else {
-        const breathPhase = Math.sin(Date.now() / 2400) * 0.45;
-        finalSpo2 = Number((98.2 + breathPhase).toFixed(1));
-      }
-    }
-
-    // 3. Presión Arterial (PTT Fisiológica estimada por onda de pulso)
-    let finalSystolic = 0;
-    let finalDiastolic = 0;
-    if (isFingerPresent && finalHeartRate > 0) {
-      if (raw.systolic && raw.systolic > 0) {
-        finalSystolic = Math.round(raw.systolic);
-      } else {
-        finalSystolic = Math.round(114 + (finalHeartRate - 68) * 0.35);
-      }
-      if (raw.diastolic && raw.diastolic > 0) {
-        finalDiastolic = Math.round(raw.diastolic);
-      } else {
-        finalDiastolic = Math.round(74 + (finalHeartRate - 68) * 0.20);
-      }
-    }
-
-    // 4. Temperatura Cutánea (Calibrada con sensor térmico del silicio)
-    let finalTemp = 0.0;
-    if (isFingerPresent && finalHeartRate > 0) {
-      if (raw.temperature && raw.temperature >= 30.0 && raw.temperature <= 42.0) {
-        finalTemp = Number(raw.temperature.toFixed(1));
-      } else if (raw.chip_temp && raw.chip_temp > 0) {
-        finalTemp = Number((36.4 + (raw.chip_temp - 30.0) * 0.1).toFixed(1));
-      } else {
-        finalTemp = 36.6;
-      }
-    }
-
-    // 5. HRV y Estrés Autonómico
-    let finalHrv = 0;
-    let finalStress = 0;
-    if (isFingerPresent && finalHeartRate > 0) {
-      finalHrv = (typeof raw.hrv === 'number' && raw.hrv > 0)
-        ? Math.round(raw.hrv)
-        : Math.max(40, Math.min(100, Math.round(60000 / finalHeartRate * 0.08)));
-
-      const rawStressNum = (typeof raw.stress === 'number' && raw.stress > 0)
-        ? raw.stress
-        : ((typeof raw.stress_score === 'number' && raw.stress_score > 0) ? raw.stress_score : null);
-
-      finalStress = rawStressNum !== null
-        ? Math.round(rawStressNum)
-        : Math.round(Math.max(15, Math.min(90, (finalHeartRate - 55) * 1.1)));
-    }
-
-    const finalChipTemp = raw.chip_temp ? Number(raw.chip_temp) : finalTemp;
-
-    const updatedVitals: VitalSigns = {
-      heartRate: finalHeartRate,
-      bloodOxygen: finalSpo2,
-      systolicPressure: finalSystolic,
-      diastolicPressure: finalDiastolic,
-      temperature: finalTemp,
-      chipTemperature: finalChipTemp,
-      hrv: finalHrv,
-      stressLevel: finalStress,
-      audio_rms: raw.audio_rms || 0.0,
-      audio_peak: raw.audio_peak || 0.0,
-      steps: 0,
-      calories: 0,
-      timestamp: new Date().toISOString(),
-      device_connected: true,
-      finger: isFingerPresent,
-      scan_mode: raw.scan_mode || 'none',
-      scan_sec: raw.scan_sec !== undefined ? raw.scan_sec : 0,
-      scan_phase: raw.scan_phase || (raw.scan_mode === 'cardiac' && (raw.cardiac_locked || finalHeartRate > 0) ? 'measuring' : (raw.scan_mode === 'cardiac' ? 'calibrating' : 'none')),
-      cardiac_locked: raw.cardiac_locked !== undefined ? Boolean(raw.cardiac_locked) : (finalHeartRate > 0),
-      power: raw.power || 'active',
-      validity: {
-        heartRate: finalHeartRate > 0,
-        bloodOxygen: finalSpo2 > 0,
-        systolicPressure: finalSystolic > 0,
-        diastolicPressure: finalDiastolic > 0,
-        temperature: finalTemp > 0,
-        chipTemperature: Boolean(raw.chip_temp),
-        hrv: finalHrv > 0,
-        stressLevel: finalStress > 0,
-        audio_rms: (raw.audio_rms ?? 0) > 0,
-        audio_peak: (raw.audio_peak ?? 0) > 0,
-      },
-      provenance: {
-        heartRate: finalHeartRate > 0 ? 'measured' : 'unavailable',
-        bloodOxygen: finalSpo2 > 0 ? 'measured' : 'unavailable',
-        systolicPressure: finalSystolic > 0 ? 'derived' : 'unavailable',
-        diastolicPressure: finalDiastolic > 0 ? 'derived' : 'unavailable',
-        temperature: finalTemp > 0 ? 'derived' : 'unavailable',
-        chipTemperature: raw.chip_temp ? 'measured' : 'unavailable',
-        hrv: finalHrv > 0 ? 'derived' : 'unavailable',
-        stressLevel: finalStress > 0 ? 'derived' : 'unavailable',
-        audio_rms: (raw.audio_rms ?? 0) > 0 ? 'measured' : 'unavailable',
-        audio_peak: (raw.audio_peak ?? 0) > 0 ? 'measured' : 'unavailable',
-      },
-      spo2_calibrated: true,
-      source: 'esp32_bio_acoustic',
-    };
 
     this.notifyVitalsListeners(updatedVitals);
 
@@ -552,24 +439,9 @@ class DeviceBridgeService {
       await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          v: 2,
-          valid: data.valid,
-          bpm: vitals.heartRate,
-          spo2: vitals.bloodOxygen,
-          systolic: 0,
-          diastolic: 0,
-          temperature: 0.0,
-          chip_temp: vitals.chipTemperature,
-          stress: vitals.stressLevel,
-          hrv: vitals.hrv,
-          audio_rms: vitals.audio_rms,
-          audio_peak: vitals.audio_peak,
-          finger: vitals.finger,
-          device_id: 'SpiroScan-Band',
-          session_id: getSessionId(),
-          cal: false,
-        }),
+        // Solo se reenvía lo que trae el paquete (undefined no viaja en JSON): así el servidor
+        // reconoce el formato original y aplica su propia validación, sin indicadores inventados.
+        body: JSON.stringify({ ...data, device_id: data.device_id ?? 'SpiroScan-Band', session_id: getSessionId() }),
       });
     } catch (e) {}
   }

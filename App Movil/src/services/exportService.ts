@@ -3,10 +3,11 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import { VitalsHistoryPoint, AIAnalysisReport } from '../types/vitals';
+import { getSessionId } from '../config/api';
 import { API_CONFIG } from '../config/api';
 
 export interface ExportDataParams {
-  metricKey?: 'heartRate' | 'bloodOxygen' | 'systolicPressure' | 'stressLevel';
+  metricKey?: 'heartRate' | 'bloodOxygen' | 'hrv' | 'stressLevel';
   history?: VitalsHistoryPoint[];
   metricName?: string;
   metricUnit?: string;
@@ -99,7 +100,7 @@ export class ExportService {
   static async exportToExcel(params: ExportDataParams): Promise<{ success: boolean; message: string }> {
     try {
       const { selectedRange } = params;
-      const downloadUrl = `${API_CONFIG.BASE_URL}/api/export/excel?range=${selectedRange}`;
+      const downloadUrl = `${API_CONFIG.BASE_URL}/api/export/excel?range=${selectedRange}&session_id=${encodeURIComponent(getSessionId())}`;
       const filename = `SpiroScan_Telemetria_${selectedRange}.xlsx`;
 
       if (Platform.OS === 'web') {
@@ -143,7 +144,7 @@ export class ExportService {
   static async exportToPng(params: ExportDataParams): Promise<{ success: boolean; message: string }> {
     try {
       const { selectedRange, metricKey = 'heartRate' } = params;
-      const downloadUrl = `${API_CONFIG.BASE_URL}/api/export/png?metric=${metricKey}&range=${selectedRange}`;
+      const downloadUrl = `${API_CONFIG.BASE_URL}/api/export/png?metric=${metricKey}&range=${selectedRange}&session_id=${encodeURIComponent(getSessionId())}`;
       const filename = `SpiroScan_Grafica_${metricKey}_${selectedRange}.png`;
 
       if (Platform.OS === 'web') {
@@ -185,7 +186,7 @@ export class ExportService {
   static async exportToPdf(params: ExportDataParams): Promise<{ success: boolean; message: string }> {
     try {
       const { selectedRange } = params;
-      const downloadUrl = `${API_CONFIG.BASE_URL}/api/export/pdf?range=${selectedRange}`;
+      const downloadUrl = `${API_CONFIG.BASE_URL}/api/export/pdf?range=${selectedRange}&session_id=${encodeURIComponent(getSessionId())}`;
       const filename = `SpiroScan_Reporte_Clinico_${selectedRange}.pdf`;
 
       if (Platform.OS === 'web') {

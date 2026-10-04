@@ -1,13 +1,7 @@
+# En la Mac se recomienda ./start_server.sh (backend nativo): Docker en macOS no tiene
+# acceso a la GPU, así que el LLM debe correr en Ollama nativo, fuera de contenedores.
+# Este compose queda como alternativa para correr SOLO el backend en un contenedor.
 services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama_local
-    restart: unless-stopped
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama:/root/.ollama
-
   backend:
     build:
       context: ./Backend
@@ -19,18 +13,13 @@ services:
       - "8000:8000"
     volumes:
       - ./Backend/telemetry.db:/app/telemetry.db
+      - ./Backend/recordings:/app/recordings
+      - ./Backend/reports:/app/reports
     environment:
       - HOST=0.0.0.0
       - PORT=8000
       - CORS_ORIGINS=*
-      - AI_PROVIDER=ollama
-      - OLLAMA_URL=http://host.docker.internal:11434
-      - OLLAMA_MODEL=llama3.2:3b
+      - LLM_BASE_URL=http://host.docker.internal:11434/v1
+      - LLM_MODEL=spiroscan-qwen3next
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on:
-      - ollama
-
-volumes:
-  ollama:
-    external: true

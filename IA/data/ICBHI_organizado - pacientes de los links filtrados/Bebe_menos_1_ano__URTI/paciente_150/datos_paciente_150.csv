@@ -1,0 +1,10 @@
+Campo,Valor
+ID Paciente,150
+Edad (anos),0.67
+Grupo de edad,Bebe (<1 ano)
+Sexo,F
+Diagnostico,URTI
+BMI adulto (kg/m2),
+Peso nino (kg),8.12
+Altura nino (cm),74
+Particion sugerida (train/validation),Validacion

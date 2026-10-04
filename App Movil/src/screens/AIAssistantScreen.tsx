@@ -13,17 +13,21 @@ import {
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useVitals } from '../context/VitalsContext';
+import { AIExplainerModal } from '../components/AIExplainerModal';
 
 export const AIAssistantScreen: React.FC = () => {
   const { vitals, chatMessages, isChatLoading, sendChatMessage } = useVitals();
   const [inputText, setInputText] = useState('');
+  const [showExplainer, setShowExplainer] = useState(false);
   const scrollViewRef = useRef<any>(null);
 
   const suggestions = [
     '¿Cómo están mis pulsaciones actuales?',
     '¿Mi oxigenación SpO2 es normal?',
-    '¿Qué significa mi presión arterial?',
-    'Dame una recomendación de bienestar completa',
+    '¿Qué resultado dio la auscultación?',
+    '¿Detectas ruidos pulmonares o sibilancias en mi auscultación?',
+    'Resume esta sesión en pocas palabras',
+    '¿Qué es SpiroScan y cómo funciona?',
   ];
 
   useEffect(() => {
@@ -53,6 +57,13 @@ export const AIAssistantScreen: React.FC = () => {
         contentContainerStyle={styles.messagesContent}
         showsVerticalScrollIndicator={true}
       >
+        <TouchableOpacity style={styles.explainerBtn} onPress={() => setShowExplainer(true)} activeOpacity={0.8}>
+          <MaterialCommunityIcons name="brain" size={18} color={Colors.aiPurple} />
+          <Text style={styles.explainerText}>¿Cómo funciona la IA de SpiroScan?</Text>
+          <Ionicons name="chevron-forward" size={16} color={Colors.aiPurple} />
+        </TouchableOpacity>
+        <AIExplainerModal visible={showExplainer} onClose={() => setShowExplainer(false)} />
+
         {/* Banner Superior de Estado en Vivo (Grid Adaptativo 2x2 Antidesbordamiento) */}
         <View style={styles.liveVitalsBanner}>
           <View style={styles.bannerHeaderRow}>
@@ -93,15 +104,15 @@ export const AIAssistantScreen: React.FC = () => {
               </View>
             </View>
 
-            {/* Presión Arterial */}
+            {/* Variabilidad HRV */}
             <View style={styles.vitalGridCard}>
               <View style={[styles.vitalIconWrap, { backgroundColor: '#EDE9FE' }]}>
-                <Ionicons name="speedometer" size={14} color="#8B5CF6" />
+                <Ionicons name="pulse" size={14} color="#8B5CF6" />
               </View>
               <View style={styles.vitalCardContent}>
-                <Text style={styles.vitalCardLabel}>Presión Art.</Text>
+                <Text style={styles.vitalCardLabel}>HRV</Text>
                 <Text style={styles.vitalCardValue} numberOfLines={1}>
-                  {vitals.systolicPressure > 0 ? `${vitals.systolicPressure}/${vitals.diastolicPressure}` : 'En espera'}
+                  {vitals.hrv > 0 ? `${vitals.hrv} ms` : 'En espera'}
                 </Text>
               </View>
             </View>
@@ -193,11 +204,19 @@ export const AIAssistantScreen: React.FC = () => {
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
-          placeholder="Pregúntale a tu Asistente Médico..."
+          placeholder="Pregúntale al asistente sobre tus datos o sobre SpiroScan…"
           placeholderTextColor={Colors.textMuted}
           value={inputText}
           onChangeText={setInputText}
           onSubmitEditing={handleSend}
+          onKeyPress={(e: any) => {
+            // En computadora: Enter envía y Shift+Enter hace salto de línea
+            if (e.nativeEvent.key === 'Enter' && !e.nativeEvent.shiftKey) {
+              e.preventDefault?.();
+              handleSend();
+            }
+          }}
+          accessibilityLabel="Mensaje para el asistente"
           returnKeyType="send"
           multiline={true}
         />
@@ -214,6 +233,18 @@ export const AIAssistantScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  explainerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.aiPurpleSoft,
+    borderColor: '#DDD6FE',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+  },
+  explainerText: { flex: 1, fontSize: 14, fontWeight: '800', color: Colors.aiPurple },
   container: {
     flex: 1,
     backgroundColor: '#F8FAFC',
@@ -224,6 +255,9 @@ const styles = StyleSheet.create({
   messagesContent: {
     padding: 14,
     paddingBottom: 24,
+    width: '100%',
+    maxWidth: 900,
+    alignSelf: 'center',
   },
   liveVitalsBanner: {
     backgroundColor: '#FFFFFF',
@@ -271,7 +305,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   llamaStatusText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '800',
     color: '#15803D',
   },
@@ -306,7 +340,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   vitalCardLabel: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
     color: '#64748B',
     marginBottom: 1,
@@ -363,7 +397,7 @@ const styles = StyleSheet.create({
     color: '#1E293B',
   },
   timestampText: {
-    fontSize: 10,
+    fontSize: 11,
     marginTop: 8,
   },
   userTimestamp: {

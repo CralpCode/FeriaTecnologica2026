@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Captura de Datos Clínicos con Instrumentos Tradicionales</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    /* Transiciones suaves */
+    input, select, textarea, button {
+      transition: all 0.2s ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased p-4 md:p-8 min-h-screen">
+  <div class="max-w-6xl mx-auto space-y-6">
+
+    <!-- Encabezado Principal -->
+    <header class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div>
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 text-blue-500 text-xs font-semibold uppercase tracking-wider mb-2">
+          <span>🩺 Fase 1: Línea Base / Métodos Tradicionales</span>
+        </div>
+        <h1 class="text-2xl md:text-3xl font-bold tracking-tight">Captura y Registro de Datos Clínicos</h1>
+        <p class="text-[var(--muted-foreground)] text-sm mt-1">
+          Visualizador y recolector de variables fisiológicas obtenibles con el equipo actual (CVS BP3MW1, estetoscopio, termómetro y antropometría).
+        </p>
+      </div>
+      
+      <!-- Botones de ejemplos rápidos -->
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-xs text-[var(--muted-foreground)] font-medium">Cargar demo:</span>
+        <button onclick="cargarEjemplo('sano')" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30">
+          👤 Sujeto Sano
+        </button>
+        <button onclick="cargarEjemplo('epoc')" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/30">
+          ⚠️ Sospecha EPOC
+        </button>
+        <button onclick="cargarEjemplo('asma')" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20 border border-rose-500/30">
+          🚨 Crisis Asmática
+        </button>
+      </div>
+    </header>
+
+    <!-- Resumen del Semáforo de Triaje Dinámico -->
+    <div id="panelTriaje" class="bg-[var(--card)] border-2 border-emerald-500/40 rounded-2xl p-5 shadow-sm transition-all duration-300">
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div class="flex items-center gap-4">
+          <div id="indicadorSemaforo" class="w-14 h-14 rounded-2xl bg-emerald-500 flex items-center justify-center text-white text-2xl font-bold shadow-md shadow-emerald-500/30 animate-pulse">
+            ✓
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Estado de Triaje Preliminar</span>
+              <span id="badgeNivel" class="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">NORMAL / ESTABLE</span>
+            </div>
+            <h2 id="tituloTriaje" class="text-lg font-bold text-[var(--foreground)] mt-0.5">Parámetros dentro de rangos fisiológicos normales</h2>
+            <p id="descTriaje" class="text-xs text-[var(--muted-foreground)]">Sin signos aparentes de compromiso respiratorio o hemodinámico agudo.</p>
+          </div>
+        </div>
+
+        <!-- Mapeo con Hardware Futuro -->
+        <div class="bg-[var(--background)] border border-[var(--border)] rounded-xl p-3 text-xs space-y-1 w-full md:w-auto">
+          <div class="font-semibold text-[var(--foreground)] flex items-center gap-1.5">
+            <span>⚡ Mapeo con Prototipo ESP32:</span>
+          </div>
+          <div class="text-[var(--muted-foreground)]">
+            • <strong class="text-blue-500">MAX30102:</strong> Reemplazará la medición manual de pulso y agregará %SpO₂.
+          </div>
+          <div class="text-[var(--muted-foreground)]">
+            • <strong class="text-purple-500">INMP441:</strong> Digitalizará el estetoscopio y clasificará los ruidos con IA.
+          </div>
+          <div class="text-[var(--muted-foreground)]">
+            • <strong class="text-amber-500">Neopixel WS2812:</strong> Reflejará físicamente este semáforo en los 8 LEDs.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rejilla de Instrumentos y Formularios -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+      <!-- COLUMNA IZQUIERDA: INSTRUMENTOS FÍSICOS TRADICIONALES (7 cols) -->
+      <div class="lg:col-span-7 space-y-6">
+
+        <!-- INSTRUMENTO 1: CVS Health BP3MW1 -->
+        <section class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 shadow-sm relative overflow-hidden">
+          <div class="absolute top-0 right-0 px-3 py-1 bg-blue-500 text-white text-xs font-semibold rounded-bl-xl">
+            Tensiómetro Digital
+          </div>
+          <div class="flex items-center gap-3 mb-4">
+            <span class="text-2xl">📟</span>
+            <div>
+              <h3 class="text-base font-bold text-[var(--foreground)]">CVS Health BP3MW1</h3>
+              <p class="text-xs text-[var(--muted-foreground)]">Presión arterial oscilométrica y frecuencia de pulso</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <!-- Sistólica -->
+            <div class="bg-[var(--background)] p-3.5 rounded-xl border border-[var(--border)]">
+              <label class="block text-xs font-semibold text-[var(--muted-foreground)] mb-1">Presión Sistólica (PAS)</label>
+              <div class="flex items-baseline gap-2">
+                <input type="number" id="inPAS" value="120" min="60" max="250" oninput="evaluarPaciente()"
+                  class="w-full text-xl font-bold bg-transparent border-b border-[var(--border)] focus:border-blue-500 focus:outline-none py-1">
+                <span class="text-xs text-[var(--muted-foreground)] font-medium">mmHg</span>
+              </div>
+              <span id="labelPAS" class="text-xs text-emerald-500 font-medium block mt-1">Normal (&lt;120)</span>
+            </div>
+
+            <!-- Diastólica -->
+            <div class="bg-[var(--background)] p-3.5 rounded-xl border border-[var(--border)]">
+              <label class="block text-xs font-semibold text-[var(--muted-foreground)] mb-1">Presión Diastólica (PAD)</label>
+              <div class="flex items-baseline gap-2">
+                <input type="number" id="inPAD" value="80" min="40" max="150" oninput="evaluarPaciente()"
+                  class="w-full text-xl font-bold bg-transparent border-b border-[var(--border)] focus:border-blue-500 focus:outline-none py-1">
+                <span class="text-xs text-[var(--muted-foreground)] font-medium">mmHg</span>
+              </div>
+              <span id="labelPAD" class="text-xs text-emerald-500 font-medium block mt-1">Normal (&lt;80)</span>
+            </div>
+
+            <!-- Pulso / Frecuencia Cardíaca -->
+            <div class="bg-[var(--background)] p-3.5 rounded-xl border border-[var(--border)] ring-1 ring-blue-500/30">
+              <div class="flex justify-between items-center mb-1">
+                <label class="block text-xs font-semibold text-[var(--muted-foreground)]">Pulso Cardíaco</label>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-500 font-bold">MAX30102</span>
+              </div>
+              <div class="flex items-baseline gap-2">
+                <input type="number" id="inFC" value="72" min="35" max="220" oninput="evaluarPaciente()"
+                  class="w-full text-xl font-bold bg-transparent border-b border-[var(--border)] focus:border-blue-500 focus:outline-none py-1 text-blue-500">
+                <span class="text-xs text-[var(--muted-foreground)] font-medium">BPM</span>
+              </div>
+              <span id="labelFC" class="text-xs text-emerald-500 font-medium block mt-1">Normocardia (60-100)</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- INSTRUMENTO 2: Estetoscopio Tradicional -->
+        <section class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 shadow-sm relative overflow-hidden">
+          <div class="absolute top-0 right-0 px-3 py-1 bg-purple-600 text-white text-xs font-semibold rounded-bl-xl">
+            Auscultación Clínica
+          </div>
+          <div class="flex items-center gap-3 mb-4">
+            <span class="text-2xl">🩺</span>
+            <div>
+              <h3 class="text-base font-bold text-[var(--foreground)]">Estetoscopio Acústico + Conteo</h3>
+              <p class="text-xs text-[var(--muted-foreground)]">Auscultación torácica y frecuencia respiratoria por minuto</p>
+            </div>
+          </div>
+
+          <div class="space-y-4">
+            <!-- Frecuencia Respiratoria -->
+            <div class="bg-[var(--background)] p-3.5 rounded-xl border border-[var(--border)]">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                <label class="text-xs font-semibold text-[var(--muted-foreground)]">Frecuencia Respiratoria (FR en 60 segundos)</label>
+                <span id="labelFR" class="text-xs text-emerald-500 font-medium">Eupnea normal (12-20 rpm)</span>
+              </div>
+              <div class="flex items-center gap-4">
+                <input type="range" id="inFR" min="8" max="40" value="16" oninput="evaluarPaciente()"
+                  class="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-600">
+                <span id="valFR" class="text-xl font-bold w-16 text-right text-purple-600">16 rpm</span>
+              </div>
+            </div>
+
+            <!-- Hallazgos Auscultación Pulmonar -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="bg-[var(--background)] p-3.5 rounded-xl border border-[var(--border)]">
+                <div class="flex justify-between items-center mb-1">
+                  <label class="block text-xs font-semibold text-[var(--muted-foreground)]">Ruidos Pulmonares (Espalda)</label>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-500 font-bold">INMP441 / ICBHI</span>
+                </div>
+                <select id="inRuidoPulmonar" onchange="evaluarPaciente()" class="w-full mt-1 p-2 rounded-lg bg-[var(--card)] border border-[var(--border)] text-xs text-[var(--foreground)] font-medium">
+                  <option value="normal">Murmullo Vesicular Limpio (Normal)</option>
+                  <option value="sibilancias">Sibilancias (Wheezes - Asma/EPOC)</option>
+                  <option value="crepitantes">Crepitantes (Crackles - Neumonía/Fibrosis)</option>
+                  <option value="ambos">Mixto (Sibilancias + Crepitantes)</option>
+                  <option value="disminuido">Murmullo Muy Disminuido / Silente</option>
+                </select>
+                <p id="descRuido" class="text-xs text-[var(--muted-foreground)] mt-2">Sonido respiratorio suave y continuo en inspiración.</p>
+              </div>
+
+              <!-- Hallazgos Cardíacos -->
+              <div class="bg-[var(--background)] p-3.5 rounded-xl border border-[var(--border)]">
+                <div class="flex justify-between items-center mb-1">
+                  <label class="block text-xs font-semibold text-[var(--muted-foreground)]">Auscultación Cardíaca (Pecho)</label>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-500 font-bold">PhysioNet 2016</span>
+                </div>
+                <select id="inRuidoCardiaco" onchange="evaluarPaciente()" class="w-full mt-1 p-2 rounded-lg bg-[var(--card)] border border-[var(--border)] text-xs text-[var(--foreground)] font-medium">
+                  <option value="normal">R1 y R2 Rítmicos, Sin soplos</option>
+                  <option value="arritmico">Latidos Arrítmicos / Irregulares</option>
+                  <option value="soplo">Soplo Cardíaco Audible (Murmur)</option>
+                </select>
+                <p id="descCardiaco" class="text-xs text-[var(--muted-foreground)] mt-2">Tonos fundamentales S1 (lub) y S2 (dub) nítidos y regulares.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- INSTRUMENTO 3: Termómetro -->
+        <section class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 shadow-sm relative overflow-hidden">
+          <div class="absolute top-0 right-0 px-3 py-1 bg-amber-500 text-white text-xs font-semibold rounded-bl-xl">
+            Termometría
+          </div>
+          <div class="flex items-center gap-3 mb-4">
+            <span class="text-2xl">🌡️</span>
+            <div>
+              <h3 class="text-base font-bold text-[var(--foreground)]">Termómetro Clínico</h3>
+              <p class="text-xs text-[var(--muted-foreground)]">Temperatura corporal axilar, oral o frontal</p>
+            </div>
+          </div>
+
+          <div class="bg-[var(--background)] p-4 rounded-xl border border-[var(--border)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div class="flex items-baseline gap-2">
+              <input type="number" id="inTemp" value="36.6" step="0.1" min="34" max="42" oninput="evaluarPaciente()"
+                class="w-28 text-2xl font-bold bg-transparent border-b border-[var(--border)] focus:border-amber-500 focus:outline-none py-1">
+              <span class="text-sm font-semibold text-[var(--muted-foreground)]">°C</span>
+            </div>
+            <div class="text-left sm:text-right">
+              <span id="labelTemp" class="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                Apirético / Normal (36.0 - 37.2 °C)
+              </span>
+              <p class="text-xs text-[var(--muted-foreground)] mt-1.5">Permite descartar infección pulmonar aguda activa.</p>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- COLUMNA DERECHA: FORMULARIO Y DEMOGRAFÍA (5 cols) -->
+      <div class="lg:col-span-5 space-y-6">
+
+        <!-- Antropometría y Datos del Sujeto -->
+        <section class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 shadow-sm">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+              <span class="text-xl">👤</span>
+              <h3 class="text-base font-bold text-[var(--foreground)]">Datos del Sujeto</h3>
+            </div>
+            <span class="text-xs text-[var(--muted-foreground)] font-mono">ID: <input type="text" id="inID" value="P_001" class="w-16 bg-transparent border-b border-[var(--border)] font-bold text-center"></span>
+          </div>
+
+          <div class="space-y-3.5">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-[var(--muted-foreground)] mb-1">Edad (Años)</label>
+                <input type="number" id="inEdad" value="28" min="1" max="100" oninput="evaluarPaciente()"
+                  class="w-full p-2 rounded-lg bg-[var(--background)] border border-[var(--border)] text-sm font-semibold">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-[var(--muted-foreground)] mb-1">Sexo Biológico</label>
+                <select id="inSexo" class="w-full p-2 rounded-lg bg-[var(--background)] border border-[var(--border)] text-sm font-semibold">
+                  <option value="M">Masculino</option>
+                  <option value="F">Femenino</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-[var(--muted-foreground)] mb-1">Estatura (cm)</label>
+                <input type="number" id="inTalla" value="172" min="80" max="220" oninput="evaluarPaciente()"
+                  class="w-full p-2 rounded-lg bg-[var(--background)] border border-[var(--border)] text-sm font-semibold">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-[var(--muted-foreground)] mb-1">Peso (kg)</label>
+                <input type="number" id="inPeso" value="70" step="0.5" min="20" max="200" oninput="evaluarPaciente()"
+                  class="w-full p-2 rounded-lg bg-[var(--background)] border border-[var(--border)] text-sm font-semibold">
+              </div>
+            </div>
+
+            <!-- Cálculo instantáneo de IMC -->
+            <div class="p-3 bg-[var(--background)] border border-[var(--border)] rounded-xl flex items-center justify-between">
+              <div>
+                <span class="text-xs text-[var(--muted-foreground)] block">Índice Masa Corporal (IMC)</span>
+                <span id="valIMC" class="text-base font-bold text-[var(--foreground)]">23.7 kg/m²</span>
+              </div>
+              <span id="badgeIMC" class="text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                Peso Normal
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Cuestionario Clínico Rápido -->
+        <section class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 shadow-sm">
+          <div class="flex items-center gap-2 mb-4">
+            <span class="text-xl">📋</span>
+            <h3 class="text-base font-bold text-[var(--foreground)]">Encuesta Rápida de Síntomas</h3>
+          </div>
+
+          <div class="space-y-4 text-xs">
+            <!-- Tos -->
+            <div>
+              <label class="block font-semibold text-[var(--muted-foreground)] mb-1.5">¿Presenta Tos en este momento?</label>
+              <div class="grid grid-cols-3 gap-2">
+                <button type="button" onclick="setTos('no')" id="btnTosNo" class="p-2 rounded-lg border font-semibold border-emerald-500 bg-emerald-500/10 text-emerald-600">No</button>
+                <button type="button" onclick="setTos('seca')" id="btnTosSeca" class="p-2 rounded-lg border font-semibold border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)]">Seca</button>
+                <button type="button" onclick="setTos('productiva')" id="btnTosProd" class="p-2 rounded-lg border font-semibold border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)]">Con Flema</button>
+              </div>
+            </div>
+
+            <!-- Disnea -->
+            <div>
+              <div class="flex justify-between items-center mb-1">
+                <label class="font-semibold text-[var(--muted-foreground)]">Dificultad Respiratoria (Escala Disnea 0-3)</label>
+                <span id="valDisnea" class="font-bold text-emerald-500">Grado 0 (Normal)</span>
+              </div>
+              <input type="range" id="inDisnea" min="0" max="3" value="0" oninput="evaluarPaciente()"
+                class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg cursor-pointer accent-blue-500">
+              <div class="flex justify-between text-[11px] text-[var(--muted-foreground)] mt-1">
+                <span>0: Ninguna</span>
+                <span>1: Al apurarse</span>
+                <span>2: Al caminar</span>
+                <span>3: En reposo</span>
+              </div>
+            </div>
+
+            <!-- Antecedentes y Tabaquismo -->
+            <div class="space-y-2 pt-2 border-t border-[var(--border)]">
+              <label class="block font-semibold text-[var(--muted-foreground)]">Factores de Riesgo / Antecedentes</label>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="flex items-center gap-2 p-2 rounded-lg bg-[var(--background)] border border-[var(--border)] cursor-pointer">
+                  <input type="checkbox" id="chkTabaco" onchange="evaluarPaciente()" class="rounded accent-blue-500">
+                  <span class="text-xs">Fumador / Vapeador</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 rounded-lg bg-[var(--background)] border border-[var(--border)] cursor-pointer">
+                  <input type="checkbox" id="chkAsma" onchange="evaluarPaciente()" class="rounded accent-blue-500">
+                  <span class="text-xs">Asma / Alergias</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 rounded-lg bg-[var(--background)] border border-[var(--border)] cursor-pointer">
+                  <input type="checkbox" id="chkHTA" onchange="evaluarPaciente()" class="rounded accent-blue-500">
+                  <span class="text-xs">Hipertensión</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 rounded-lg bg-[var(--background)] border border-[var(--border)] cursor-pointer">
+                  <input type="checkbox" id="chkCongestion" onchange="evaluarPaciente()" class="rounded accent-blue-500">
+                  <span class="text-xs">Resfriado activo</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Botones de Acción -->
+            <div class="pt-3 flex gap-2">
+              <button onclick="guardarRegistro()" class="flex-1 py-2.5 px-4 rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-sm flex items-center justify-center gap-2">
+                <span>💾 Guardar Registro</span>
+              </button>
+              <button onclick="descargarCSV()" class="py-2.5 px-3 rounded-xl font-medium bg-[var(--background)] border border-[var(--border)] hover:bg-black/5 dark:hover:bg-white/5 text-xs text-[var(--foreground)]" title="Exportar a Excel / CSV">
+                📥 CSV
+              </button>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+
+    <!-- TABLA DE REGISTROS GUARDADOS LOCALMENTE -->
+    <section class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 shadow-sm overflow-hidden">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-base font-bold text-[var(--foreground)]">Historial de Registros Tomados Hoy</h3>
+          <p class="text-xs text-[var(--muted-foreground)]">Estos datos se acumulan localmente y pueden exportarse directamente a CSV.</p>
+        </div>
+        <span id="cantRegistros" class="px-3 py-1 rounded-full text-xs font-bold bg-blue-500/10 text-blue-500">0 registros guardados</span>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="border-b border-[var(--border)] text-[var(--muted-foreground)] font-semibold">
+              <th class="py-2.5 px-3">ID Sujeto</th>
+              <th class="py-2.5 px-3">Edad / Sexo</th>
+              <th class="py-2.5 px-3">Presión (BP3MW1)</th>
+              <th class="py-2.5 px-3">Pulso (BPM)</th>
+              <th class="py-2.5 px-3">Temp (°C)</th>
+              <th class="py-2.5 px-3">FR (rpm)</th>
+              <th class="py-2.5 px-3">Ruidos Pulmonares</th>
+              <th class="py-2.5 px-3">Triaje</th>
+            </tr>
+          </thead>
+          <tbody id="cuerpoTabla">
+            <tr>
+              <td colspan="8" class="text-center py-6 text-[var(--muted-foreground)]">
+                Aún no has guardado registros en esta sesión. Completa los datos arriba y pulsa "Guardar Registro".
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    // Estado local en memoria
+    let estadoTos = 'no';
+    let registros = [];
+
+    function setTos(tipo) {
+      estadoTos = tipo;
+      const btnNo = document.getElementById('btnTosNo');
+      const btnSeca = document.getElementById('btnTosSeca');
+      const btnProd = document.getElementById('btnTosProd');
+
+      // Reset
+      [btnNo, btnSeca, btnProd].forEach(b => {
+        b.className = 'p-2 rounded-lg border font-semibold border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)]';
+      });
+
+      if (tipo === 'no') {
+        btnNo.className = 'p-2 rounded-lg border font-semibold border-emerald-500 bg-emerald-500/10 text-emerald-600';
+      } else if (tipo === 'seca') {
+        btnSeca.className = 'p-2 rounded-lg border font-semibold border-amber-500 bg-amber-500/10 text-amber-600';
+      } else {
+        btnProd.className = 'p-2 rounded-lg border font-semibold border-rose-500 bg-rose-500/10 text-rose-600';
+      }
+      evaluarPaciente();
+    }
+
+    function evaluarPaciente() {
+      // 1. Obtener valores
+      const pas = parseFloat(document.getElementById('inPAS').value) || 120;
+      const pad = parseFloat(document.getElementById('inPAD').value) || 80;
+      const fc = parseFloat(document.getElementById('inFC').value) || 72;
+      const fr = parseInt(document.getElementById('inFR').value) || 16;
+      const temp = parseFloat(document.getElementById('inTemp').value) || 36.5;
+      const ruido = document.getElementById('inRuidoPulmonar').value;
+      const cardiaco = document.getElementById('inRuidoCardiaco').value;
+      const disnea = parseInt(document.getElementById('inDisnea').value) || 0;
+      const peso = parseFloat(document.getElementById('inPeso').value) || 70;
+      const talla = parseFloat(document.getElementById('inTalla').value) || 170;
+
+      // Actualizar displays
+      document.getElementById('valFR').textContent = fr + ' rpm';
+      
+      const disneaTextos = ['Grado 0 (Normal)', 'Grado 1 (Leve)', 'Grado 2 (Moderada)', 'Grado 3 (Severa/Reposo)'];
+      const disneaEl = document.getElementById('valDisnea');
+      disneaEl.textContent = disneaTextos[disnea];
+      disneaEl.className = disnea === 0 ? 'font-bold text-emerald-500' : (disnea === 1 ? 'font-bold text-amber-500' : 'font-bold text-rose-500');
+
+      // IMC
+      const tallaMetros = talla / 100;
+      const imc = (peso / (tallaMetros * tallaMetros)).toFixed(1);
+      document.getElementById('valIMC').textContent = imc + ' kg/m²';
+      const badgeIMC = document.getElementById('badgeIMC');
+      if (imc < 18.5) {
+        badgeIMC.textContent = 'Bajo Peso';
+        badgeIMC.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-500/10 text-amber-600';
+      } else if (imc < 25) {
+        badgeIMC.textContent = 'Peso Normal';
+        badgeIMC.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-500/10 text-emerald-600';
+      } else if (imc < 30) {
+        badgeIMC.textContent = 'Sobrepeso';
+        badgeIMC.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-500/10 text-amber-600';
+      } else {
+        badgeIMC.textContent = 'Obesidad';
+        badgeIMC.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-rose-500/10 text-rose-600';
+      }
+
+      // Evaluar Presión
+      const labelPAS = document.getElementById('labelPAS');
+      const labelPAD = document.getElementById('labelPAD');
+      if (pas < 120 && pad < 80) {
+        labelPAS.textContent = 'Normal (<120)'; labelPAS.className = 'text-xs text-emerald-500 font-medium block mt-1';
+        labelPAD.textContent = 'Normal (<80)'; labelPAD.className = 'text-xs text-emerald-500 font-medium block mt-1';
+      } else if (pas <= 129 && pad < 80) {
+        labelPAS.textContent = 'Elevada (120-129)'; labelPAS.className = 'text-xs text-amber-500 font-medium block mt-1';
+        labelPAD.textContent = 'Normal (<80)'; labelPAD.className = 'text-xs text-emerald-500 font-medium block mt-1';
+      } else if (pas >= 140 || pad >= 90) {
+        labelPAS.textContent = 'HTA Grado 2 (≥140)'; labelPAS.className = 'text-xs text-rose-500 font-medium block mt-1';
+        labelPAD.textContent = 'HTA Grado 2 (≥90)'; labelPAD.className = 'text-xs text-rose-500 font-medium block mt-1';
+      } else {
+        labelPAS.textContent = 'HTA Grado 1 (130-139)'; labelPAS.className = 'text-xs text-amber-500 font-medium block mt-1';
+        labelPAD.textContent = 'HTA Grado 1 (80-89)'; labelPAD.className = 'text-xs text-amber-500 font-medium block mt-1';
+      }
+
+      // Evaluar FC
+      const labelFC = document.getElementById('labelFC');
+      if (fc >= 60 && fc <= 100) {
+        labelFC.textContent = 'Normocardia (60-100)'; labelFC.className = 'text-xs text-emerald-500 font-medium block mt-1';
+      } else if (fc < 60) {
+        labelFC.textContent = 'Bradicardia (<60)'; labelFC.className = 'text-xs text-amber-500 font-medium block mt-1';
+      } else {
+        labelFC.textContent = 'Taquicardia (>100)'; labelFC.className = 'text-xs text-rose-500 font-medium block mt-1';
+      }
+
+      // Evaluar FR
+      const labelFR = document.getElementById('labelFR');
+      if (fr >= 12 && fr <= 20) {
+        labelFR.textContent = 'Eupnea normal (12-20 rpm)'; labelFR.className = 'text-xs text-emerald-500 font-medium';
+      } else if (fr < 12) {
+        labelFR.textContent = 'Bradipnea (<12 rpm)'; labelFR.className = 'text-xs text-amber-500 font-medium';
+      } else {
+        labelFR.textContent = 'Taquipnea (>20 rpm)'; labelFR.className = 'text-xs text-rose-500 font-medium';
+      }
+
+      // Evaluar Temp
+      const labelTemp = document.getElementById('labelTemp');
+      if (temp < 36.0) {
+        labelTemp.textContent = 'Hipotermia leve (<36.0 °C)';
+        labelTemp.className = 'px-2.5 py-1 rounded-full text-xs font-bold bg-blue-500/10 text-blue-600 border border-blue-500/20';
+      } else if (temp <= 37.3) {
+        labelTemp.textContent = 'Normal / Apirético (36.0 - 37.3 °C)';
+        labelTemp.className = 'px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20';
+      } else if (temp <= 38.0) {
+        labelTemp.textContent = 'Febrícula (37.4 - 38.0 °C)';
+        labelTemp.className = 'px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20';
+      } else {
+        labelTemp.textContent = 'Fiebre activa (>38.0 °C)';
+        labelTemp.className = 'px-2.5 py-1 rounded-full text-xs font-bold bg-rose-500/10 text-rose-600 border border-rose-500/20';
+      }
+
+      // Descripciones de ruidos
+      const descRuido = document.getElementById('descRuido');
+      if (ruido === 'normal') descRuido.textContent = 'Sonido respiratorio suave y continuo en inspiración.';
+      else if (ruido === 'sibilancias') descRuido.textContent = 'Silbido agudo musical por obstrucción o broncoespasmo.';
+      else if (ruido === 'crepitantes') descRuido.textContent = 'Sonido crujiente tipo velcro por apertura de alvéolos con líquido.';
+      else if (ruido === 'ambos') descRuido.textContent = 'Patrón obstructivo e infeccioso combinado.';
+      else descRuido.textContent = 'Grave disminución de ventilación o tórax silente.';
+
+      // CÁLCULO DEL SEMÁFORO DE TRIAJE GENERAL
+      let nivelAlerta = 'verde'; // verde, amarillo, rojo
+      let razones = [];
+
+      // Criterios Rojos
+      if (disnea === 3) { nivelAlerta = 'rojo'; razones.push('Disnea severa en reposo'); }
+      if (fr > 26 || fr < 10) { nivelAlerta = 'rojo'; razones.push('FR en rango crítico (' + fr + ' rpm)'); }
+      if (pas >= 160 || pad >= 100) { nivelAlerta = 'rojo'; razones.push('Crisis / HTA severa'); }
+      if (ruido === 'disminuido') { nivelAlerta = 'rojo'; razones.push('Tórax hipoventilado / silente'); }
+      if (temp >= 38.5) { nivelAlerta = 'rojo'; razones.push('Fiebre alta (' + temp + '°C)'); }
+
+      // Criterios Amarillos (si no es rojo)
+      if (nivelAlerta !== 'rojo') {
+        if (ruido === 'sibilancias' || ruido === 'crepitantes' || ruido === 'ambos') {
+          nivelAlerta = 'amarillo'; razones.push('Ruidos adventicios auscultados');
+        }
+        if (fr > 20 || fr < 12) { nivelAlerta = 'amarillo'; razones.push('Alteración en FR (' + fr + ' rpm)'); }
+        if (fc > 100 || fc < 55) { nivelAlerta = 'amarillo'; razones.push('Alteración de pulso (' + fc + ' BPM)'); }
+        if (pas >= 135 || pad >= 85) { nivelAlerta = 'amarillo'; razones.push('Presión elevada'); }
+        if (temp > 37.3) { nivelAlerta = 'amarillo'; razones.push('Febrícula'); }
+        if (estadoTos !== 'no') { nivelAlerta = 'amarillo'; razones.push('Presencia de tos'); }
+        if (cardiaco !== 'normal') { nivelAlerta = 'amarillo'; razones.push('Alteración acústica cardíaca'); }
+      }
+
+      // Renderizar Semáforo
+      const semEl = document.getElementById('indicadorSemaforo');
+      const badgeNivel = document.getElementById('badgeNivel');
+      const tituloTriaje = document.getElementById('tituloTriaje');
+      const descTriaje = document.getElementById('descTriaje');
+      const panelTriaje = document.getElementById('panelTriaje');
+
+      if (nivelAlerta === 'verde') {
+        semEl.className = 'w-14 h-14 rounded-2xl bg-emerald-500 flex items-center justify-center text-white text-2xl font-bold shadow-md shadow-emerald-500/30';
+        semEl.textContent = '✓';
+        badgeNivel.className = 'px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400';
+        badgeNivel.textContent = 'NORMAL / ESTABLE';
+        tituloTriaje.textContent = 'Parámetros dentro de rangos normales';
+        descTriaje.textContent = 'Sin ruidos adventicios ni compromiso respiratorio evidente.';
+        panelTriaje.className = 'bg-[var(--card)] border-2 border-emerald-500/40 rounded-2xl p-5 shadow-sm transition-all duration-300';
+      } else if (nivelAlerta === 'amarillo') {
+        semEl.className = 'w-14 h-14 rounded-2xl bg-amber-500 flex items-center justify-center text-white text-2xl font-bold shadow-md shadow-amber-500/30 animate-pulse';
+        semEl.textContent = '⚠️';
+        badgeNivel.className = 'px-2 py-0.5 rounded text-xs font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400';
+        badgeNivel.textContent = 'ALERTA / OBSERVACIÓN';
+        tituloTriaje.textContent = 'Hallazgos que requieren seguimiento';
+        descTriaje.textContent = 'Signos detectados: ' + razones.join(', ') + '.';
+        panelTriaje.className = 'bg-[var(--card)] border-2 border-amber-500/40 rounded-2xl p-5 shadow-sm transition-all duration-300';
+      } else {
+        semEl.className = 'w-14 h-14 rounded-2xl bg-rose-500 flex items-center justify-center text-white text-2xl font-bold shadow-md shadow-rose-500/30 animate-bounce';
+        semEl.textContent = '🚨';
+        badgeNivel.className = 'px-2 py-0.5 rounded text-xs font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400';
+        badgeNivel.textContent = 'PRIORITARIO / ALTO RIESGO';
+        tituloTriaje.textContent = '¡Alerta de compromiso cardiorrespiratorio!';
+        descTriaje.textContent = 'Criterios críticos: ' + razones.join(', ') + '.';
+        panelTriaje.className = 'bg-[var(--card)] border-2 border-rose-500/50 rounded-2xl p-5 shadow-sm transition-all duration-300';
+      }
+
+      return nivelAlerta;
+    }
+
+    function cargarEjemplo(tipo) {
+      if (tipo === 'sano') {
+        document.getElementById('inID').value = 'P_SANO_01';
+        document.getElementById('inEdad').value = '23';
+        document.getElementById('inSexo').value = 'M';
+        document.getElementById('inTalla').value = '175';
+        document.getElementById('inPeso').value = '68';
+        document.getElementById('inPAS').value = '118';
+        document.getElementById('inPAD').value = '76';
+        document.getElementById('inFC').value = '68';
+        document.getElementById('inTemp').value = '36.5';
+        document.getElementById('inFR').value = '15';
+        document.getElementById('inRuidoPulmonar').value = 'normal';
+        document.getElementById('inRuidoCardiaco').value = 'normal';
+        document.getElementById('inDisnea').value = '0';
+        document.getElementById('chkTabaco').checked = false;
+        document.getElementById('chkAsma').checked = false;
+        document.getElementById('chkHTA').checked = false;
+        document.getElementById('chkCongestion').checked = false;
+        setTos('no');
+      } else if (tipo === 'epoc') {
+        document.getElementById('inID').value = 'P_EPOC_02';
+        document.getElementById('inEdad').value = '68';
+        document.getElementById('inSexo').value = 'M';
+        document.getElementById('inTalla').value = '168';
+        document.getElementById('inPeso').value = '74';
+        document.getElementById('inPAS').value = '145';
+        document.getElementById('inPAD').value = '88';
+        document.getElementById('inFC').value = '88';
+        document.getElementById('inTemp').value = '36.8';
+        document.getElementById('inFR').value = '23';
+        document.getElementById('inRuidoPulmonar').value = 'sibilancias';
+        document.getElementById('inRuidoCardiaco').value = 'normal';
+        document.getElementById('inDisnea').value = '2';
+        document.getElementById('chkTabaco').checked = true;
+        document.getElementById('chkAsma').checked = false;
+        document.getElementById('chkHTA').checked = true;
+        document.getElementById('chkCongestion').checked = false;
+        setTos('productiva');
+      } else if (tipo === 'asma') {
+        document.getElementById('inID').value = 'P_ASMA_03';
+        document.getElementById('inEdad').value = '21';
+        document.getElementById('inSexo').value = 'F';
+        document.getElementById('inTalla').value = '162';
+        document.getElementById('inPeso').value = '55';
+        document.getElementById('inPAS').value = '130';
+        document.getElementById('inPAD').value = '82';
+        document.getElementById('inFC').value = '108';
+        document.getElementById('inTemp').value = '37.8';
+        document.getElementById('inFR').value = '28';
+        document.getElementById('inRuidoPulmonar').value = 'ambos';
+        document.getElementById('inRuidoCardiaco').value = 'arritmico';
+        document.getElementById('inDisnea').value = '3';
+        document.getElementById('chkTabaco').checked = false;
+        document.getElementById('chkAsma').checked = true;
+        document.getElementById('chkHTA').checked = false;
+        document.getElementById('chkCongestion').checked = true;
+        setTos('seca');
+      }
+      evaluarPaciente();
+    }
+
+    function guardarRegistro() {
+      const id = document.getElementById('inID').value || ('P_' + (registros.length + 1).toString().padStart(3, '0'));
+      const edad = document.getElementById('inEdad').value;
+      const sexo = document.getElementById('inSexo').value;
+      const pas = document.getElementById('inPAS').value;
+      const pad = document.getElementById('inPAD').value;
+      const fc = document.getElementById('inFC').value;
+      const temp = document.getElementById('inTemp').value;
+      const fr = document.getElementById('inFR').value;
+      const ruido = document.getElementById('inRuidoPulmonar').options[document.getElementById('inRuidoPulmonar').selectedIndex].text;
+      const triaje = evaluarPaciente();
+
+      const reg = { id, edad, sexo, pas, pad, fc, temp, fr, ruido, triaje, fecha: new Date().toLocaleTimeString() };
+      registros.push(reg);
+
+      actualizarTabla();
+      // Incrementar ID para el próximo
+      const numMatch = id.match(/\d+/);
+      if (numMatch) {
+        const nextNum = parseInt(numMatch[0]) + 1;
+        document.getElementById('inID').value = 'P_' + nextNum.toString().padStart(3, '0');
+      }
+    }
+
+    function actualizarTabla() {
+      const cuerpo = document.getElementById('cuerpoTabla');
+      const badgeCant = document.getElementById('cantRegistros');
+      badgeCant.textContent = registros.length + ' registro(s) guardado(s)';
+
+      if (registros.length === 0) {
+        cuerpo.innerHTML = '<tr><td colspan="8" class="text-center py-6 text-[var(--muted-foreground)]">No hay registros guardados.</td></tr>';
+        return;
+      }
+
+      cuerpo.innerHTML = registros.map((r, i) => {
+        let badgeColor = r.triaje === 'verde' ? 'bg-emerald-500/20 text-emerald-500' : (r.triaje === 'amarillo' ? 'bg-amber-500/20 text-amber-500' : 'bg-rose-500/20 text-rose-500');
+        let triajeNombre = r.triaje === 'verde' ? 'Verde (Normal)' : (r.triaje === 'amarillo' ? 'Amarillo (Alerta)' : 'Rojo (Crítico)');
+        return `
+          <tr class="border-b border-[var(--border)] hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+            <td class="py-2.5 px-3 font-bold font-mono">${r.id}</td>
+            <td class="py-2.5 px-3">${r.edad}a / ${r.sexo}</td>
+            <td class="py-2.5 px-3 font-semibold">${r.pas}/${r.pad} mmHg</td>
+            <td class="py-2.5 px-3 text-blue-500 font-bold">${r.fc} BPM</td>
+            <td class="py-2.5 px-3">${r.temp} °C</td>
+            <td class="py-2.5 px-3 text-purple-500 font-bold">${r.fr} rpm</td>
+            <td class="py-2.5 px-3 truncate max-w-[150px]" title="${r.ruido}">${r.ruido}</td>
+            <td class="py-2.5 px-3">
+              <span class="px-2 py-0.5 rounded text-[11px] font-bold ${badgeColor}">
+                ${triajeNombre}
+              </span>
+            </td>
+          </tr>
+        `;
+      }).reverse().join('');
+    }
+
+    function descargarCSV() {
+      if (registros.length === 0) {
+        alert('Guarda al menos un registro antes de exportar a CSV.');
+        return;
+      }
+      const headers = ['ID_Sujeto', 'Edad', 'Sexo', 'PAS_mmHg', 'PAD_mmHg', 'FC_BPM', 'Temp_C', 'FR_rpm', 'Auscultacion_Pulmonar', 'Nivel_Triaje', 'Hora'];
+      const rows = registros.map(r => [
+        r.id, r.edad, r.sexo, r.pas, r.pad, r.fc, r.temp, r.fr, `"${r.ruido}"`, r.triaje, r.fecha
+      ]);
+      const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement('a');
+      link.setAttribute('href', encodedUri);
+      link.setAttribute('download', 'registros_signos_vitales_tradicionales.csv');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // Inicialización al cargar
+    evaluarPaciente();
+  </script>
+</body>
+</html>

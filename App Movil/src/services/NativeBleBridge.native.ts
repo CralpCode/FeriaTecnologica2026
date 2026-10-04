@@ -1,5 +1,7 @@
 import { BleManager, Device, BleError, Characteristic } from 'react-native-ble-plx';
 import { PermissionsAndroid, Platform } from 'react-native';
+import { DevicePacketBuffer } from './DevicePacketBuffer';
+import { decodeHeartRateMeasurement } from './measurementQuality';
 import { RawDevicePacket } from '../types/vitals';
 
 export interface NativeBleService {
@@ -73,7 +75,7 @@ class NativeBleServiceImpl implements NativeBleService {
   private manager: BleManager | null = null;
   private connectedDevice: Device | null = null;
   private isScanning: boolean = false;
-  private packetBuffer: string = '';
+  private packetBuffer = new DevicePacketBuffer();
 
   private getManager(): BleManager {
     if (!this.manager) {
@@ -123,7 +125,7 @@ class NativeBleServiceImpl implements NativeBleService {
       }
     } catch {}
     this.connectedDevice = null;
-    this.packetBuffer = '';
+    this.packetBuffer.clear();
   }
 
   public async sendCommand(cmd: string): Promise<boolean> {
@@ -161,48 +163,6 @@ class NativeBleServiceImpl implements NativeBleService {
     }
   }
 
-  private parseOrBufferPacket(text: string): RawDevicePacket | null {
-    this.packetBuffer += text;
-
-    while (this.packetBuffer.length > 0) {
-      const start = this.packetBuffer.indexOf('{');
-      if (start === -1) {
-        this.packetBuffer = '';
-        return null;
-      }
-
-      // Descartar basura antes del primer '{'
-      if (start > 0) {
-        this.packetBuffer = this.packetBuffer.substring(start);
-      }
-
-      let parsed: RawDevicePacket | null = null;
-      let searchPos = 1;
-      let end = this.packetBuffer.indexOf('}', searchPos);
-
-      while (end !== -1) {
-        const candidate = this.packetBuffer.substring(0, end + 1);
-        try {
-          parsed = JSON.parse(candidate);
-          this.packetBuffer = this.packetBuffer.substring(end + 1);
-          return parsed;
-        } catch {
-          // Si falló el parseo, este '}' no era el cierre del objeto, buscar el siguiente
-          searchPos = end + 1;
-          end = this.packetBuffer.indexOf('}', searchPos);
-        }
-      }
-
-      // Si no encontramos un objeto JSON completo válido con los '}' actuales, esperar más fragmentos
-      break;
-    }
-
-    if (this.packetBuffer.length > 2048) {
-      this.packetBuffer = '';
-    }
-    return null;
-  }
-
   public async scanAndConnect(
     onData: (packet: RawDevicePacket) => void,
     onDisconnect: () => void
@@ -225,7 +185,7 @@ class NativeBleServiceImpl implements NativeBleService {
       this.isScanning = false;
     }
 
-    this.packetBuffer = '';
+    this.packetBuffer.clear();
 
     return new Promise<{ success: boolean; message: string; deviceName?: string }>((resolve) => {
       this.isScanning = true;
@@ -293,7 +253,7 @@ class NativeBleServiceImpl implements NativeBleService {
             connected.onDisconnected(() => {
               console.warn('[Native BLE] Desconectado de:', name);
               this.connectedDevice = null;
-              this.packetBuffer = '';
+              this.packetBuffer.clear();
               onDisconnect();
             });
 
@@ -308,10 +268,11 @@ class NativeBleServiceImpl implements NativeBleService {
                   if (charError || !characteristic?.value) return;
                   try {
                     const text = base64ToUtf8(characteristic.value);
-                    const packet = this.parseOrBufferPacket(text);
-                    if (packet && (packet.bpm !== undefined || (packet as any).heartRate !== undefined)) {
-                      receivedCustomData = true;
-                      onData(packet);
+                    for (const packet of this.packetBuffer.push(text)) {
+                      if (packet.bpm !== undefined || (packet as any).heartRate !== undefined) {
+                        receivedCustomData = true;
+                        onData(packet);
+                      }
                     }
                   } catch (parseErr) {
                     console.warn('[Native BLE Parse Error]:', parseErr);
@@ -334,42 +295,9 @@ class NativeBleServiceImpl implements NativeBleService {
 
                   try {
                     const raw = base64ToUtf8(hrChar.value);
-                    if (raw.length >= 2) {
-                      const flags = raw.charCodeAt(0);
-                      const bpm = flags & 0x01
-                        ? (raw.charCodeAt(1) | (raw.charCodeAt(2) << 8))
-                        : raw.charCodeAt(1);
-
-                      if (bpm > 0) {
-                        onData({
-                          bpm,
-                          spo2: 0,
-                          systolic: 0,
-                          diastolic: 0,
-                          temperature: 0,
-                          stress: 0,
-                          hrv: 0,
-                          audio_rms: 0,
-                          audio_peak: 0,
-                          finger: true,
-                          device_id: 'SpiroScan-Band',
-                        });
-                      } else {
-                        onData({
-                          bpm: 0,
-                          spo2: 0,
-                          systolic: 0,
-                          diastolic: 0,
-                          temperature: 0,
-                          stress: 0,
-                          hrv: 0,
-                          audio_rms: 0,
-                          audio_peak: 0,
-                          finger: false,
-                          device_id: 'SpiroScan-Band',
-                        });
-                      }
-                    }
+                    const bytes = Uint8Array.from(raw, (char) => char.charCodeAt(0));
+                    const packet = decodeHeartRateMeasurement(bytes);
+                    if (packet) onData(packet);
                   } catch {}
                 }
               );

@@ -105,9 +105,9 @@ void send_telemetry_wifi() {
 #if ENABLE_WIFI_TELEMETRY
   if (WiFi.status() != WL_CONNECTED) return;
 
-  char payload[256];
+  char payload[512];
   snprintf(payload, sizeof(payload),
-           "{\"bpm\":%d,\"spo2\":%.1f,\"audio_rms\":%.2f,\"audio_peak\":%.2f,\"systolic\":%d,\"diastolic\":%d,\"device_id\":\"ESP32-Wokwi\"}",
+           "{\"bpm\":%d,\"spo2\":%.1f,\"audio_rms\":%.2f,\"audio_peak\":%.2f,\"systolic\":%d,\"diastolic\":%d,\"device_id\":\"ESP32-Wokwi\",\"source\":\"simulated\",\"test\":true,\"heartRateValid\":false,\"bloodOxygenValid\":false,\"spo2Calibrated\":false,\"signalQuality\":\"simulated\"}",
            beat_avg, spo2_val, audio_rms, audio_peak, systolic_bp, diastolic_bp);
 
   HTTPClient http;

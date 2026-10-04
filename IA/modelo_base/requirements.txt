@@ -1,0 +1,24 @@
+# Dependencias para Ciencia de Datos, Procesamiento de Audio e Inteligencia Artificial
+# Proyecto: Sistema Embebido para Captura y Análisis de Señales Cardiorrespiratorias (f tecno 2026)
+
+# Manipulación de datos y cálculo numérico
+numpy>=1.24.0
+scipy>=1.10.0
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# Procesamiento de audio digital y psicoacústica
+librosa>=0.10.1
+soundfile>=0.12.1
+
+# Aprendizaje Automático y Evaluación Clínica
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# Visualización y Análisis Exploratorio de Datos (EDA)
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Soporte para Cuadernos de experimentación
+jupyterlab>=4.0.0
+ipywidgets>=8.0.0

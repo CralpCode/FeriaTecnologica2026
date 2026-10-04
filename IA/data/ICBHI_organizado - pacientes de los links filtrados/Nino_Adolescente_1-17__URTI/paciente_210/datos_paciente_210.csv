@@ -1,0 +1,10 @@
+Campo,Valor
+ID Paciente,210
+Edad (anos),1
+Grupo de edad,Nino/Adolescente (1-17)
+Sexo,F
+Diagnostico,URTI
+BMI adulto (kg/m2),
+Peso nino (kg),12.96
+Altura nino (cm),76
+Particion sugerida (train/validation),Entrenamiento

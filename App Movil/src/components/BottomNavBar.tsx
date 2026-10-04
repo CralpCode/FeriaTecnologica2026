@@ -1,151 +1,100 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 
-export type TabScreen = 'dashboard' | 'pulmonary' | 'charts' | 'ai';
+export type TabScreen = 'dashboard' | 'pulmonary' | 'auscultation' | 'alerts' | 'history' | 'charts' | 'ai';
 
-interface BottomNavBarProps {
+export interface NavProps {
   currentTab: TabScreen;
   onSelectTab: (tab: TabScreen) => void;
   hasAlert?: boolean;
+  alertsCount?: number;
 }
 
-export const BottomNavBar: React.FC<BottomNavBarProps> = ({ currentTab, onSelectTab, hasAlert = false }) => {
-  const tabs = [
-    {
-      id: 'dashboard' as TabScreen,
-      label: 'Monitoreo',
-      iconFamily: 'MaterialCommunityIcons',
-      iconName: 'heart-pulse',
-    },
-    {
-      id: 'pulmonary' as TabScreen,
-      label: 'IA Pulmonar',
-      iconFamily: 'MaterialCommunityIcons',
-      iconName: 'lungs',
-    },
-    {
-      id: 'charts' as TabScreen,
-      label: 'Gráficas',
-      iconFamily: 'Ionicons',
-      iconName: 'analytics-outline',
-    },
-    {
-      id: 'ai' as TabScreen,
-      label: 'Asistente IA',
-      iconFamily: 'MaterialCommunityIcons',
-      iconName: 'robot-outline',
-      badge: hasAlert,
-    },
-  ];
+/** Pestañas de la app: las usan la barra inferior (celular) y la lateral (tablet y computadora). */
+export const NAV_TABS: { id: TabScreen; label: string; icon: string }[] = [
+  { id: 'dashboard', label: 'Monitoreo', icon: 'heart-pulse' },
+  { id: 'auscultation', label: 'Auscultar', icon: 'stethoscope' },
+  { id: 'alerts', label: 'Alertas', icon: 'bell-outline' },
+  { id: 'history', label: 'Historial', icon: 'folder-account-outline' },
+  { id: 'ai', label: 'Asistente', icon: 'robot-outline' },
+];
 
-  return (
-    <View style={styles.container}>
-      <View style={styles.innerBar}>
-        {tabs.map((tab) => {
-          const isActive = currentTab === tab.id;
-          const activeColor = tab.id === 'ai' 
-            ? Colors.aiPurple 
-            : tab.id === 'pulmonary' 
-            ? '#0D9488' 
-            : Colors.heartRate;
+export const tabColor = (id: TabScreen) => (id === 'ai' ? Colors.aiPurple : Colors.heartRate);
 
-          return (
-            <TouchableOpacity
-              key={tab.id}
-              style={[styles.tabButton, isActive && styles.tabButtonActive]}
-              activeOpacity={0.65}
-              onPress={() => onSelectTab(tab.id)}
+export const BottomNavBar: React.FC<NavProps> = ({ currentTab, onSelectTab, hasAlert = false, alertsCount = 0 }) => (
+  <View style={styles.container} accessibilityRole="tablist">
+    <View style={styles.innerBar}>
+      {NAV_TABS.map((tab) => {
+        const isActive = currentTab === tab.id;
+        const color = isActive ? tabColor(tab.id) : Colors.textMuted;
+        const badge = tab.id === 'alerts' && alertsCount > 0;
+        return (
+          <TouchableOpacity
+            key={tab.id}
+            style={[styles.tabButton, isActive && styles.tabButtonActive]}
+            activeOpacity={0.65}
+            onPress={() => onSelectTab(tab.id)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: isActive }}
+            accessibilityLabel={badge ? `${tab.label}, ${alertsCount} activas` : tab.label}
+          >
+            <View style={styles.iconContainer}>
+              <MaterialCommunityIcons name={tab.icon as any} size={24} color={color} />
+              {badge && <View style={[styles.alertBadge, hasAlert && styles.alertBadgeCritical]} />}
+            </View>
+            <Text
+              style={[
+                styles.tabLabel,
+                { color: isActive ? tabColor(tab.id) : Colors.textSecondary, fontWeight: isActive ? '800' : '600' },
+              ]}
             >
-              <View style={styles.iconContainer}>
-                {tab.iconFamily === 'Ionicons' ? (
-                  <Ionicons
-                    name={tab.iconName as any}
-                    size={24}
-                    color={isActive ? activeColor : Colors.textMuted}
-                  />
-                ) : (
-                  <MaterialCommunityIcons
-                    name={tab.iconName as any}
-                    size={24}
-                    color={isActive ? activeColor : Colors.textMuted}
-                  />
-                )}
-
-                {tab.badge && <View style={styles.alertBadge} />}
-              </View>
-
-              <Text
-                style={[
-                  styles.tabLabel,
-                  { color: isActive ? activeColor : Colors.textSecondary, fontWeight: isActive ? '800' : '600' },
-                ]}
-              >
-                {tab.label}
-              </Text>
-
-              {isActive && <View style={[styles.activeIndicator, { backgroundColor: activeColor }]} />}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+              {tab.label}
+            </Text>
+            {isActive && <View style={[styles.activeIndicator, { backgroundColor: tabColor(tab.id) }]} />}
+          </TouchableOpacity>
+        );
+      })}
     </View>
-  );
-};
+  </View>
+);
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.card,
     borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
-    paddingBottom: Platform.OS === 'ios' ? 24 : 10,
-    paddingTop: 8,
+    borderTopColor: Colors.border,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 8,
+    paddingTop: 6,
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: -3 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 8,
   },
-  innerBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 8,
-  },
+  innerBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 6 },
   tabButton: {
     flex: 1,
+    minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,
+    paddingVertical: 6,
     position: 'relative',
     cursor: 'pointer' as any,
   },
-  tabButtonActive: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-  },
-  iconContainer: {
-    position: 'relative',
-    marginBottom: 4,
-  },
+  tabButtonActive: { backgroundColor: Colors.background, borderRadius: 12 },
+  iconContainer: { position: 'relative', marginBottom: 3 },
   alertBadge: {
     position: 'absolute',
     top: -2,
     right: -4,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#DC2626',
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: Colors.danger,
   },
-  tabLabel: {
-    fontSize: 12,
-  },
-  activeIndicator: {
-    position: 'absolute',
-    bottom: -2,
-    width: 20,
-    height: 3,
-    borderRadius: 2,
-  },
+  alertBadgeCritical: { width: 11, height: 11, borderRadius: 6 },
+  tabLabel: { fontSize: 12 },
+  activeIndicator: { position: 'absolute', bottom: -2, width: 20, height: 3, borderRadius: 2 },
 });

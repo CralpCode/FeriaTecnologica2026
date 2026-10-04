@@ -1,11 +1,14 @@
 import { API_CONFIG, getSessionId, BACKEND_FALLBACK_URLS, setCustomBackendUrl } from '../config/api';
+import { normalizePublicVitals } from './measurementQuality';
 import {
   VitalSigns,
   VitalsHistoryPoint,
   AIAnalysisReport,
   DeviceInfo,
   TimeRange,
-  PulmonaryReport,
+   AcousticAnalysisResult,
+  AuscultationFocus, AuscultationMode, RecordingResult, ClinicalAlert, FocusGuide, HeartModelInfo,
+  SessionReport, TriageResult, PatientContext, ClinicalAssessment, SessionOverview, ReportItem, LungModelsInfo,
 } from '../types/vitals';
 
 const ZERO_VITALS: VitalSigns = {
@@ -23,6 +26,10 @@ const ZERO_VITALS: VitalSigns = {
   timestamp: '',
   device_connected: false,
   finger: false,
+  source: 'unknown',
+  heartRateValid: false,
+  bloodOxygenValid: false,
+  spo2Calibrated: false,
 };
 
 class ApiService {
@@ -84,7 +91,7 @@ class ApiService {
         { method: 'GET' }
       );
       if (!response.ok) return ZERO_VITALS;
-      return await response.json();
+      return normalizePublicVitals(await response.json());
     } catch (error) {
       return ZERO_VITALS;
     }
@@ -146,13 +153,13 @@ class ApiService {
     if (!vitals || vitals.heartRate === 0) {
       return {
         id: 'zero-vitals',
-        healthScore: 0,
-        status: 'normal',
+        healthScore: null,
+        status: 'insufficient_data',
         title: 'Dispositivo en Espera',
         summary: 'Dispositivo en espera. Enlaza tu ESP32 para ver el análisis médico.',
         recommendations: ['Esperando telemetría del sensor...'],
         anomaliesDetected: [],
-        confidence: 0,
+        confidence: null,
         timestamp: new Date().toISOString(),
       };
     }
@@ -160,164 +167,46 @@ class ApiService {
     try {
       const response = await this.fetchWithFailover(API_CONFIG.ENDPOINTS.AI_ANALYZE, {
         method: 'POST',
-        body: JSON.stringify({ vitals }),
+        headers: this.defaultHeaders,
+        body: JSON.stringify({ session_id: getSessionId() }),
       });
       if (!response.ok) throw new Error('API error');
       const data = await response.json();
       return {
         id: data.id || `ai-${Date.now()}`,
-        healthScore: data.healthScore || 85,
-        status: data.status || 'normal',
-        title: data.title || 'Análisis Clínico',
-        summary: data.summary || 'Monitoreo activo.',
-        recommendations: data.recommendations || ['Parámetros dentro de rango.'],
+        healthScore: null,
+        status: data.status || 'insufficient_data',
+        title: data.title || 'Evaluación por reglas',
+        summary: data.summary || '',
+        recommendations: data.recommendations || [],
         anomaliesDetected: data.anomaliesDetected || [],
-        confidence: data.confidence || 95,
+        confidence: null,
+        method: data.method,
         timestamp: data.timestamp || new Date().toISOString(),
+        acoustic_analysis: data.acoustic_analysis || null,
       };
     } catch (error) {
-      return {
-        id: `err-${Date.now()}`,
-        healthScore: 85,
-        status: 'normal',
-        title: 'Análisis Local',
-        summary: 'Monitoreo activo.',
-        recommendations: ['Parámetros en rango.'],
-        anomaliesDetected: [],
-        confidence: 90,
-        timestamp: new Date().toISOString(),
-      };
+      // Sin servidor no hay evaluación: se lanza el error para que el contexto use las reglas locales.
+      throw error;
+    }
+  }
+
+  async classifyAudio(features: Record<string, number>, sessionId?: string): Promise<AcousticAnalysisResult | null> {
+    try {
+      const sid = sessionId || getSessionId();
+      const response = await fetch(`${this.baseUrl}${API_CONFIG.ENDPOINTS.AI_AUDIO_CLASSIFY}`, {
+        method: 'POST',
+        headers: this.defaultHeaders,
+        body: JSON.stringify({ features, session_id: sid }),
+      });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
     }
   }
 
   // Análisis y Predicción de Enfermedades Pulmonares con IA (Nube o Motor Local Offline)
-  async getPulmonaryAnalysis(vitals: VitalSigns): Promise<PulmonaryReport> {
-    try {
-      const sid = getSessionId();
-      const response = await this.fetchWithFailover(
-        API_CONFIG.ENDPOINTS.AI_PULMONARY_ANALYZE,
-        {
-          method: 'POST',
-          body: JSON.stringify({ vitals, session_id: sid }),
-        },
-        12000 // 12s para análisis acústico
-      );
-      if (response.ok) {
-        return await response.json();
-      }
-    } catch {}
-
-    // Fallback inteligente offline autónomo si el backend no responde
-    return this.generateOfflinePulmonaryReport(vitals);
-  }
-
-  generateOfflinePulmonaryReport(vitals: VitalSigns): PulmonaryReport {
-    const rms = vitals.audio_rms || 0;
-    const peak = vitals.audio_peak || 0;
-    const spo2 = vitals.bloodOxygen || 98;
-    const hr = vitals.heartRate || 75;
-
-    let score = 95;
-    let status: 'normal' | 'caution' | 'critical' = 'normal';
-    const findings: string[] = [];
-    const recommendations: string[] = [];
-
-    let pNormal = 88.0;
-    let pAsthma = 5.0;
-    let pPneumonia = 3.0;
-    let pCopd = 2.0;
-    let pBronchitis = 2.0;
-
-    if (rms > 72 || peak > 30000) {
-      findings.push('Detección acústica de picos transitorios compatibles con tos o ruido paroxístico.');
-      pBronchitis += 26;
-      pNormal -= 20;
-      score -= 15;
-      recommendations.push('Mantener buena hidratación y evitar irritantes inhalados.');
-    }
-
-    if (rms >= 62 && rms <= 72) {
-      findings.push('Turbulencia respiratoria compatible con sibilancias o resistencia bronquial.');
-      pAsthma += 25;
-      pCopd += 12;
-      pNormal -= 22;
-      score -= 12;
-      recommendations.push('Practicar respiración con labios fruncidos para mejorar ventilación.');
-    }
-
-    if (spo2 < 92 && spo2 > 0) {
-      findings.push(`Hipoxemia moderada detectada en espectrometría periférica (${spo2.toFixed(1)}% SpO2).`);
-      pPneumonia += 35;
-      pCopd += 18;
-      pNormal -= 40;
-      status = 'critical';
-      score -= 35;
-      recommendations.push('Atención prioritaria: Desaturación significativa. Valorar con personal médico.');
-    } else if (spo2 < 95 && spo2 > 0) {
-      findings.push(`Saturación SpO2 subóptima (${spo2.toFixed(1)}%).`);
-      pPneumonia += 12;
-      pAsthma += 10;
-      pNormal -= 15;
-      status = 'caution';
-      score -= 10;
-      recommendations.push('Repetir medición en reposo asegurando buena colocación del sensor.');
-    }
-
-    if (hr > 105) {
-      findings.push(`Taquicardia compensatoria detectada (${hr} BPM).`);
-      score -= 8;
-    }
-
-    const total = Math.max(1, pNormal + pAsthma + pPneumonia + pCopd + pBronchitis);
-    pNormal = Math.round((Math.max(1, pNormal) / total) * 1000) / 10;
-    pAsthma = Math.round((Math.max(1, pAsthma) / total) * 1000) / 10;
-    pPneumonia = Math.round((Math.max(1, pPneumonia) / total) * 1000) / 10;
-    pCopd = Math.round((Math.max(1, pCopd) / total) * 1000) / 10;
-    pBronchitis = Math.round((Math.max(1, pBronchitis) / total) * 1000) / 10;
-
-    let primary = 'Patrón Eupneico (Normal)';
-    if (pAsthma > 30 && pAsthma > pNormal) {
-      primary = 'Sospecha de Hiperreactividad / Asma';
-      if (status !== 'critical') status = 'caution';
-    } else if (pPneumonia > 25 && pPneumonia > pNormal) {
-      primary = 'Sugestivo de Infiltrado Pulmonar / Neumonía';
-      status = 'critical';
-    } else if (pBronchitis > 30 && pBronchitis > pNormal) {
-      primary = 'Afectación Bronquial / Tos Reactiva';
-      if (status !== 'critical') status = 'caution';
-    } else if (pCopd > 25 && pCopd > pNormal) {
-      primary = 'Patrón Obstructivo / Enfisematoso';
-      if (status !== 'critical') status = 'caution';
-    }
-
-    if (findings.length === 0) {
-      findings.push('Flujo aéreo broncovesicular fisiológico y simétrico sin ruidos adventicios agregados.');
-      recommendations.push('Parámetros auscultatorios normales. Continuar con hábitos de respiración saludable.');
-    }
-
-    return {
-      id: `local-pulm-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      health_score: Math.max(20, Math.min(100, score)),
-      status,
-      primary_prediction: primary,
-      acoustic_decibels: rms,
-      acoustic_peak: peak,
-      spo2,
-      heart_rate: hr,
-      probabilities: {
-        normal: pNormal,
-        asthma: pAsthma,
-        pneumonia: pPneumonia,
-        copd: pCopd,
-        bronchitis: pBronchitis,
-      },
-      findings,
-      recommendations,
-      confidence: 93.8,
-    };
-  }
-
   async sendAIChatMessage(message: string, currentVitals: VitalSigns): Promise<string> {
     try {
       const sid = getSessionId();
@@ -325,23 +214,131 @@ class ApiService {
         API_CONFIG.ENDPOINTS.AI_CHAT,
         {
           method: 'POST',
-          body: JSON.stringify({ message, vitals: currentVitals, session_id: sid }),
+          body: JSON.stringify({ message, session_id: sid }),
         },
-        18000 // 18 segundos para inferencia LLM en Docker/Cloud
+        100000 // El servidor local puede tardar hasta 90 s en responder.
       );
       if (!response.ok) throw new Error('Chat API error');
       const data = await response.json();
       return data.reply || data.message;
     } catch (error) {
-      const hr = currentVitals.heartRate > 0 ? `${currentVitals.heartRate} LPM` : 'En reposo';
-      const spo2 = currentVitals.bloodOxygen > 0 ? `${currentVitals.bloodOxygen.toFixed(1)}%` : 'Sin contacto';
-      return `Como tu asistente médico SpiroScan AI, he evaluado tus constantes en tiempo real:\n\n` +
-        `• Frecuencia Cardíaca: ${hr}\n` +
-        `• Saturación de Oxígeno (SpO2): ${spo2}\n` +
-        `• Presión Arterial: ${currentVitals.systolicPressure || 120}/${currentVitals.diastolicPressure || 80} mmHg\n` +
-        `• Nivel Acústico: ${currentVitals.audio_rms.toFixed(1)} dB\n\n` +
-        `Tu patrón cardiopulmonar se encuentra monitoreado de forma continua. Mantén respiraciones diafragmáticas profundas y continúa con tu hidratación diaria.`;
+      return 'El servidor de valoración no está disponible. No se ha generado una evaluación con estos datos. Revisa la conexión y vuelve a intentar.';
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Auscultación, alertas e informes
+  // -------------------------------------------------------------------------
+
+  get liveSocketUrl(): string {
+    return `${this.baseUrl.replace(/^http/, 'ws')}/ws/live`;
+  }
+
+  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers: this.defaultHeaders });
+    if (!response.ok) {
+      const detail = await response.json().then((d) => d.detail).catch(() => response.statusText);
+      throw new Error(detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  }
+
+  /** Indica al servidor que la próxima grabación del ESP32 pertenece a esta sesión y foco. */
+  armRecording(location: AuscultationFocus, mode: AuscultationMode) {
+    return this.request('/api/audio/arm', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: getSessionId(), location, mode }),
+    });
+  }
+
+  getHistory(): Promise<SessionOverview[]> {
+    return this.request('/api/history');
+  }
+
+  getSessionRecordings(sessionId: string): Promise<RecordingResult[]> {
+    return this.request(`/api/recordings?session_id=${encodeURIComponent(sessionId)}`);
+  }
+
+  listReports(sessionId: string): Promise<ReportItem[]> {
+    return this.request(`/api/reports?session_id=${encodeURIComponent(sessionId)}`);
+  }
+
+  recordingAudioUrl(recordingId: string): string {
+    return `${this.baseUrl}/api/recordings/${encodeURIComponent(recordingId)}/audio`;
+  }
+
+  absoluteUrl(path: string): string {
+    return `${this.baseUrl}${path}`;
+  }
+
+  createReportFor(sessionId: string): Promise<SessionReport> {
+    return this.request(`/api/reports/session/${encodeURIComponent(sessionId)}`, { method: 'POST' });
+  }
+
+  getTriage(): Promise<TriageResult> {
+    return this.request(`/api/triage/${encodeURIComponent(getSessionId())}`);
+  }
+
+  getPatientContext(sessionId: string): Promise<PatientContext> {
+    return this.request(`/api/clinical/context/${encodeURIComponent(sessionId)}`);
+  }
+
+  savePatientContext(sessionId: string, context: PatientContext): Promise<PatientContext> {
+    return this.request(`/api/clinical/context/${encodeURIComponent(sessionId)}`, {
+      method: 'PUT', body: JSON.stringify(context),
+    });
+  }
+
+  getClinicalAssessment(sessionId: string): Promise<ClinicalAssessment> {
+    return this.request(`/api/clinical/assessment/${encodeURIComponent(sessionId)}`);
+  }
+
+  getModelsInfo(): Promise<{ corazon: HeartModelInfo; pulmon: LungModelsInfo }> {
+    return this.request('/api/models');
+  }
+
+  /** Indica al servidor que los datos que lleguen del ESP32 por WiFi pertenecen a esta sesión. */
+  linkDevice() {
+    return this.request(API_CONFIG.ENDPOINTS.DEVICE_LINK, {
+      method: 'POST',
+      body: JSON.stringify({ session_id: getSessionId() }),
+    });
+  }
+
+  getRecordings(): Promise<RecordingResult[]> {
+    return this.request(`/api/recordings?session_id=${encodeURIComponent(getSessionId())}`);
+  }
+
+  getAlerts(): Promise<ClinicalAlert[]> {
+    return this.request(`/api/alerts?session_id=${encodeURIComponent(getSessionId())}`);
+  }
+
+  ackAlert(id: number): Promise<ClinicalAlert> {
+    return this.request(`/api/alerts/${id}/ack`, { method: 'POST' });
+  }
+
+  createSessionReport(): Promise<SessionReport> {
+    return this.request(`/api/reports/session/${encodeURIComponent(getSessionId())}`, { method: 'POST' });
+  }
+
+  reportPdfUrl(report: SessionReport): string {
+    return `${this.baseUrl}${report.pdf_url}`;
+  }
+
+  getGuide(location: AuscultationFocus): Promise<FocusGuide> {
+    return this.request(`/api/guide/${location}`);
+  }
+
+  async askGuide(question: string, location: AuscultationFocus): Promise<string> {
+    const data = await this.request<{ answer: string }>('/api/guide/ask', {
+      method: 'POST',
+      body: JSON.stringify({ question, location, session_id: getSessionId() }),
+    });
+    return data.answer;
+  }
+
+  getHeartModelInfo(): Promise<HeartModelInfo> {
+    return this.request('/api/model/heart');
   }
 
   async getDeviceStatus(): Promise<DeviceInfo> {
@@ -361,6 +358,36 @@ class ApiService {
         firmwareVersion: 'v1.5.0',
         signalStrength: 'weak',
       };
+    }
+  }
+
+  getDemoAudioUrl(sampleId: string): string {
+    return `${this.baseUrl}/api/demo/audio/${sampleId}.wav`;
+  }
+
+  async getDemoSamples(): Promise<Record<string, any>> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/demo/samples`, {
+        headers: this.defaultHeaders,
+      });
+      if (!response.ok) return {};
+      return await response.json();
+    } catch {
+      return {};
+    }
+  }
+
+  async injectDemoSample(sampleId: string): Promise<any | null> {
+    try {
+      const sid = getSessionId();
+      const response = await fetch(`${this.baseUrl}/api/demo/inject/${encodeURIComponent(sampleId)}?session_id=${encodeURIComponent(sid)}`, {
+        method: 'POST',
+        headers: this.defaultHeaders,
+      });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
     }
   }
 }

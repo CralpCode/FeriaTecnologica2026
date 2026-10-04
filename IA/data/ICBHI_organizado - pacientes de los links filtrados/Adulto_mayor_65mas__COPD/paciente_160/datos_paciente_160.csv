@@ -1,0 +1,10 @@
+Campo,Valor
+ID Paciente,160
+Edad (anos),74
+Grupo de edad,Adulto mayor (65+)
+Sexo,M
+Diagnostico,COPD
+BMI adulto (kg/m2),27.4
+Peso nino (kg),
+Altura nino (cm),
+Particion sugerida (train/validation),Entrenamiento

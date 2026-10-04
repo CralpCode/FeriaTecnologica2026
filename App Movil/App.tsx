@@ -3,20 +3,35 @@ import { View, StyleSheet, Platform, StatusBar as RNStatusBar } from 'react-nati
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from './src/theme/colors';
-import { VitalsProvider, useVitals } from './src/context/VitalsContext';
+import { VitalsProvider } from './src/context/VitalsContext';
+import { ClinicalProvider, useClinical } from './src/context/ClinicalContext';
 import { Header } from './src/components/Header';
 import { BottomNavBar, TabScreen } from './src/components/BottomNavBar';
+import { SideNavBar } from './src/components/SideNavBar';
+import { ConnectionBanner } from './src/components/ConnectionBanner';
+import { useLayout } from './src/hooks/useLayout';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { PulmonaryAIScreen } from './src/screens/PulmonaryAIScreen';
 import { ChartsScreen } from './src/screens/ChartsScreen';
 import { AIAssistantScreen } from './src/screens/AIAssistantScreen';
+import { AuscultationScreen } from './src/screens/AuscultationScreen';
+import { AlertsScreen } from './src/screens/AlertsScreen';
+import { HistoryScreen } from './src/screens/HistoryScreen';
+import { AuscultationMode } from './src/types/vitals';
 
 const MainAppContent: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<TabScreen>('dashboard');
-  const { aiReport } = useVitals();
+  const [auscultationMode, setAuscultationMode] = useState<AuscultationMode>('corazon');
+  const { hasCriticalAlert, activeAlertsCount } = useClinical();
   const insets = useSafeAreaInsets();
+  const { useSideNav, isDesktop } = useLayout();
+  const nav = {
+    currentTab,
+    onSelectTab: setCurrentTab,
+    hasAlert: hasCriticalAlert,
+    alertsCount: activeAlertsCount,
+  };
 
-  const hasCriticalAlert = aiReport?.status === 'critical';
   const paddingTop = Platform.OS === 'android' ? (RNStatusBar.currentHeight || 0) : (insets?.top || 0);
 
   return (
@@ -24,7 +39,13 @@ const MainAppContent: React.FC = () => {
       <StatusBar style="dark" />
 
       {/* Cabecera común */}
-      <Header />
+      <Header onNewPatient={() => setCurrentTab('dashboard')} />
+
+      <ConnectionBanner />
+
+      <View style={styles.body}>
+        {/* Navegación lateral en computadora y tablet horizontal */}
+        {useSideNav && <SideNavBar {...nav} compact={!isDesktop} />}
 
       {/* Contenido según pestaña seleccionada */}
       <View style={styles.screenContainer}>
@@ -33,19 +54,23 @@ const MainAppContent: React.FC = () => {
             onNavigateToAI={() => setCurrentTab('ai')}
             onNavigateToPulmonary={() => setCurrentTab('pulmonary')}
             onNavigateToCharts={() => setCurrentTab('charts')}
+            onOpenAuscultation={(mode) => {
+              setAuscultationMode(mode);
+              setCurrentTab('auscultation');
+            }}
           />
         )}
         {currentTab === 'pulmonary' && <PulmonaryAIScreen />}
+        {currentTab === 'auscultation' && <AuscultationScreen initialMode={auscultationMode} />}
+        {currentTab === 'alerts' && <AlertsScreen />}
+        {currentTab === 'history' && <HistoryScreen />}
         {currentTab === 'charts' && <ChartsScreen />}
         {currentTab === 'ai' && <AIAssistantScreen />}
       </View>
+      </View>
 
-      {/* Barra de navegación inferior */}
-      <BottomNavBar
-        currentTab={currentTab}
-        onSelectTab={setCurrentTab}
-        hasAlert={hasCriticalAlert}
-      />
+      {/* Barra de navegación inferior (celular y tablet vertical) */}
+      {!useSideNav && <BottomNavBar {...nav} />}
     </View>
   );
 };
@@ -54,7 +79,9 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <VitalsProvider>
-        <MainAppContent />
+        <ClinicalProvider>
+          <MainAppContent />
+        </ClinicalProvider>
       </VitalsProvider>
     </SafeAreaProvider>
   );
@@ -65,7 +92,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  body: {
+    flex: 1,
+    flexDirection: 'row',
+  },
   screenContainer: {
     flex: 1,
+    minWidth: 0,
   },
 });

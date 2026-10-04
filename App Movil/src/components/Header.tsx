@@ -4,12 +4,17 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useDeviceConnection } from '../context/VitalsContext';
 import { DeviceConnectionModal } from './DeviceConnectionModal';
+import { ClinicalAudioModal } from './ClinicalAudioModal';
+import { NewPatientModal } from './NewPatientModal';
+import { useLayout } from '../hooks/useLayout';
 
 interface HeaderProps {
   title?: string;
   subtitle?: string;
   onOpenSettings?: () => void;
   onOpenInfo?: () => void;
+  /** Se llama después de crear un paciente nuevo (p. ej. para volver a Monitoreo). */
+  onNewPatient?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -17,9 +22,13 @@ export const Header: React.FC<HeaderProps> = ({
   subtitle = 'Monitoreo Biomédico Continuo',
   onOpenSettings,
   onOpenInfo,
+  onNewPatient,
 }) => {
-  const { isDeviceDirectConnected, device, isBackendOnline } = useDeviceConnection();
+  const { isDeviceDirectConnected, device, isBackendOnline, currentSessionId } = useDeviceConnection();
   const [deviceModalVisible, setDeviceModalVisible] = useState(false);
+  const [clinicalDemoVisible, setClinicalDemoVisible] = useState(false);
+  const [newPatientVisible, setNewPatientVisible] = useState(false);
+  const { isPhone } = useLayout();
 
   return (
     <>
@@ -29,13 +38,29 @@ export const Header: React.FC<HeaderProps> = ({
             <MaterialCommunityIcons name="heart-pulse" size={24} color={Colors.primary} />
           </View>
           <View style={styles.textContainer}>
-            <Text style={styles.title}>{title}</Text>
-            <Text style={styles.subtitle}>{subtitle}</Text>
+            <Text style={styles.title} numberOfLines={1}>{title}</Text>
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {isPhone ? 'Sesión ' : `${subtitle} • Sesión `}
+              <Text style={{ color: Colors.primary, fontWeight: '700' }}>{currentSessionId}</Text>
+            </Text>
           </View>
         </View>
 
         <View style={styles.rightContainer}>
-          {/* Indicador de Nube / Modo Local */}
+          {/* Nuevo paciente: siempre visible */}
+          <TouchableOpacity
+            style={styles.newPatientButton}
+            onPress={() => setNewPatientVisible(true)}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Nuevo paciente"
+          >
+            <MaterialCommunityIcons name="account-plus" size={18} color="#FFFFFF" />
+            {!isPhone && <Text style={styles.newPatientText}>NUEVO PACIENTE</Text>}
+          </TouchableOpacity>
+
+          {/* Indicador de Nube / Modo Local (en celular basta la franja de aviso si se cae el servidor) */}
+          {!isPhone && (
           <TouchableOpacity
             style={[
               styles.cloudStatusBadge,
@@ -43,21 +68,20 @@ export const Header: React.FC<HeaderProps> = ({
             ]}
             onPress={() => setDeviceModalVisible(true)}
             activeOpacity={0.8}
+            accessibilityLabel={isBackendOnline ? 'Servidor conectado' : 'Servidor sin conexión'}
           >
             <MaterialCommunityIcons
-              name={isBackendOnline ? 'cloud-check' : 'cloud-off-outline'}
-              size={15}
-              color={isBackendOnline ? '#059669' : '#64748B'}
+              name={isBackendOnline ? 'server-network' : 'server-network-off'}
+              size={16}
+              color={isBackendOnline ? Colors.success : Colors.textSecondary}
             />
-            <Text
-              style={[
-                styles.cloudStatusText,
-                { color: isBackendOnline ? '#059669' : '#64748B' },
-              ]}
-            >
-              {isBackendOnline ? 'NUBE' : 'OFFLINE'}
-            </Text>
+            {!isPhone && (
+              <Text style={[styles.cloudStatusText, { color: isBackendOnline ? Colors.success : Colors.textSecondary }]}>
+                {isBackendOnline ? 'SERVIDOR' : 'SIN SERVIDOR'}
+              </Text>
+            )}
           </TouchableOpacity>
+          )}
 
           {/* Botón de Estado de Dispositivo (Bluetooth Directo) */}
           <TouchableOpacity
@@ -67,20 +91,26 @@ export const Header: React.FC<HeaderProps> = ({
             ]}
             onPress={() => setDeviceModalVisible(true)}
             activeOpacity={0.8}
+            accessibilityLabel={isDeviceDirectConnected ? 'Dispositivo conectado' : 'Conectar dispositivo'}
           >
             <MaterialCommunityIcons
-              name={isDeviceDirectConnected ? 'bluetooth-connect' : 'bluetooth-off'}
+              name={isDeviceDirectConnected ? 'link-variant' : 'link-variant-off'}
               size={18}
               color={isDeviceDirectConnected ? '#16A34A' : '#EF4444'}
             />
-            <Text
-              style={[
-                styles.deviceStatusText,
-                { color: isDeviceDirectConnected ? '#15803D' : '#DC2626' },
-              ]}
-            >
-              {isDeviceDirectConnected ? 'CONECTADO' : 'DESCONECTADO'}
+            <Text style={[styles.deviceStatusText, { color: isDeviceDirectConnected ? '#15803D' : '#DC2626' }]}>
+              {isDeviceDirectConnected ? 'CONECTADO' : isPhone ? 'CONECTAR' : 'SIN DISPOSITIVO'}
             </Text>
+          </TouchableOpacity>
+
+          {/* Botón Discreto de Banco de Pruebas Clínico (Validación ICBHI) */}
+          <TouchableOpacity
+            style={styles.labDemoButton}
+            onPress={() => setClinicalDemoVisible(true)}
+            activeOpacity={0.7}
+            accessibilityLabel="Banco de Pruebas Clínicas"
+          >
+            <MaterialCommunityIcons name="flask-outline" size={16} color={Colors.aiPurple} />
           </TouchableOpacity>
 
           {onOpenSettings && (
@@ -91,13 +121,24 @@ export const Header: React.FC<HeaderProps> = ({
         </View>
       </View>
 
-      {/* Modal de Conexión de Dispositivo (Renderizado condicional perezoso para máxima velocidad) */}
-      {deviceModalVisible && (
-        <DeviceConnectionModal
-          visible={deviceModalVisible}
-          onClose={() => setDeviceModalVisible(false)}
-        />
-      )}
+      {/* Modal de Conexión de Dispositivo */}
+      {deviceModalVisible && <DeviceConnectionModal
+        visible={deviceModalVisible}
+        onClose={() => setDeviceModalVisible(false)}
+        onOpenClinicalDemo={() => setClinicalDemoVisible(true)}
+      />}
+
+      <NewPatientModal
+        visible={newPatientVisible}
+        onClose={() => setNewPatientVisible(false)}
+        onCreated={onNewPatient}
+      />
+
+      {/* Modal Discreto de Banco de Pruebas y Validación Clínica */}
+      <ClinicalAudioModal
+        visible={clinicalDemoVisible}
+        onClose={() => setClinicalDemoVisible(false)}
+      />
     </>
   );
 };
@@ -141,7 +182,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 10,
+    fontSize: 12,
     color: Colors.textSecondary,
     fontWeight: '500',
   },
@@ -154,7 +195,8 @@ const styles = StyleSheet.create({
   cloudStatusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 7,
+    minHeight: 36,
+    paddingHorizontal: 9,
     paddingVertical: 5,
     borderRadius: 14,
     borderWidth: 1,
@@ -169,14 +211,15 @@ const styles = StyleSheet.create({
     borderColor: '#CBD5E1',
   },
   cloudStatusText: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
   deviceStatusButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
+    minHeight: 36,
+    paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 16,
     borderWidth: 1,
@@ -191,7 +234,7 @@ const styles = StyleSheet.create({
     borderColor: '#FCA5A5',
   },
   deviceStatusText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '800',
   },
   iconButton: {
@@ -201,5 +244,31 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  newPatientButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 36,
+    minWidth: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    backgroundColor: Colors.primary,
+    gap: 4,
+  },
+  newPatientText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  labDemoButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F3E8FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E9D5FF',
   },
 });
