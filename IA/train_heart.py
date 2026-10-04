@@ -46,7 +46,8 @@ def compute_features(recs, ir: np.ndarray | None, ir_tag: str):
             y, sr = sf.read(r.path, dtype="float32", always_2d=False)
             if ir is not None:
                 # Corrección acústica: simula que el audio clínico fue grabado con nuestro dispositivo.
-                y = fftconvolve(F.preprocess(y, sr), ir, mode="full")[: len(y)]
+                pre = F.preprocess(y, sr)
+                y = fftconvolve(pre, ir, mode="full")[: len(pre)]
                 sr = F.TARGET_SR
             x = F.features_from_audio(y, sr)
             np.save(cf, x)
