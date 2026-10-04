@@ -205,6 +205,8 @@ export interface SessionOverview {
   active_alerts: number;
   reports: number;
   triaje: TriageLevel;
+  /** Archivada: oculta de las listas, sin borrar nada. */
+  archived?: boolean;
 }
 
 export interface ReportItem {

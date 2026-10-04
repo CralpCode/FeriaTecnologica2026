@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './ui/Text';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useVitals } from '../context/VitalsContext';
 import { useLayout } from '../hooks/useLayout';

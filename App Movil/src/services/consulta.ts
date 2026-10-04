@@ -69,3 +69,17 @@ export const isNamedPatient = (sessionId: string) => !/^(pc|movil|apk|sess)_[a-z
 /** Código legible del paciente: "p017_ab12c" -> "P017". */
 export const patientLabel = (sessionId: string) =>
   isNamedPatient(sessionId) ? sessionId.replace(/_[a-z0-9]{5}$/, '').toUpperCase() : 'Sin identificar';
+
+/** Tiempo relativo corto: "hace 5 min", "hace 2 h", "ayer", "3 oct". */
+export function relativeTime(iso?: string | null, now = Date.now()): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const min = Math.round((now - t) / 60000);
+  if (min < 1) return 'ahora';
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  if (h < 48) return 'ayer';
+  return new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short' });
+}

@@ -1,5 +1,6 @@
 ﻿import React, { useState } from 'react';
-import { View, Text, StyleSheet, useWindowDimensions, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, useWindowDimensions, TouchableOpacity, LayoutChangeEvent } from 'react-native';
+import { Text } from './ui/Text';
 import Svg, { Path, Circle, Line, Defs, LinearGradient, Stop, Text as SvgText } from 'react-native-svg';
 import { Colors } from '../theme/colors';
 import { VitalsHistoryPoint } from '../types/vitals';
@@ -20,8 +21,12 @@ const PADDING_RIGHT = 20;
 
 export const TrendChart: React.FC<TrendChartProps> = ({ data, metricKey, title, unit, color }) => {
   const { width } = useWindowDimensions();
-  const chartWidth = Math.max(280, width - 40);
+  // Ancho real de la tarjeta (en computadora la ventana es mucho más ancha que el contenido)
+  const [measured, setMeasured] = useState(0);
+  const chartWidth = Math.max(260, measured || Math.min(width - 40, 960));
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const onLayout = (e: LayoutChangeEvent) => setMeasured(Math.round(e.nativeEvent.layout.width - 32));
+  const notValidated = metricKey === 'hrv' || metricKey === 'stressLevel';
 
   data = (data || []).filter((point) => point.source === 'real' && point.signalQuality === 'good'
     && typeof point.sampleAgeMs === 'number' && point.sampleAgeMs >= 0 && point.sampleAgeMs <= 15000
@@ -31,7 +36,11 @@ export const TrendChart: React.FC<TrendChartProps> = ({ data, metricKey, title, 
     return (
       <View style={[styles.card, styles.emptyContainer]}>
         <Text style={styles.title}>{title}</Text>
-        <Text style={styles.emptyText}>Recibiendo telemetría en tiempo real para generar tendencias...</Text>
+        <Text style={styles.emptyText}>
+          {notValidated ? 'No se grafica: esta lectura no está validada, así que no se usa ni se muestra.'
+            : metricKey === 'bloodOxygen' ? 'Sin SpO2 calibrada en este periodo: el sensor no está calibrado, así que no se grafica.'
+            : 'Sin lecturas válidas de pulso en este periodo. Aparecerán al medir con el dedo bien apoyado.'}
+        </Text>
       </View>
     );
   }
@@ -93,7 +102,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({ data, metricKey, title, 
   const selectedPoint = selectedIndex !== null && points[selectedIndex] ? points[selectedIndex] : null;
 
   return (
-    <View style={styles.card}>
+    <View style={styles.card} onLayout={onLayout}>
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>{title}</Text>
@@ -215,14 +224,10 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#E3E7EC',
     marginBottom: 16,
     position: 'relative',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
+    boxShadow: '0px 4px 14px rgba(15, 23, 42, 0.07), 0px 1px 3px rgba(15, 23, 42, 0.05)',
   },
   emptyContainer: {
     height: 160,

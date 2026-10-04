@@ -203,8 +203,18 @@ class ApiService {
     });
   }
 
-  getHistory(): Promise<SessionOverview[]> {
-    return this.request('/api/history');
+  /** Historial de pacientes; con archived=true, solo los archivados. */
+  getHistory(archived = false): Promise<SessionOverview[]> {
+    return this.request(archived ? '/api/history?archived=true' : '/api/history');
+  }
+
+  /** Oculta un paciente de las listas. No borra grabaciones, informes ni alertas. */
+  archiveSession(sessionId: string): Promise<{ session_id: string; archived: boolean }> {
+    return this.request(`/api/sessions/${encodeURIComponent(sessionId)}/archive`, { method: 'POST' });
+  }
+
+  unarchiveSession(sessionId: string): Promise<{ session_id: string; archived: boolean }> {
+    return this.request(`/api/sessions/${encodeURIComponent(sessionId)}/unarchive`, { method: 'POST' });
   }
 
   getSessionRecordings(sessionId: string): Promise<RecordingResult[]> {

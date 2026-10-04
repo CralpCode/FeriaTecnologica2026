@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../components/ui/Text';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useVitals } from '../context/VitalsContext';
 import { useClinical } from '../context/ClinicalContext';
@@ -10,7 +11,7 @@ import { HospitalEcgMonitor } from '../components/HospitalEcgMonitor';
 import { TriageCard } from '../components/TriageCard';
 import { Centered, Columns } from '../components/ResponsiveContainer';
 import { ConsultaBanner } from '../components/consulta/ConsultaBanner';
-import { Banner, Button, SectionHeader } from '../components/ui';
+import { Banner, Button, SectionHeader, VitalTile } from '../components/ui';
 
 interface DashboardScreenProps {
   onNavigateToAI: () => void;
@@ -76,45 +77,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToAI
   );
 };
 
-const VitalTile: React.FC<{
-  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
-  tint: string;
-  label: string;
-  value: string | null;
-  unit: string;
-  hint: string;
-  source: string;
-}> = ({ icon, tint, label, value, unit, hint, source }) => (
-  <View style={styles.tile} accessibilityLabel={`${label}: ${value ? `${value} ${unit}` : 'sin dato'}. ${hint}`}>
-    <View style={styles.tileHead}>
-      <View style={[styles.tileIcon, { backgroundColor: `${tint}14` }]}>
-        <MaterialCommunityIcons name={icon} size={18} color={tint} />
-      </View>
-      <Text style={styles.tileLabel} numberOfLines={1}>{label}</Text>
-    </View>
-    <View style={styles.valueRow}>
-      <Text style={[styles.value, !value && { color: color.textMuted }]}>{value ?? '--'}</Text>
-      <Text style={styles.unit}>{unit}</Text>
-    </View>
-    <Text style={[styles.hint, !value && { color: color.textMuted }]} numberOfLines={2}>{hint}</Text>
-    <Text style={styles.source}>{source}</Text>
-  </View>
-);
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: color.bg },
   content: { padding: space.lg, paddingBottom: space.xxl },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
-  tile: {
-    flexGrow: 1, flexBasis: 160, minHeight: 132, padding: space.lg, backgroundColor: color.surface,
-    borderWidth: 1, borderColor: color.border, borderRadius: radius.lg,
-  },
-  tileHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  tileIcon: { width: 32, height: 32, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
-  tileLabel: { flex: 1, fontSize: font.sm, fontWeight: weight.bold, color: color.text },
-  valueRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginTop: space.md },
-  value: { fontSize: font.xxl, lineHeight: 36, fontWeight: weight.heavy, color: color.text, letterSpacing: -0.5 },
-  unit: { fontSize: font.sm, color: color.textSecondary, fontWeight: weight.bold, marginBottom: 4 },
-  hint: { fontSize: font.xs, color: color.textSecondary, marginTop: space.xs, lineHeight: 16 },
-  source: { fontSize: font.xs, color: color.textMuted, marginTop: space.xs },
 });

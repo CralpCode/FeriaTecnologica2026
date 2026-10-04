@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking, RefreshControl, TextInput } from 'react-native';
+import { Linking, Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Text } from '../components/ui/Text';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { apiService } from '../services/api';
@@ -9,25 +10,20 @@ import { ListeningFilterBar } from '../components/ListeningFilterBar';
 import { RecordingResult, ReportItem, SessionOverview, TriageLevel } from '../types/vitals';
 import { Centered, Columns } from '../components/ResponsiveContainer';
 import { useLayout } from '../hooks/useLayout';
-import { isNamedPatient, patientLabel } from '../services/consulta';
-import { color as T, radius, space } from '../theme/tokens';
+import { focusName, isNamedPatient, patientLabel, relativeTime } from '../services/consulta';
+import { RESULT_STYLE } from '../components/consulta/RecorderPanel';
+import { color, font, radius, space, tabular, weight } from '../theme/tokens';
+import {
+  Avatar, Banner, Button, Card, EmptyState, IconButton, ListItem, SectionHeader, Skeleton, SkeletonList, StatusPill,
+} from '../components/ui';
 
-const TRIAGE_COLOR: Record<TriageLevel, string> = {
-  rojo: Colors.danger, amarillo: Colors.warning, verde: Colors.success, gris: Colors.textMuted,
+const LEVEL: Record<TriageLevel, { label: string; tone: 'danger' | 'warning' | 'success' | 'neutral'; dot: string }> = {
+  rojo: { label: 'Rojo', tone: 'danger', dot: color.danger },
+  amarillo: { label: 'Amarillo', tone: 'warning', dot: color.warning },
+  verde: { label: 'Verde', tone: 'success', dot: color.success },
+  gris: { label: 'Sin datos', tone: 'neutral', dot: color.textMuted },
 };
-
-const RESULT_TEXT: Record<string, { label: string; color: string }> = {
-  normal: { label: 'Normal', color: Colors.success },
-  anormal: { label: 'Anormal', color: Colors.danger },
-  calidad_insuficiente: { label: 'Calidad insuficiente', color: Colors.warning },
-  modelo_no_disponible: { label: 'Sin analizar', color: Colors.textSecondary },
-  error: { label: 'Error', color: Colors.textSecondary },
-};
-
-const FOCUS: Record<string, string> = {
-  AV: 'Aórtico', PV: 'Pulmonar', TV: 'Tricuspídeo', MV: 'Mitral', TC: 'Tráquea', AL: 'Ant. izq.',
-  AR: 'Ant. der.', PL: 'Espalda izq.', PR: 'Espalda der.', LL: 'Costado izq.', LR: 'Costado der.',
-};
+const FILTERS: (TriageLevel | 'todos')[] = ['todos', 'rojo', 'amarillo', 'verde', 'gris'];
 
 const when = (iso?: string | null) => {
   if (!iso) return '—';
@@ -37,8 +33,16 @@ const when = (iso?: string | null) => {
     return iso;
   }
 };
+const nameOf = (sid: string) => (isNamedPatient(sid) ? patientLabel(sid) : sid);
+const summary = (s: SessionOverview) => {
+  const parts = [relativeTime(s.last_seen)];
+  parts.push(`${s.recordings} ${s.recordings === 1 ? 'grabación' : 'grabaciones'}${s.abnormal_recordings ? ` (${s.abnormal_recordings} anormal${s.abnormal_recordings === 1 ? '' : 'es'})` : ''}`);
+  if (s.reports) parts.push(`${s.reports} ${s.reports === 1 ? 'informe' : 'informes'}`);
+  if (s.active_alerts) parts.push(`${s.active_alerts} ${s.active_alerts === 1 ? 'alerta' : 'alertas'}`);
+  return parts.filter(Boolean).join(' · ');
+};
 
-/** Historial por paciente (cada sesión es un paciente): grabaciones, informes y semáforo. */
+/** Historial por paciente (cada sesión es un paciente): grabaciones, informes, semáforo y archivo. */
 export const HistoryScreen: React.FC<{ onOpenConsulta?: () => void }> = ({ onOpenConsulta }) => {
   const { currentSessionId, switchSession } = useVitals();
   const [sessions, setSessions] = useState<SessionOverview[] | null>(null);
@@ -47,99 +51,114 @@ export const HistoryScreen: React.FC<{ onOpenConsulta?: () => void }> = ({ onOpe
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState('');
   const [level, setLevel] = useState<TriageLevel | 'todos'>('todos');
+  const [archivedView, setArchivedView] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const { twoColumns } = useLayout();
 
   const load = useCallback(async () => {
     try {
-      setSessions(await apiService.getHistory());
+      setSessions(await apiService.getHistory(archivedView));
       setError(false);
     } catch {
       setError(true);
     }
-  }, []);
+  }, [archivedView]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { setSessions(null); setOpen(null); load(); }, [load]);
 
-  // En pantalla ancha siempre hay un paciente seleccionado para el panel de detalle
-  useEffect(() => {
-    if (twoColumns && !open && sessions && sessions.length) setOpen(sessions[0].session_id);
-  }, [twoColumns, open, sessions]);
-
-  const selected = sessions?.find((x) => x.session_id === open) || null;
   const q = query.trim().toLowerCase();
   const visible = (sessions || []).filter((x) =>
     (level === 'todos' || x.triaje === level)
     && (!q || x.session_id.toLowerCase().includes(q) || patientLabel(x.session_id).toLowerCase().includes(q)));
 
+  // En pantalla ancha siempre hay un paciente seleccionado para el panel de detalle
+  useEffect(() => {
+    if (twoColumns && visible.length && !visible.some((x) => x.session_id === open)) setOpen(visible[0].session_id);
+  }, [twoColumns, open, visible]);
+
+  const selected = sessions?.find((x) => x.session_id === open) || null;
+
+  const toggleArchive = async (s: SessionOverview) => {
+    try {
+      if (s.archived) await apiService.unarchiveSession(s.session_id);
+      else await apiService.archiveSession(s.session_id);
+      setNotice(s.archived ? `${nameOf(s.session_id)} volvió a la lista.`
+        : `${nameOf(s.session_id)} se archivó: ya no aparece en las listas. Sus datos no se borraron; puedes restaurarlo en "Archivados".`);
+      setOpen(null);
+      load();
+    } catch (e: any) {
+      setNotice(`No se pudo cambiar: ${e?.message || e}`);
+    }
+  };
+
+  const detail = (s: SessionOverview) => (
+    <SessionDetail
+      key={s.session_id}
+      session={s}
+      isCurrent={s.session_id === currentSessionId}
+      onOpenSession={() => { switchSession(s.session_id); onOpenConsulta?.(); }}
+      onArchive={() => toggleArchive(s)}
+      onChanged={load}
+    />
+  );
+
   const list = (
     <View>
-      <View style={styles.headerRow}>
-        <Text style={styles.title}>Historial de pacientes</Text>
-        <TouchableOpacity onPress={load} style={styles.iconBtn}>
-          <Ionicons name="refresh" size={18} color={Colors.primary} />
-        </TouchableOpacity>
-      </View>
-      <Text style={styles.note}>Cada sesión corresponde a un paciente. Toca una para ver sus grabaciones e informes.</Text>
+      <SectionHeader title={archivedView ? 'Pacientes archivados' : 'Historial de pacientes'}
+                     subtitle={archivedView ? 'Ocultos de las listas; sus datos siguen guardados.' : 'Cada sesión corresponde a un paciente.'}
+                     right={<IconButton icon="refresh" accessibilityLabel="Actualizar" onPress={load} />} />
       <View style={styles.searchBox}>
-        <Ionicons name="search" size={18} color={T.textMuted} />
+        <Ionicons name="search" size={18} color={color.textMuted} />
         <TextInput style={styles.searchInput} value={query} onChangeText={setQuery} placeholder="Buscar por código (p. ej. P017)"
-                   placeholderTextColor={T.textMuted} autoCapitalize="characters" accessibilityLabel="Buscar paciente por código" />
+                   placeholderTextColor={color.textMuted} autoCapitalize="characters" accessibilityLabel="Buscar paciente por código" />
+        {!!query && <IconButton icon="close" size={32} accessibilityLabel="Borrar búsqueda" onPress={() => setQuery('')} style={{ borderWidth: 0 }} />}
       </View>
       <View style={styles.filters}>
-        {(['todos', 'rojo', 'amarillo', 'verde', 'gris'] as const).map((lv) => (
-          <TouchableOpacity key={lv} onPress={() => setLevel(lv)} accessibilityRole="button" accessibilityState={{ selected: level === lv }}
-                            style={[styles.filterChip, level === lv && styles.filterChipActive]}>
-            {lv !== 'todos' && <View style={[styles.filterDot, { backgroundColor: TRIAGE_COLOR[lv] }]} />}
-            <Text style={[styles.filterText, level === lv && styles.filterTextActive]}>
-              {{ todos: 'Todos', rojo: 'Rojo', amarillo: 'Amarillo', verde: 'Verde', gris: 'Sin datos' }[lv]}
-            </Text>
-          </TouchableOpacity>
+        {FILTERS.map((lv) => (
+          <Chip key={lv} active={level === lv} onPress={() => setLevel(lv)} dot={lv === 'todos' ? undefined : LEVEL[lv].dot}
+                label={lv === 'todos' ? 'Todos' : LEVEL[lv].label} />
         ))}
+        <Chip active={archivedView} onPress={() => setArchivedView((v) => !v)} icon="archive-outline" label="Archivados" />
       </View>
+      {notice && <Banner tone="info" text={notice} />}
 
-      {sessions === null && !error && <ActivityIndicator color={Colors.primary} style={{ marginTop: 24 }} />}
-      {error && <Text style={styles.error}>No se pudo cargar el historial del servidor.</Text>}
-      {sessions?.length === 0 && <Text style={styles.note}>Todavía no hay sesiones registradas.</Text>}
-      {sessions && sessions.length > 0 && visible.length === 0 && <Text style={styles.note}>Ningún paciente coincide con la búsqueda.</Text>}
+      {sessions === null && !error && <SkeletonList rows={5} />}
+      {error && <Banner tone="danger" text="No se pudo cargar el historial del servidor." />}
+      {sessions?.length === 0 && (
+        <EmptyState icon={archivedView ? 'archive-outline' : 'account-clock-outline'} tone="neutral"
+                    title={archivedView ? 'No hay pacientes archivados' : 'Todavía no hay pacientes'}
+                    text={archivedView ? undefined : 'Cuando registres una consulta aparecerá aquí.'} />
+      )}
+      {sessions && sessions.length > 0 && visible.length === 0 && (
+        <EmptyState compact icon="magnify" tone="neutral" title="Ningún paciente coincide con la búsqueda" />
+      )}
 
-      {visible.map((s) => (
-        <View key={s.session_id} style={[styles.card, s.session_id === currentSessionId && styles.cardCurrent]}>
-          <TouchableOpacity
-            style={[styles.cardHeader, twoColumns && open === s.session_id && styles.cardSelected]}
-            onPress={() => setOpen(twoColumns ? s.session_id : open === s.session_id ? null : s.session_id)}
-            accessibilityRole="button"
-            accessibilityState={{ selected: open === s.session_id }}
-          >
-            <View style={[styles.triageDot, { backgroundColor: TRIAGE_COLOR[s.triaje] || Colors.textMuted }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sessionId}>
-                {isNamedPatient(s.session_id) ? patientLabel(s.session_id) : s.session_id}
-                {s.session_id === currentSessionId ? '  · abierto ahora' : ''}
-              </Text>
-              <Text style={styles.meta}>Última actividad: {when(s.last_seen)}</Text>
-              <Text style={styles.meta}>
-                {s.readings} lecturas · {s.recordings} grabaciones ({s.abnormal_recordings} anormales) · {s.alerts} alertas ·{' '}
-                {s.reports} informes
-              </Text>
+      <View style={{ gap: space.sm }}>
+        {visible.map((s) => {
+          const lv = LEVEL[s.triaje] || LEVEL.gris;
+          const isOpen = open === s.session_id;
+          const current = s.session_id === currentSessionId;
+          return (
+            <View key={s.session_id}>
+              <ListItem
+                title={nameOf(s.session_id)}
+                subtitle={summary(s)}
+                selected={isOpen}
+                left={<Avatar label={nameOf(s.session_id)} size={40} muted={!isNamedPatient(s.session_id)} />}
+                right={(
+                  <View style={styles.rightPills}>
+                    {current && <StatusPill label="Abierto" tone="primary" />}
+                    <StatusPill label={lv.label} tone={lv.tone} dot />
+                  </View>
+                )}
+                accessibilityLabel={`${nameOf(s.session_id)}. Semáforo ${lv.label}. ${summary(s)}`}
+                onPress={() => setOpen(twoColumns ? s.session_id : isOpen ? null : s.session_id)}
+              />
+              {!twoColumns && isOpen && <Card style={styles.inlineDetail}>{detail(s)}</Card>}
             </View>
-            <Ionicons
-              name={twoColumns ? 'chevron-forward' : open === s.session_id ? 'chevron-up' : 'chevron-down'}
-              size={18}
-              color={Colors.textSecondary}
-            />
-          </TouchableOpacity>
-          {!twoColumns && open === s.session_id && (
-            <SessionDetail
-              session={s}
-              isCurrent={s.session_id === currentSessionId}
-              onOpenSession={() => { switchSession(s.session_id); onOpenConsulta?.(); }}
-              onChanged={load}
-            />
-          )}
-        </View>
-      ))}
+          );
+        })}
+      </View>
     </View>
   );
 
@@ -152,47 +171,42 @@ export const HistoryScreen: React.FC<{ onOpenConsulta?: () => void }> = ({ onOpe
       <Centered>
         <Columns
           left={list}
-          right={
-            twoColumns && selected ? (
-              <View style={[styles.card, styles.detailPanel]}>
-                <View style={styles.cardHeader}>
-                  <View style={[styles.triageDot, { backgroundColor: TRIAGE_COLOR[selected.triaje] || Colors.textMuted }]} />
-                  <Text style={styles.sessionId}>{isNamedPatient(selected.session_id) ? patientLabel(selected.session_id) : selected.session_id}</Text>
-                </View>
-                <SessionDetail
-                  key={selected.session_id}
-                  session={selected}
-                  isCurrent={selected.session_id === currentSessionId}
-                  onOpenSession={() => { switchSession(selected.session_id); onOpenConsulta?.(); }}
-                  onChanged={load}
-                />
-              </View>
-            ) : null
-          }
+          right={twoColumns && selected ? <Card elevated style={styles.detailPanel}>{detail(selected)}</Card> : null}
         />
       </Centered>
     </ScrollView>
   );
 };
 
+const Chip: React.FC<{ label: string; active: boolean; onPress: () => void; dot?: string; icon?: React.ComponentProps<typeof Ionicons>['name'] }> = ({
+  label, active, onPress, dot, icon,
+}) => (
+  <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: active }}
+             style={(s: any) => [styles.chip, s.hovered && !active && { backgroundColor: color.surfaceMuted }, active && styles.chipActive]}>
+    {dot && <View style={[styles.chipDot, { backgroundColor: dot }]} />}
+    {icon && <Ionicons name={icon} size={14} color={active ? color.primary : color.textSecondary} />}
+    <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+  </Pressable>
+);
+
 const SessionDetail: React.FC<{
   session: SessionOverview;
   isCurrent: boolean;
   onOpenSession: () => void;
+  onArchive: () => void;
   onChanged: () => void;
-}> = ({ session, isCurrent, onOpenSession, onChanged }) => {
+}> = ({ session, isCurrent, onOpenSession, onArchive, onChanged }) => {
   const [recordings, setRecordings] = useState<RecordingResult[] | null>(null);
   const [reports, setReports] = useState<ReportItem[] | null>(null);
   const [generating, setGenerating] = useState(false);
+  const lv = LEVEL[session.triaje] || LEVEL.gris;
 
   const load = useCallback(() => {
     apiService.getSessionRecordings(session.session_id).then(setRecordings).catch(() => setRecordings([]));
     apiService.listReports(session.session_id).then(setReports).catch(() => setReports([]));
   }, [session.session_id]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const generate = async () => {
     setGenerating(true);
@@ -207,115 +221,120 @@ const SessionDetail: React.FC<{
   };
 
   return (
-    <View style={styles.detail}>
+    <View>
+      <View style={styles.detailHead}>
+        <Avatar label={nameOf(session.session_id)} size={48} muted={!isNamedPatient(session.session_id)} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.detailName} numberOfLines={1}>{nameOf(session.session_id)}</Text>
+          <Text style={styles.meta}>Última actividad: {when(session.last_seen)}</Text>
+        </View>
+        <StatusPill label={lv.label} tone={lv.tone} dot />
+      </View>
+
+      <View style={styles.stats}>
+        <Stat value={session.readings} label="lecturas" />
+        <Stat value={session.recordings} label="grabaciones" />
+        <Stat value={session.abnormal_recordings} label="anormales" tint={session.abnormal_recordings ? color.danger : undefined} />
+        <Stat value={session.alerts} label="alertas" />
+      </View>
+
+      <View style={styles.actions}>
+        {!isCurrent && !session.archived && <Button label="Abrir consulta" icon="enter-outline" onPress={onOpenSession} style={styles.action} />}
+        <Button label={generating ? 'Redactando…' : 'Nuevo informe'} icon="document-text-outline" variant="ai" onPress={generate}
+                loading={generating} style={styles.action} />
+      </View>
+
       <Text style={styles.detailTitle}>Grabaciones</Text>
-      {recordings === null && <ActivityIndicator color={Colors.primary} />}
+      {recordings === null && <View style={{ gap: space.sm }}><Skeleton height={44} /><Skeleton height={44} /></View>}
       {recordings?.length === 0 && <Text style={styles.meta}>Sin grabaciones.</Text>}
-      {recordings?.some((r) => r.has_audio) && <ListeningFilterBar />}
       {recordings?.map((r) => {
-        const t = RESULT_TEXT[r.result] || RESULT_TEXT.error;
+        const st = RESULT_STYLE[r.result] || RESULT_STYLE.error;
         return (
           <View key={r.recording_id} style={styles.recRow}>
-            <MaterialCommunityIcons
-              name={r.mode === 'pulmon' ? 'lungs' : 'heart-pulse'}
-              size={16}
-              color={r.mode === 'pulmon' ? Colors.oxygen : Colors.heartRate}
-            />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.recText}>
-                {FOCUS[r.location] || 'Sin foco'} · <Text style={{ color: t.color, fontWeight: '700' }}>{t.label}</Text>
-                {r.probability !== null && r.probability !== undefined ? ` (${Math.round(r.probability * 100)} %)` : ''}
-              </Text>
+            <View style={[styles.recIcon, { backgroundColor: r.mode === 'pulmon' ? Colors.oxygenSoft : Colors.heartRateSoft }]}>
+              <MaterialCommunityIcons name={r.mode === 'pulmon' ? 'lungs' : 'heart-pulse'} size={16}
+                                      color={r.mode === 'pulmon' ? Colors.oxygen : Colors.heartRate} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.recText} numberOfLines={1}>{focusName(r.location)}</Text>
               <Text style={styles.meta}>
                 {when(r.created_at)}
+                {r.probability !== null && r.probability !== undefined ? ` · salida ${Math.round(r.probability * 100)} %` : ''}
                 {r.recording_id.startsWith('demo_') ? ' · caso de demostración' : ''}
               </Text>
             </View>
+            <StatusPill label={st.label} tone={st.tone} />
             {r.has_audio && <PlayButton url={apiService.recordingAudioUrl(r.recording_id)} mode={r.mode} />}
           </View>
         );
       })}
+      {recordings?.some((r) => r.has_audio) && <View style={{ marginTop: space.sm }}><ListeningFilterBar /></View>}
 
-      <Text style={[styles.detailTitle, { marginTop: 10 }]}>Informes PDF</Text>
-      {reports === null && <ActivityIndicator color={Colors.primary} />}
+      <Text style={[styles.detailTitle, { marginTop: space.lg }]}>Informes PDF</Text>
+      {reports === null && <Skeleton height={36} />}
       {reports?.length === 0 && <Text style={styles.meta}>Sin informes todavía.</Text>}
       {reports?.map((rep) => (
-        <TouchableOpacity
-          key={rep.report_id}
-          style={styles.reportRow}
-          disabled={!rep.has_pdf}
-          onPress={() => Linking.openURL(apiService.absoluteUrl(rep.pdf_url))}
-        >
-          <MaterialCommunityIcons name="file-pdf-box" size={20} color={rep.has_pdf ? Colors.danger : Colors.textMuted} />
+        <Pressable key={rep.report_id} disabled={!rep.has_pdf} accessibilityRole="link"
+                   onPress={() => Linking.openURL(apiService.absoluteUrl(rep.pdf_url))}
+                   style={(s: any) => [styles.reportRow, s.hovered && rep.has_pdf && { backgroundColor: color.surfaceMuted }]}>
+          <MaterialCommunityIcons name="file-pdf-box" size={22} color={rep.has_pdf ? color.danger : color.textMuted} />
           <Text style={styles.recText}>Informe #{rep.report_id} · {when(rep.created_at)}</Text>
-          {rep.has_pdf && <Ionicons name="open-outline" size={16} color={Colors.primary} />}
-        </TouchableOpacity>
+          {rep.has_pdf && <Ionicons name="open-outline" size={16} color={color.primary} />}
+        </Pressable>
       ))}
 
-      <View style={styles.actions}>
-        {!isCurrent && (
-          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: Colors.primary }]} onPress={onOpenSession}>
-            <Ionicons name="enter-outline" size={16} color="#FFFFFF" />
-            <Text style={styles.actionText}>Abrir consulta</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity
-          style={[styles.actionBtn, { backgroundColor: Colors.aiPurple }]}
-          onPress={generate}
-          disabled={generating}
-        >
-          {generating ? <ActivityIndicator color="#FFFFFF" size="small" /> : <MaterialCommunityIcons name="file-document-outline" size={16} color="#FFFFFF" />}
-          <Text style={styles.actionText}>{generating ? 'Redactando…' : 'Nuevo informe'}</Text>
-        </TouchableOpacity>
-      </View>
+      {!isCurrent && (
+        <View style={styles.archiveRow}>
+          <Button label={session.archived ? 'Restaurar a la lista' : 'Archivar'} variant="ghost"
+                  icon={session.archived ? 'arrow-undo-outline' : 'archive-outline'} onPress={onArchive} size="sm" />
+          {!session.archived && <Text style={styles.archiveHint}>Lo oculta de las listas; no borra nada.</Text>}
+        </View>
+      )}
     </View>
   );
 };
 
+const Stat: React.FC<{ value: number; label: string; tint?: string }> = ({ value, label, tint }) => (
+  <View style={styles.stat}>
+    <Text style={[styles.statValue, tabular, tint ? { color: tint } : null]}>{value}</Text>
+    <Text style={styles.statLabel}>{label}</Text>
+  </View>
+);
+
 const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: color.bg },
+  content: { padding: space.lg, paddingBottom: space.xxl },
   searchBox: {
-    flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 44, paddingHorizontal: space.md,
-    backgroundColor: T.surface, borderWidth: 1, borderColor: T.borderStrong, borderRadius: radius.md, marginTop: space.md,
+    flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 46, paddingHorizontal: space.md,
+    backgroundColor: color.surface, borderWidth: 1, borderColor: color.borderStrong, borderRadius: radius.md,
   },
-  searchInput: { flex: 1, fontSize: 14, color: T.text, minHeight: 40 },
+  searchInput: { flex: 1, fontSize: font.sm, color: color.text, minHeight: 42 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginVertical: space.md },
-  filterChip: {
+  chip: {
     flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: space.md, borderRadius: radius.pill,
-    borderWidth: 1, borderColor: T.border, backgroundColor: T.surface, cursor: 'pointer' as any,
+    borderWidth: 1, borderColor: color.border, backgroundColor: color.surface, cursor: 'pointer' as any,
   },
-  filterChipActive: { backgroundColor: T.primarySoft, borderColor: T.primary },
-  filterDot: { width: 10, height: 10, borderRadius: 5 },
-  filterText: { fontSize: 13, fontWeight: '700', color: T.textSecondary },
-  filterTextActive: { color: T.primary },
-  container: { flex: 1, backgroundColor: Colors.background },
-  content: { padding: 16, paddingBottom: 32 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  title: { fontSize: 17, fontWeight: '800', color: Colors.textPrimary },
-  iconBtn: { padding: 6 },
-  note: { fontSize: 12, color: Colors.textSecondary, marginVertical: 8 },
-  error: { fontSize: 13, color: Colors.danger, marginTop: 12 },
-  card: { backgroundColor: Colors.card, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, marginBottom: 10 },
-  cardCurrent: { borderColor: Colors.primary, borderWidth: 1.5 },
-  cardSelected: { backgroundColor: Colors.primarySoft, borderRadius: 14 },
-  detailPanel: { marginTop: 44 },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12 },
-  triageDot: { width: 14, height: 14, borderRadius: 7 },
-  sessionId: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
-  meta: { fontSize: 12, color: Colors.textSecondary, lineHeight: 16 },
-  detail: { borderTopWidth: 1, borderTopColor: Colors.border, padding: 12 },
-  detailTitle: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary, marginBottom: 6 },
-  recRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 5 },
-  recText: { flex: 1, fontSize: 13, color: Colors.textPrimary },
-  reportRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
-  actions: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  actionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderRadius: 10,
-    paddingVertical: 10,
-  },
-  actionText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
+  chipActive: { backgroundColor: color.primarySoft, borderColor: color.primary },
+  chipDot: { width: 10, height: 10, borderRadius: 5 },
+  chipText: { fontSize: font.xs, fontWeight: weight.bold, color: color.textSecondary },
+  chipTextActive: { color: color.primary },
+  rightPills: { flexDirection: 'row', gap: space.xs, alignItems: 'center' },
+  inlineDetail: { marginTop: space.sm, marginBottom: 0 },
+  detailPanel: { marginTop: 0 },
+  detailHead: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  detailName: { fontSize: font.lg, fontWeight: weight.heavy, color: color.text, letterSpacing: -0.3 },
+  meta: { fontSize: font.xs, color: color.textSecondary, lineHeight: 17 },
+  stats: { flexDirection: 'row', marginTop: space.lg, paddingVertical: space.md, borderTopWidth: 1, borderBottomWidth: 1, borderColor: color.border },
+  stat: { flex: 1, alignItems: 'center' },
+  statValue: { fontSize: font.lg, fontWeight: weight.heavy, color: color.text },
+  statLabel: { fontSize: font.xs, color: color.textMuted },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.lg, marginBottom: space.lg },
+  action: { flexGrow: 1, flexBasis: 160 },
+  detailTitle: { fontSize: font.xs, fontWeight: weight.heavy, color: color.textMuted, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: space.sm },
+  recRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm, borderBottomWidth: 1, borderBottomColor: color.surfaceMuted },
+  recIcon: { width: 32, height: 32, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  recText: { flex: 1, fontSize: font.sm, color: color.text, fontWeight: weight.medium },
+  reportRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 44, borderRadius: radius.sm, paddingHorizontal: 4, cursor: 'pointer' as any },
+  archiveRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.lg, paddingTop: space.md, borderTopWidth: 1, borderTopColor: color.border, flexWrap: 'wrap' },
+  archiveHint: { fontSize: font.xs, color: color.textMuted },
 });

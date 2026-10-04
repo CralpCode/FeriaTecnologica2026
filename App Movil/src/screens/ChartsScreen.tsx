@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { MaterialCommunityIcons, Ionicons, FontAwesome5 } from '@expo/vector-icons';
+import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { Text } from '../components/ui/Text';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useVitals } from '../context/VitalsContext';
 import { TrendChart } from '../components/TrendChart';
 import { TimeRange } from '../types/vitals';
 import { ExportService } from '../services/exportService';
+import { Centered } from '../components/ResponsiveContainer';
+import { Banner, Button, Card, SectionHeader, SegmentedControl } from '../components/ui';
+import { color, font, radius, space, weight } from '../theme/tokens';
 
 type MetricFilter = 'heartRate' | 'bloodOxygen' | 'hrv' | 'stressLevel';
 
@@ -16,9 +20,9 @@ export const ChartsScreen: React.FC = () => {
   const [exportFeedback, setExportFeedback] = useState<{ text: string; isError: boolean } | null>(null);
 
   const ranges: { id: TimeRange; label: string }[] = [
-    { id: '24h', label: '24 Horas' },
-    { id: '7d', label: '7 Días' },
-    { id: '30d', label: '30 Días' },
+    { id: '24h', label: '24 horas' },
+    { id: '7d', label: '7 días' },
+    { id: '30d', label: '30 días' },
   ];
 
   const metrics: {
@@ -55,7 +59,7 @@ export const ChartsScreen: React.FC = () => {
     },
     {
       id: 'stressLevel',
-      label: 'Índice de Estrés (experimental)',
+      label: 'Índice de estrés (experimental)',
       unit: '/100',
       color: Colors.stress,
       icon: 'brain',
@@ -131,352 +135,78 @@ export const ChartsScreen: React.FC = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      {/* 1. Selector de Rango Temporal Clínico (24 Horas / 7 Días / 30 Días) */}
-      <View style={styles.rangeSelectorCard}>
-        <View style={styles.rangeTabs}>
-          {ranges.map((r) => {
-            const isActive = selectedRange === r.id;
+      <Centered>
+        <SectionHeader title="Gráficas" subtitle="Tendencias del paciente abierto. Solo se grafican lecturas válidas del dispositivo." />
+
+        <View style={{ marginBottom: space.md }}>
+          <SegmentedControl options={ranges.map((r) => ({ label: r.label, value: r.id }))} value={selectedRange}
+                            onChange={setSelectedRange} accessibilityLabel="Periodo" stretch />
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.metricsSelector}>
+          {metrics.map((m) => {
+            const isSelected = selectedMetric === m.id;
             return (
-              <TouchableOpacity
-                key={r.id}
-                activeOpacity={0.8}
-                style={[styles.rangeTab, isActive && styles.rangeTabActive]}
-                onPress={() => setSelectedRange(r.id)}
-              >
-                <Text style={[styles.rangeTabText, isActive && styles.rangeTabTextActive]}>
-                  {r.label}
-                </Text>
-              </TouchableOpacity>
+              <Pressable key={m.id} onPress={() => setSelectedMetric(m.id)} accessibilityRole="button" accessibilityState={{ selected: isSelected }}
+                         style={(st: any) => [styles.metricChip, st.hovered && !isSelected && { backgroundColor: color.surfaceMuted },
+                           isSelected && { backgroundColor: `${m.color}12`, borderColor: m.color }]}>
+                <MaterialCommunityIcons name={m.icon} size={18} color={isSelected ? m.color : color.textSecondary} />
+                <Text style={[styles.metricChipText, isSelected && { color: m.color, fontWeight: weight.heavy }]}>{m.label}</Text>
+              </Pressable>
             );
           })}
-        </View>
-      </View>
+        </ScrollView>
 
-      {/* 2. Selector de Métrica */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.metricsSelector}>
-        {metrics.map((m) => {
-          const isSelected = selectedMetric === m.id;
-          return (
-            <TouchableOpacity
-              key={m.id}
-              activeOpacity={0.8}
-              style={[
-                styles.metricChip,
-                isSelected && { backgroundColor: m.color, borderColor: m.color },
-              ]}
-              onPress={() => setSelectedMetric(m.id)}
-            >
-              <MaterialCommunityIcons
-                name={m.icon}
-                size={18}
-                color={isSelected ? '#FFFFFF' : Colors.textSecondary}
-              />
-              <Text style={[styles.metricChipText, isSelected && styles.metricChipTextActive]}>
-                {m.label}
+        <TrendChart
+          data={history}
+          metricKey={selectedMetric}
+          title={currentMetricConfig.label}
+          unit={currentMetricConfig.unit}
+          color={currentMetricConfig.color}
+        />
+
+        <Card elevated>
+          <View style={styles.exportHeader}>
+            <View style={styles.exportIcon}><MaterialCommunityIcons name="file-export-outline" size={20} color={color.primary} /></View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.exportTitle}>Exportar telemetría</Text>
+              <Text style={styles.exportSubtitle}>
+                Registros de {selectedRange === '24h' ? '24 horas' : selectedRange === '7d' ? '7 días' : '30 días'} en formatos estándar.
               </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-
-      {/* 3. Gráfica Principal de Tendencia */}
-      <TrendChart
-        data={history}
-        metricKey={selectedMetric}
-        title={currentMetricConfig.label}
-        unit={currentMetricConfig.unit}
-        color={currentMetricConfig.color}
-      />
-
-      {/* 4. Barra de Exportación de Datos (Excel, PDF, PNG) */}
-      <View style={styles.exportSection}>
-        <View style={styles.exportHeader}>
-          <MaterialCommunityIcons name="file-export-outline" size={20} color={Colors.primary} />
-          <Text style={styles.exportTitle}>Exportar Telemetría</Text>
-        </View>
-        <Text style={styles.exportSubtitle}>
-          Descarga o comparte los registros de {selectedRange === '24h' ? '24 horas' : selectedRange === '7d' ? '7 días' : '30 días'} en formatos estándar:
-        </Text>
-
-        <View style={styles.exportButtonsGrid}>
-          {/* Botón Excel */}
-          <TouchableOpacity
-            style={[styles.exportBtn, styles.excelBtn]}
-            onPress={handleExportExcel}
-            activeOpacity={0.8}
-            disabled={exportingType !== null}
-          >
-            {exportingType === 'excel' ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <>
-                <FontAwesome5 name="file-excel" size={16} color="#FFFFFF" />
-                <Text style={styles.exportBtnText}>Excel (.xlsx)</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          {/* Botón PDF */}
-          <TouchableOpacity
-            style={[styles.exportBtn, styles.pdfBtn]}
-            onPress={handleExportPdf}
-            activeOpacity={0.8}
-            disabled={exportingType !== null}
-          >
-            {exportingType === 'pdf' ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <>
-                <FontAwesome5 name="file-pdf" size={16} color="#FFFFFF" />
-                <Text style={styles.exportBtnText}>Informe PDF</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          {/* Botón PNG */}
-          <TouchableOpacity
-            style={[styles.exportBtn, styles.pngBtn]}
-            onPress={handleExportPng}
-            activeOpacity={0.8}
-            disabled={exportingType !== null}
-          >
-            {exportingType === 'png' ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <>
-                <MaterialCommunityIcons name="image-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.exportBtnText}>Gráfica PNG</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        {/* Feedback / Notificación de exportación */}
-        {exportFeedback && (
-          <View
-            style={[
-              styles.feedbackBanner,
-              exportFeedback.isError ? styles.feedbackError : styles.feedbackSuccess,
-            ]}
-          >
-            <Ionicons
-              name={exportFeedback.isError ? 'alert-circle' : 'checkmark-circle'}
-              size={18}
-              color={exportFeedback.isError ? '#DC2626' : '#16A34A'}
-            />
-            <Text
-              style={[
-                styles.feedbackText,
-                { color: exportFeedback.isError ? '#991B1B' : '#166534' },
-              ]}
-            >
-              {exportFeedback.text}
-            </Text>
+            </View>
           </View>
-        )}
-      </View>
+          <View style={styles.exportButtonsGrid}>
+            <Button label="Excel (.xlsx)" icon="grid-outline" variant="secondary" onPress={handleExportExcel}
+                    loading={exportingType === 'excel'} disabled={exportingType !== null} style={styles.exportBtn} />
+            <Button label="Informe PDF" icon="document-text-outline" variant="secondary" onPress={handleExportPdf}
+                    loading={exportingType === 'pdf'} disabled={exportingType !== null} style={styles.exportBtn} />
+            <Button label="Gráfica PNG" icon="image-outline" variant="secondary" onPress={handleExportPng}
+                    loading={exportingType === 'png'} disabled={exportingType !== null} style={styles.exportBtn} />
+          </View>
+          {exportFeedback && (
+            <Banner tone={exportFeedback.isError ? 'danger' : 'success'} text={exportFeedback.text} style={{ marginTop: space.md, marginBottom: 0 }} />
+          )}
+        </Card>
 
-      {/* 5. Tarjeta de Información Fisiológica */}
-      <View style={styles.infoCard}>
-        <View style={styles.infoHeader}>
-          <Ionicons name="information-circle" size={20} color={Colors.primary} />
-          <Text style={styles.infoTitle}>Acerca de este Parámetro</Text>
-        </View>
-        <Text style={styles.infoDesc}>{currentMetricConfig.info}</Text>
-      </View>
+        <Banner tone="info" title="Acerca de este parámetro" text={currentMetricConfig.info} />
+      </Centered>
     </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 36,
-    width: '100%',
-    maxWidth: 1000,
-    alignSelf: 'center',
-  },
-  rangeSelectorCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    padding: 4,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 3,
-    elevation: 1,
-  },
-  rangeTabs: {
-    flexDirection: 'row',
-    backgroundColor: '#F1F5F9',
-    borderRadius: 10,
-    padding: 2,
-    gap: 4,
-  },
-  rangeTab: {
-    flex: 1,
-    paddingVertical: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    backgroundColor: 'transparent',
-  },
-  rangeTabActive: {
-    backgroundColor: Colors.primary,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  rangeTabText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#64748B',
-  },
-  rangeTabTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-  },
-  metricsSelector: {
-    gap: 8,
-    paddingBottom: 14,
-  },
+  container: { flex: 1, backgroundColor: color.bg },
+  content: { padding: space.lg, paddingBottom: space.xxl },
+  metricsSelector: { gap: space.sm, paddingBottom: space.md },
   metricChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    gap: 6,
+    flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 40, paddingHorizontal: space.md, borderRadius: radius.pill,
+    borderWidth: 1, borderColor: color.border, backgroundColor: color.surface, cursor: 'pointer' as any,
   },
-  metricChipText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  metricChipTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  exportSection: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  exportHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
-  },
-  exportTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-  },
-  exportSubtitle: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginBottom: 12,
-    lineHeight: 16,
-  },
-  exportButtonsGrid: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  exportBtn: {
-    flex: 1,
-    minWidth: 100,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    gap: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  excelBtn: {
-    backgroundColor: '#16A34A',
-  },
-  pdfBtn: {
-    backgroundColor: '#DC2626',
-  },
-  pngBtn: {
-    backgroundColor: '#2563EB',
-  },
-  exportBtnText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  feedbackBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    padding: 10,
-    borderRadius: 8,
-    gap: 8,
-    borderWidth: 1,
-  },
-  feedbackSuccess: {
-    backgroundColor: '#F0FDF4',
-    borderColor: '#BBF7D0',
-  },
-  feedbackError: {
-    backgroundColor: '#FEF2F2',
-    borderColor: '#FECACA',
-  },
-  feedbackText: {
-    fontSize: 12,
-    fontWeight: '700',
-    flex: 1,
-  },
-  infoCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  infoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  infoTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  infoDesc: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    lineHeight: 18,
-  },
+  metricChipText: { fontSize: font.sm, color: color.textSecondary, fontWeight: weight.medium },
+  exportHeader: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  exportIcon: { width: 40, height: 40, borderRadius: radius.md, backgroundColor: color.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  exportTitle: { fontSize: font.md, fontWeight: weight.heavy, color: color.text },
+  exportSubtitle: { fontSize: font.xs, color: color.textSecondary, marginTop: 2 },
+  exportButtonsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.lg },
+  exportBtn: { flexGrow: 1, flexBasis: 150 },
 });

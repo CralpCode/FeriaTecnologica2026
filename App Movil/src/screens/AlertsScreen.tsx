@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
+import { Text } from '../components/ui/Text';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useClinical } from '../context/ClinicalContext';
@@ -7,6 +8,8 @@ import { apiService } from '../services/api';
 import { AlertSeverity, ClinicalAlert, SessionReport } from '../types/vitals';
 import { Centered, Columns } from '../components/ResponsiveContainer';
 import { useLayout } from '../hooks/useLayout';
+import { Button, Card, EmptyState, SectionHeader, StatusPill } from '../components/ui';
+import { color, radius, space } from '../theme/tokens';
 
 const SEVERITY: Record<AlertSeverity, { label: string; color: string; soft: string; icon: string }> = {
   critical: { label: 'Crítica', color: Colors.danger, soft: Colors.dangerSoft, icon: 'alert-octagon' },
@@ -81,19 +84,14 @@ export const AlertsScreen: React.FC = () => {
         leftWeight={1.2}
         left={
           <View>
-      <View style={styles.headerRow}>
-        <Text style={styles.sectionTitle}>Alertas de la sesión ({activeAlertsCount} activas)</Text>
-        <View style={[styles.liveDot, { backgroundColor: isLiveConnected ? Colors.success : Colors.textMuted }]} />
-      </View>
-      <Text style={styles.note}>
-        Las alertas las decide un conjunto de reglas fijas y la red neuronal de audio. La IA de lenguaje solo redacta el texto.
-      </Text>
+      <SectionHeader title="Alertas de la sesión"
+                     subtitle="Las deciden reglas fijas y la red neuronal de audio; la IA de lenguaje solo redacta el texto."
+                     right={<StatusPill label={`${activeAlertsCount} activas`} tone={activeAlertsCount ? 'warning' : 'neutral'}
+                                        dot={isLiveConnected} />} />
 
       {alerts.length === 0 && (
-        <View style={styles.empty}>
-          <MaterialCommunityIcons name="bell-check-outline" size={36} color={Colors.textMuted} />
-          <Text style={styles.note}>Sin alertas en esta sesión.</Text>
-        </View>
+        <Card><EmptyState icon="bell-check-outline" tone="success" title="Sin alertas en esta sesión"
+                          text="Si una grabación o una lectura lo amerita, la alerta aparecerá aquí al momento." /></Card>
       )}
 
       {(['critical', 'caution', 'info'] as AlertSeverity[]).map((sev) => {
@@ -122,19 +120,16 @@ export const AlertsScreen: React.FC = () => {
         right={
           <View>
       {/* Informe de sesión */}
-      <Text style={[styles.sectionTitle, !twoColumns && { marginTop: 18 }]}>Informe de la sesión</Text>
-      <View style={styles.reportCard}>
-        <Text style={styles.note}>
-          Resume signos vitales, grabaciones y alertas. Si hubo hallazgos, incluye una nota de referencia para personal de salud.
-        </Text>
-        <TouchableOpacity style={styles.primaryBtn} onPress={handleReport} disabled={generating} activeOpacity={0.8}>
-          {generating ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <MaterialCommunityIcons name="file-document-outline" size={18} color="#FFFFFF" />
-          )}
-          <Text style={styles.primaryBtnText}>{generating ? 'Redactando informe…' : 'Generar informe PDF'}</Text>
-        </TouchableOpacity>
+      <SectionHeader title="Informe de la sesión" style={!twoColumns ? { marginTop: space.lg } : undefined} />
+      <Card elevated>
+        <View style={styles.reportHead}>
+          <View style={styles.reportIcon}><MaterialCommunityIcons name="file-document-outline" size={22} color={color.primary} /></View>
+          <Text style={[styles.note, { flex: 1, marginVertical: 0 }]}>
+            Resume signos vitales, grabaciones y alertas. Si hubo hallazgos, incluye una nota de referencia para personal de salud.
+          </Text>
+        </View>
+        <Button label={generating ? 'Redactando informe…' : 'Generar informe PDF'} icon="document-text-outline" onPress={handleReport}
+                loading={generating} full style={{ marginTop: space.md }} />
         {reportError && <Text style={styles.errorText}>{reportError}</Text>}
 
         {report && (
@@ -144,16 +139,11 @@ export const AlertsScreen: React.FC = () => {
               <Text key={i} style={styles.reportItem}>• {h}</Text>
             ))}
             <Text style={[styles.reportText, { fontWeight: '700', marginTop: 6 }]}>{report.content.recomendacion}</Text>
-            <TouchableOpacity
-              style={[styles.primaryBtn, { backgroundColor: Colors.aiPurple }]}
-              onPress={() => Linking.openURL(apiService.reportPdfUrl(report))}
-            >
-              <Ionicons name="open-outline" size={16} color="#FFFFFF" />
-              <Text style={styles.primaryBtnText}>Abrir PDF</Text>
-            </TouchableOpacity>
+            <Button label="Abrir PDF" icon="open-outline" variant="ai" onPress={() => Linking.openURL(apiService.reportPdfUrl(report))}
+                    full style={{ marginTop: space.md }} />
           </View>
         )}
-      </View>
+      </Card>
           </View>
         }
       />
@@ -163,6 +153,8 @@ export const AlertsScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  reportHead: { flexDirection: 'row', gap: space.md, alignItems: 'center' },
+  reportIcon: { width: 44, height: 44, borderRadius: radius.md, backgroundColor: color.primarySoft, alignItems: 'center', justifyContent: 'center' },
   groupTitle: { fontSize: 13, fontWeight: '800', color: Colors.textSecondary, marginTop: 12, marginBottom: 8, letterSpacing: 0.3 },
   seenHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
   container: { flex: 1, backgroundColor: Colors.background },

@@ -43,10 +43,14 @@
         "react-native-ble-plx",
         {
           "isBackgroundEnabled": false,
-          "modes": ["peripheral", "central"],
+          "modes": [
+            "peripheral",
+            "central"
+          ],
           "bluetoothAlwaysPermission": "Permite a SpiroScan sincronizar con la pulsera biomédica ESP32 por Bluetooth."
         }
-      ]
+      ],
+      "expo-font"
     ]
   }
 }

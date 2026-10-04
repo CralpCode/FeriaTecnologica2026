@@ -99,6 +99,13 @@ export const audioPlayer = {
     return currentUrl;
   },
 
+  /** Avance de la grabación que suena (0 a 1) para dibujar la línea sobre la onda. */
+  progress(url: string): number {
+    if (currentUrl !== url || !current) return 0;
+    const d = Number(current.duration);
+    return Number.isFinite(d) && d > 0 ? Math.min(1, Number(current.currentTime) / d) : 0;
+  },
+
   onChange(listener: (url: string | null) => void): () => void {
     listeners.add(listener);
     return () => listeners.delete(listener);
