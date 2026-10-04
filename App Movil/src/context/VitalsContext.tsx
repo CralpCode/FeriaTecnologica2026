@@ -122,6 +122,8 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       },
     ]);
     refreshSessionsList();
+    // El ESP32 (por WiFi) pasa a registrar en el paciente nuevo; si no, seguiría en el anterior.
+    apiService.linkDevice().catch(() => {});
     return newId;
   }, [refreshSessionsList]);
 
@@ -142,6 +144,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     ]);
     apiService.getCurrentVitals().then(setVitals).catch(() => {});
     apiService.getVitalsHistory(selectedRange).then(setHistory).catch(() => {});
+    apiService.linkDevice().catch(() => {});  // el ESP32 registra en el paciente abierto
     refreshSessionsList();
   }, [selectedRange, refreshSessionsList]);
 

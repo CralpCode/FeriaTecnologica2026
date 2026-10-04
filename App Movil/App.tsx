@@ -16,9 +16,11 @@ import { AIAssistantScreen } from './src/screens/AIAssistantScreen';
 import { AuscultationScreen } from './src/screens/AuscultationScreen';
 import { AlertsScreen } from './src/screens/AlertsScreen';
 import { HistoryScreen } from './src/screens/HistoryScreen';
+import { AuscultationMode } from './src/types/vitals';
 
 const MainAppContent: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<TabScreen>('dashboard');
+  const [auscultationMode, setAuscultationMode] = useState<AuscultationMode>('corazon');
   const { hasCriticalAlert, activeAlertsCount } = useClinical();
   const insets = useSafeAreaInsets();
   const { useSideNav, isDesktop } = useLayout();
@@ -36,7 +38,7 @@ const MainAppContent: React.FC = () => {
       <StatusBar style="dark" />
 
       {/* Cabecera común */}
-      <Header />
+      <Header onNewPatient={() => setCurrentTab('dashboard')} />
 
       <ConnectionBanner />
 
@@ -50,9 +52,13 @@ const MainAppContent: React.FC = () => {
           <DashboardScreen
             onNavigateToAI={() => setCurrentTab('ai')}
             onNavigateToCharts={() => setCurrentTab('charts')}
+            onOpenAuscultation={(mode) => {
+              setAuscultationMode(mode);
+              setCurrentTab('auscultation');
+            }}
           />
         )}
-        {currentTab === 'auscultation' && <AuscultationScreen />}
+        {currentTab === 'auscultation' && <AuscultationScreen initialMode={auscultationMode} />}
         {currentTab === 'alerts' && <AlertsScreen />}
         {currentTab === 'history' && <HistoryScreen />}
         {currentTab === 'charts' && <ChartsScreen />}

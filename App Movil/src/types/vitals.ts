@@ -155,6 +155,9 @@ export interface TriageResult {
   motivos: string[];
   aviso: string;
   demo?: boolean;               // incluye un caso de demostración ICBHI (no es de esta persona)
+  datos_usados?: {
+    vitales_ultimo_minuto: { spo2: number | null; fc: number | null; lecturas: number } | null;
+  };
 }
 
 export interface RecordingResult {

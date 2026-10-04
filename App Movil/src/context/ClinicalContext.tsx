@@ -119,6 +119,13 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
     };
   }, [currentSessionId, backendUrl, refresh, upsertAlert]);
 
+  // Una preparación vence a los 120 s en el servidor (ARM_TTL_S); la app vuelve a "lista" igual.
+  useEffect(() => {
+    if (phase !== 'armed') return;
+    const timer = setTimeout(() => setPhase((p) => (p === 'armed' ? 'idle' : p)), 120_000);
+    return () => clearTimeout(timer);
+  }, [phase]);
+
   // Respaldo: si el WebSocket no está disponible (p. ej. algunos túneles), se consulta periódicamente.
   useEffect(() => {
     if (isLiveConnected) return;

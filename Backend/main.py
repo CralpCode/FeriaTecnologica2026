@@ -490,7 +490,8 @@ async def ack_alert(alert_id: int):
 # ---------------------------------------------------------------------------
 
 # El ESP32 no sabe qué foco eligió la app: la app "arma" la próxima grabación (y vincula su sesión).
-ARM_TTL_S = 600
+# Una preparación sirve para UNA grabación y vence pronto, para que nada caiga en otro foco o paciente.
+ARM_TTL_S = 120
 _armed: dict = {}
 
 
@@ -502,6 +503,8 @@ class DeviceLinkInput(BaseModel):
 async def link_device(payload: DeviceLinkInput):
     """La app indica que el ESP32 (por WiFi) debe registrar sus datos en esta sesión."""
     sid = _get_effective_session(payload.session_id)
+    if _armed and _armed.get("session_id") != sid:
+        _armed.clear()  # la preparación era de otro paciente
     _device_link.update({"session_id": sid, "at": time.time()})
     await manager.broadcast({"type": "DEVICE_LINKED", "session_id": sid})
     return {"status": "linked", "session_id": sid}
@@ -523,9 +526,10 @@ async def audio_arm(payload: AudioArmInput):
 
 
 def _consume_armed() -> dict | None:
-    if _armed and time.time() - _armed["at"] <= ARM_TTL_S:
-        return dict(_armed)
-    return None
+    """Devuelve la preparación vigente y la borra: una preparación = una grabación."""
+    armed = dict(_armed) if _armed and time.time() - _armed["at"] <= ARM_TTL_S else None
+    _armed.clear()
+    return armed
 
 
 async def _after_classification(result: dict):
@@ -627,7 +631,9 @@ def get_triage(session_id: str):
 
 async def _publish_triage_if_changed(sid: str):
     t = triage.evaluate(sid)
-    key = t["nivel"] + "|" + "|".join(t["motivos"])
+    v = t["datos_usados"]["vitales_ultimo_minuto"] or {}
+    # También avisa cuando el pulso o la SpO2 empiezan o dejan de usarse (para el paso "Pulso" de la consulta)
+    key = t["nivel"] + "|" + "|".join(t["motivos"]) + f"|fc={v.get('fc') is not None}|spo2={v.get('spo2') is not None}"
     if _last_triage.get(sid) != key:
         _last_triage[sid] = key
         await manager.broadcast({"type": "TRIAGE_UPDATE", "session_id": sid, "data": t})

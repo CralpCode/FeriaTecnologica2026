@@ -146,6 +146,21 @@ class Esp32InputTests(unittest.TestCase):
         rec = database.get_recording(self.start({'device_id': 'emu', 'sample_rate': 16000, 'source': 'simulated'}))
         self.assertEqual(rec['source'], 'simulated')
 
+    def test_arm_is_used_once_and_dropped_when_patient_changes(self):
+        self.client.post('/api/audio/arm', json={'session_id': 'p017', 'location': 'MV'})
+        rec = database.get_recording(self.start())
+        self.assertEqual((rec['session_id'], rec['location']), ('p017', 'MV'))
+        # Segunda presión sin preparar: sigue en el paciente enlazado, pero sin heredar el foco
+        rec = database.get_recording(self.start())
+        self.assertEqual((rec['session_id'], rec['location']), ('p017', ''))
+        # Otro paciente: la preparación pendiente del anterior se descarta
+        self.client.post('/api/audio/arm', json={'session_id': 'p017', 'location': 'AV'})
+        self.client.post('/api/device/link', json={'session_id': 'p018'})
+        rec = database.get_recording(self.start())
+        self.assertEqual((rec['session_id'], rec['location']), ('p018', ''))
+        # El pulso del firmware original también va al paciente recién enlazado
+        self.assertEqual(self.send()['session_id'], 'p018')
+
     def test_audio_errors_are_client_errors(self):
         for body in ({'sample_rate': 0}, {'sample_rate': 'abc'}, {'sample_rate': 10 ** 9}, {'location': 'XX'},
                      {'location': 123}, {'source': 'marte'}):

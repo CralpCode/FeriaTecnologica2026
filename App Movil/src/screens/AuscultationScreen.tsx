@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
@@ -10,6 +10,7 @@ import { PlayButton } from '../components/PlayButton';
 import { AIExplainerModal } from '../components/AIExplainerModal';
 import { Centered, Columns } from '../components/ResponsiveContainer';
 import { AuscultationFocus, AuscultationMode, FocusGuide, HeartModelInfo, RecordingResult } from '../types/vitals';
+import { focusStates, nextFocus, doneCount, FocusState } from '../services/consulta';
 
 const FOCI: Record<AuscultationMode, { id: AuscultationFocus; label: string }[]> = {
   corazon: [
@@ -42,11 +43,39 @@ const RESULT_STYLE: Record<RecordingResult['result'], { label: string; color: st
 
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? '—' : `${Math.round(v * 100)} %`);
 
-export const AuscultationScreen: React.FC = () => {
+const FOCUS_STATE_STYLE: Record<Exclude<FocusState, 'pendiente'>, { color: string; icon: any; text: string }> = {
+  normal: { color: Colors.success, icon: 'checkmark', text: 'grabado, normal' },
+  anormal: { color: Colors.danger, icon: 'checkmark', text: 'grabado, anormal' },
+  repetir: { color: Colors.warning, icon: 'refresh', text: 'repetir: calidad insuficiente' },
+};
+
+const defaultFocus = (m: AuscultationMode): AuscultationFocus => (m === 'corazon' ? 'MV' : 'PL');
+
+export const AuscultationScreen: React.FC<{ initialMode?: AuscultationMode }> = ({ initialMode = 'corazon' }) => {
   const { phase, armedLocation, lastResult, recordings, armRecording, recordingStartedAt } = useClinical();
   const [showGuide, setShowGuide] = useState(false);
-  const [mode, setMode] = useState<AuscultationMode>('corazon');
-  const [focus, setFocus] = useState<AuscultationFocus>('MV');
+  const [mode, setMode] = useState<AuscultationMode>(initialMode);
+  // Al entrar se selecciona el primer foco pendiente del modo
+  const [focus, setFocus] = useState<AuscultationFocus>(
+    () => nextFocus(initialMode, focusStates([lastResult, ...recordings], initialMode)) || defaultFocus(initialMode));
+  const states = useMemo(() => focusStates([lastResult, ...recordings], mode), [lastResult, recordings, mode]);
+
+  // Al llegar un resultado se selecciona el siguiente foco pendiente (o el mismo si hay que repetir).
+  // No se prepara solo: el médico confirma con "Preparar".
+  const lastSeen = useRef(lastResult?.recording_id);
+  useEffect(() => {
+    if (!lastResult || lastResult.recording_id === lastSeen.current) return;
+    lastSeen.current = lastResult.recording_id;
+    if (lastResult.recording_id.startsWith('demo_') || !lastResult.location) return;
+    const m: AuscultationMode = lastResult.mode === 'pulmon' ? 'pulmon' : 'corazon';
+    if (m !== mode) return;
+    if (lastResult.result !== 'normal' && lastResult.result !== 'anormal') {
+      setFocus(lastResult.location as AuscultationFocus);
+      return;
+    }
+    const next = nextFocus(m, focusStates([lastResult, ...recordings], m));
+    if (next) setFocus(next);
+  }, [lastResult, recordings, mode]);
   const [guide, setGuide] = useState<FocusGuide | null>(null);
   const [model, setModel] = useState<HeartModelInfo | null>(null);
   const [lungReady, setLungReady] = useState<boolean | null>(null);
@@ -114,7 +143,7 @@ export const AuscultationScreen: React.FC = () => {
             style={[styles.modeBtn, mode === m && styles.modeBtnActive]}
             onPress={() => {
               setMode(m);
-              setFocus(m === 'corazon' ? 'MV' : 'PL');
+              setFocus(nextFocus(m, focusStates([lastResult, ...recordings], m)) || defaultFocus(m));
             }}
           >
             <MaterialCommunityIcons
@@ -146,19 +175,33 @@ export const AuscultationScreen: React.FC = () => {
       <View style={[styles.focusRow, mode === 'pulmon' && { flexWrap: 'wrap' }]}>
         {FOCI[mode].map((f) => {
           const active = focus === f.id;
+          const st = states[f.id];
+          const badge = st && st !== 'pendiente' ? FOCUS_STATE_STYLE[st] : null;
           return (
             <TouchableOpacity
               key={f.id}
               style={[styles.focusBtn, mode === 'pulmon' && styles.focusBtnLung, active && styles.focusBtnActive]}
               onPress={() => setFocus(f.id)}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`${f.id} ${f.label}: ${badge ? badge.text : 'pendiente'}`}
             >
+              {badge && (
+                <View style={[styles.focusState, { backgroundColor: badge.color }]}>
+                  <Ionicons name={badge.icon} size={11} color="#FFFFFF" />
+                </View>
+              )}
               <Text style={[styles.focusId, active && { color: '#FFFFFF' }]}>{f.id}</Text>
               <Text style={[styles.focusLabel, active && { color: '#DBEAFE' }]}>{f.label}</Text>
             </TouchableOpacity>
           );
         })}
       </View>
+      <Text style={styles.focusHint}>
+        {mode === 'corazon' ? `Grabados ${doneCount('corazon', states)}/4. ` : `Zonas grabadas: ${doneCount('pulmon', states)}. `}
+        Al terminar cada grabación se selecciona el siguiente foco; confirma que coincida con donde está el estetoscopio.
+      </Text>
 
       <Columns
         left={
@@ -443,6 +486,11 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   focusBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  focusState: {
+    position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: 9,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#FFFFFF',
+  },
+  focusHint: { fontSize: 12, color: Colors.textSecondary, marginTop: -4, marginBottom: 12, lineHeight: 17 },
   focusBtnLung: { flex: 0, minWidth: '22%', flexGrow: 1 },
   modeRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   modeBtn: {

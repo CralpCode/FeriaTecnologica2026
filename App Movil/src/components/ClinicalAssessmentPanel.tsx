@@ -22,7 +22,8 @@ const emptyContext = (): PatientContext => ({
   history: { asthma: null, copd: null, smoking: null },
 });
 
-export const ClinicalAssessmentPanel: React.FC = () => {
+/** onSaved: se llama cuando el contexto quedó guardado (p. ej. para marcar el paso en la consulta). */
+export const ClinicalAssessmentPanel: React.FC<{ onSaved?: () => void }> = ({ onSaved }) => {
   const { currentSessionId, backendUrl } = useVitals();
   const [context, setContext] = useState<PatientContext>(emptyContext);
   const [age, setAge] = useState('');
@@ -70,6 +71,7 @@ export const ClinicalAssessmentPanel: React.FC = () => {
     setSaving(true); setError(null); setAssessment(null);
     try {
       await apiService.savePatientContext(session, { ...context, age_years: ageValue, altitude_m: altitudeValue });
+      onSaved?.();
       const result = await apiService.getClinicalAssessment(session);
       if (generation === requestGeneration.current) setAssessment(result);
     } catch (err: any) {

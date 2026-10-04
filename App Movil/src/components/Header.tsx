@@ -5,6 +5,7 @@ import { Colors } from '../theme/colors';
 import { useVitals } from '../context/VitalsContext';
 import { DeviceConnectionModal } from './DeviceConnectionModal';
 import { ClinicalAudioModal } from './ClinicalAudioModal';
+import { NewPatientModal } from './NewPatientModal';
 import { useLayout } from '../hooks/useLayout';
 
 interface HeaderProps {
@@ -12,6 +13,8 @@ interface HeaderProps {
   subtitle?: string;
   onOpenSettings?: () => void;
   onOpenInfo?: () => void;
+  /** Se llama después de crear un paciente nuevo (p. ej. para volver a Monitoreo). */
+  onNewPatient?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -19,10 +22,12 @@ export const Header: React.FC<HeaderProps> = ({
   subtitle = 'Monitoreo Biomédico Continuo',
   onOpenSettings,
   onOpenInfo,
+  onNewPatient,
 }) => {
   const { isDeviceDirectConnected, device, isBackendOnline, currentSessionId } = useVitals();
   const [deviceModalVisible, setDeviceModalVisible] = useState(false);
   const [clinicalDemoVisible, setClinicalDemoVisible] = useState(false);
+  const [newPatientVisible, setNewPatientVisible] = useState(false);
   const { isPhone } = useLayout();
 
   return (
@@ -42,7 +47,20 @@ export const Header: React.FC<HeaderProps> = ({
         </View>
 
         <View style={styles.rightContainer}>
-          {/* Indicador de Nube / Modo Local */}
+          {/* Nuevo paciente: siempre visible */}
+          <TouchableOpacity
+            style={styles.newPatientButton}
+            onPress={() => setNewPatientVisible(true)}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Nuevo paciente"
+          >
+            <MaterialCommunityIcons name="account-plus" size={18} color="#FFFFFF" />
+            {!isPhone && <Text style={styles.newPatientText}>NUEVO PACIENTE</Text>}
+          </TouchableOpacity>
+
+          {/* Indicador de Nube / Modo Local (en celular basta la franja de aviso si se cae el servidor) */}
+          {!isPhone && (
           <TouchableOpacity
             style={[
               styles.cloudStatusBadge,
@@ -63,6 +81,7 @@ export const Header: React.FC<HeaderProps> = ({
               </Text>
             )}
           </TouchableOpacity>
+          )}
 
           {/* Botón de Estado de Dispositivo (Bluetooth Directo) */}
           <TouchableOpacity
@@ -107,6 +126,12 @@ export const Header: React.FC<HeaderProps> = ({
         visible={deviceModalVisible}
         onClose={() => setDeviceModalVisible(false)}
         onOpenClinicalDemo={() => setClinicalDemoVisible(true)}
+      />
+
+      <NewPatientModal
+        visible={newPatientVisible}
+        onClose={() => setNewPatientVisible(false)}
+        onCreated={onNewPatient}
       />
 
       {/* Modal Discreto de Banco de Pruebas y Validación Clínica */}
@@ -219,6 +244,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  newPatientButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 36,
+    minWidth: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    backgroundColor: Colors.primary,
+    gap: 4,
+  },
+  newPatientText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   labDemoButton: {
     width: 36,
