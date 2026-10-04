@@ -1,4 +1,7 @@
 """
+OBSOLETO: el código original del autor ya está en IA/modelo_base/ y está verificado
+(modelo_base/verificar_modelo_base.py). Este script queda solo como registro del intento de reconstrucción.
+
 Reconstruye y VALIDA el cálculo de las 61 características del modelo base de pulmón.
 
 El modelo base (regresión logística, ICBHI) se entrenó con 61 medidas por ciclo respiratorio, pero no

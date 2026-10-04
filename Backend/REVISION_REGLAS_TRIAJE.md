@@ -62,7 +62,7 @@ con el título "DEMO · …". El texto lo redacta Qwen en lenguaje claro solo si
 | Red neuronal del corazón | ≈ 82 % de puntuación | Elegido para detectar al menos 85 % de los anormales en validación (tamizaje) |
 | Red neuronal de pulmón: sibilancias | ≈ 77 % (grabación completa) | Calibrado con grabaciones completas de ICBHI; se muestra |
 | Red neuronal de pulmón: crepitantes y patrón por enfermedad | — | No se muestran por baja confiabilidad |
-| Modelo base de pulmón (regresión logística) | 30 % | Calibrado por su autor para no dejar pasar casos |
+| Modelo base de pulmón (regresión logística) | 30 % | Calibrado por su autor para no dejar pasar casos. Solo en casos demo: con 24 pacientes no vistos, sensibilidad 90 % y especificidad 31 % (IA/modelo_base) |
 
 ## 5. Preguntas para el revisor
 1. ¿Los umbrales de SpO2 (90 % y 94 %) son adecuados, considerando la altitud de Guatemala?

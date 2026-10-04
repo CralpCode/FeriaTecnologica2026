@@ -36,7 +36,7 @@ Solo se muestra lo confiable:
   (acierto balanceado ≈ 47 %). Reconoce bien EPOC y sanos, pero falla en las demás.
 Es una sugerencia para referir, nunca un diagnóstico.
 
-Hay además un modelo pulmonar base de regresión logística (del equipo). Su puntaje ICBHI reportado por el autor no se volvió a verificar con el dataset completo. Los casos demo ICBHI usan este modelo base.
+Hay además un modelo pulmonar base de regresión logística (del equipo, 61 características acústicas). Se verificó con el código original del autor (IA/modelo_base): con 24 pacientes no vistos tiene AUC 0.71; con su umbral marca bien el 90 % de los ciclos anormales, pero también marca como anormales a 7 de cada 10 ciclos normales (especificidad 31 %). Por eso solo se usa en los casos demo ICBHI y no con grabaciones del dispositivo.
 
 ## Valoración orientativa
 

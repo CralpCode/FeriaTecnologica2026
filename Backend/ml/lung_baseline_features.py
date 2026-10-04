@@ -1,10 +1,9 @@
 """
 Cálculo de las 61 características que usa el modelo base de pulmón (lung_baseline.py).
 
-Solo se activa si existe Backend/models/lung_baseline_extractor.json, que genera
-IA/validar_extractor.py cuando su reconstrucción coincide con las medidas guardadas por el autor
-en los casos de ICBHI. Sin ese archivo, READY = False y no se inventan parámetros.
-Si el autor comparte su código original, puede reemplazar extract() directamente.
+El código original del autor está en IA/modelo_base/src (verificado contra su tabla de características).
+No se activa con grabaciones del dispositivo porque el modelo base no es confiable para eso
+(IA/modelo_base/README.md). READY solo sería True con Backend/models/lung_baseline_extractor.json.
 
 IMPORTANTE: _features() debe ser idéntica a extract() de IA/validar_extractor.py.
 """

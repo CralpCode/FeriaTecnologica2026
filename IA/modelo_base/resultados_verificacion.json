@@ -1,0 +1,43 @@
+{
+  "caracteristicas": 61,
+  "extractor": {
+    "ciclos": 60,
+    "error_relativo_mediano": 0.0,
+    "error_relativo_p95": 1.1663953360263459e-06,
+    "error_relativo_maximo": 0.003325600104625133
+  },
+  "modelo": {
+    "modelo": "Logistic Regression (L2)",
+    "pacientes_compartidos": 0,
+    "Entrenamiento": {
+      "ciclos": 5195,
+      "pacientes": 102,
+      "auc": 0.7273271192190112,
+      "umbral_0.30": {
+        "sensibilidad": 0.9218559218559218,
+        "especificidad": 0.2724616508400292,
+        "exactitud_balanceada": 0.5971587863479755
+      },
+      "umbral_0.50": {
+        "sensibilidad": 0.7085877085877086,
+        "especificidad": 0.6373265157048941,
+        "exactitud_balanceada": 0.6729571121463014
+      }
+    },
+    "Validacion": {
+      "ciclos": 1703,
+      "pacientes": 24,
+      "auc": 0.7140258287461096,
+      "umbral_0.30": {
+        "sensibilidad": 0.8986232790988736,
+        "especificidad": 0.31194690265486724,
+        "exactitud_balanceada": 0.6052850908768704
+      },
+      "umbral_0.50": {
+        "sensibilidad": 0.6808510638297872,
+        "especificidad": 0.6438053097345132,
+        "exactitud_balanceada": 0.6623281867821502
+      }
+    }
+  }
+}

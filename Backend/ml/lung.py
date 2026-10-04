@@ -78,9 +78,8 @@ def classify_wav(path: str | Path) -> dict:
                     "probability": baseline["probability_abnormal"], "model": "pulmon_modelo_base",
                     "details": {"modelo_base": baseline}}
         reason = ("Los modelos de pulmón aún no están entrenados (faltan los audios de ICBHI)."
-                  if baseline.get("estado") != "pendiente_extractor" else
-                  "Modelo base listo, pero falta el código de sus 61 características; "
-                  "las CNN de pulmón aún no están entrenadas.")
+                  if baseline.get("estado") != "solo_demo" else
+                  "Las CNN de pulmón no están disponibles y el modelo base se usa solo en los casos demo.")
         return {**base, "result": "modelo_no_disponible", "details": {}, "reason": reason}
 
     import torch

@@ -115,8 +115,8 @@ ICBHI_organizado - pacientes de los links filtrados/
 #### Contenido interno de cada carpeta de paciente:
 Dentro de cada carpeta de paciente (ej. `paciente_111/`):
 * **`datos_paciente_<id>.csv`**: Ficha individual con ID, edad, sexo, diagnóstico, IMC, antropometría infantil y partición sugerida (Entrenamiento / Validación).
-* **`audios/`**: Subdirectorio destino para las grabaciones acústicas `.wav`.
-  * *Estado actual:* Contiene el archivo de control `LEEME.txt` indicando que los audios están pendientes de ser vinculados desde el archivo descargado de Kaggle.
+* **`audios/`**: Subdirectorio destino para las grabaciones acústicas `.wav` y anotaciones `.txt`.
+  * *Estado actual:* **Totalmente poblado y verificado.** Contiene las grabaciones de auscultación en formato `.wav` y sus correspondientes archivos de anotación de ciclos respiratorios en formato `.txt` (920 pares en total distribuidos entre los 126 pacientes). Los marcadores temporales `LEEME.txt` fueron eliminados tras la ejecución exitosa de `organizar_por_categoria.py`.
 
 ---
 

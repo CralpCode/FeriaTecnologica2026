@@ -6,8 +6,9 @@ rolloff, MFCC 1-13 con deltas).
 Archivos en Backend/models/: mejor_clasificador_icbhi.joblib (pipeline scikit-learn) o, si no se
 puede cargar, modelo_icbhi_exportado.json (mismos coeficientes, sin dependencias).
 
-Para analizar una GRABACIÓN hace falta calcular las 61 características exactamente igual que en el
-entrenamiento; eso vive en lung_baseline_features.py y está pendiente del código del autor.
+El código original del autor y su verificación están en IA/modelo_base/ (AUC 0.71 con 24 pacientes no vistos;
+con el umbral 0.30 marca como anormales a ~7 de cada 10 ciclos normales). Por eso se usa solo con los casos
+demo ICBHI, que traen sus características ya calculadas, y no con grabaciones del dispositivo.
 """
 import json
 import math
@@ -134,13 +135,14 @@ def classify_features(features) -> dict:
 
 
 def classify_audio(y, sr: int) -> dict:
-    """Grabación -> 61 características -> modelo base. Si el extractor aún no está, lo informa."""
+    """Grabación -> 61 características -> modelo base. Hoy no se usa con grabaciones reales (ver arriba)."""
     from . import lung_baseline_features
     if _meta() is None:
         return {"estado": "no_disponible"}
     if not lung_baseline_features.READY:
-        return {"estado": "pendiente_extractor",
-                "detalle": "Falta el código con que el equipo calculó las 61 características."}
+        return {"estado": "solo_demo",
+                "detalle": "El modelo base se usa solo en los casos demo: no es confiable con grabaciones reales "
+                           "(ver IA/modelo_base/README.md)."}
     out = classify_features(lung_baseline_features.extract(y, sr))
     out["estado"] = "ok" if "probability_abnormal" in out else "no_disponible"
     return out

@@ -136,26 +136,29 @@ export const AIExplainerModal: React.FC<{ visible: boolean; onClose: () => void 
               {base?.loaded && (
                 <Text style={styles.p}>
                   También hay un <Text style={styles.b}>modelo base</Text> (regresión logística) hecho por el equipo, que
-                  dice normal o patológico. Puntaje ICBHI informado al entrenar: {base.puntaje_icbhi_reportado} %.
+                  dice normal o patológico. Verificado con 24 pacientes no vistos: detecta el 90 % de los ciclos anormales,
+                  pero marca como anormales a 7 de cada 10 normales.
                   {base.extractor_listo
                     ? ' Ya analiza grabaciones del dispositivo.'
-                    : ' Por ahora funciona con los casos de demostración.'}
+                    : ' Por eso solo se usa en los casos de demostración.'}
                 </Text>
               )}
             </Section>
 
             <Section icon="traffic-light" color={Colors.warning} title="4. Las reglas: el semáforo">
               <Text style={styles.p}>No es inteligencia artificial: son reglas fijas, fáciles de revisar.</Text>
-              <Bullet color={Colors.danger} text="ROJO: oxígeno menor a 90 %, o un hallazgo en pulmones con oxígeno menor a 94 %." />
-              <Bullet color={Colors.warning} text="AMARILLO: posible soplo, ruidos en pulmones, oxígeno entre 90 y 93 % o pulso fuera de rango." />
-              <Bullet color={Colors.success} text="VERDE: hay datos y ninguna regla se activa." />
+              <Bullet color={Colors.danger} text="ROJO: un síntoma de alarma (dificultad intensa para respirar, labios azulados, confusión, desmayo o dolor de pecho) u oxígeno calibrado menor a 90 %." />
+              <Bullet color={Colors.warning} text="AMARILLO: sonido del corazón o de los pulmones anormal, síntomas comunicados, oxígeno calibrado menor a 94 % o pulso fuera de 45–120 en un adulto en reposo." />
+              <Bullet color={Colors.textSecondary} text="GRIS: faltan datos. Sin oxígeno calibrado todavía no se puede llegar a VERDE." />
+              <Bullet color={Colors.success} text="VERDE: sin hallazgos y sin datos faltantes." />
             </Section>
 
             <Section icon="robot-outline" color={Colors.primary} title="5. La voz: el asistente (Qwen)">
               <Text style={styles.p}>
-                Un modelo de lenguaje que corre en la propia Mac, sin internet, redacta las alertas, el informe en PDF y
-                responde preguntas. Solo usa los datos medidos y tiene prohibido diagnosticar, recomendar medicamentos o
-                inventar valores. Se revisa con una prueba de preguntas trampa.
+                Un modelo de lenguaje que corre en la propia Mac, sin internet, responde preguntas, redacta el texto de las
+                alertas y un resumen sencillo del informe (las secciones clínicas del informe salen de las reglas). Solo usa
+                los datos medidos; si escribe una cifra que no está en los datos, su texto se descarta. Se revisa con una
+                prueba de preguntas trampa.
               </Text>
             </Section>
 

@@ -71,53 +71,110 @@ A partir de la misma base de adquisición de datos, se podrán desplegar una o m
 * [x] [docs/RESUMEN_DATOS.md](file:///Users/wilsonjonatan/Documents/8vo%202026/f%20tecno/code/docs/RESUMEN_DATOS.md): Diccionario de variables, conteos y mapeo exhaustivo de datos.
 * [x] [docs/AVANCES_PROYECTO.md](file:///Users/wilsonjonatan/Documents/8vo%202026/f%20tecno/code/docs/AVANCES_PROYECTO.md): Bitácora de decisiones tomadas e hitos completados.
 * [x] [docs/TAREAS_PENDIENTES.md](file:///Users/wilsonjonatan/Documents/8vo%202026/f%20tecno/code/docs/TAREAS_PENDIENTES.md): Backlog operativo priorizado.
+* [x] [docs/RESOLUCION_DUDAS.md](file:///Users/wilsonjonatan/Documents/8vo%202026/f%20tecno/code/docs/RESOLUCION_DUDAS.md): Guía conceptual viva y resolución incremental de dudas de ingeniería y clínica.
+
+### D. Infraestructura de Servidor y Ecosistema de Software
+* [x] **Servidor Remoto / Host Backend e IA:** **Apple Mac Studio** (nodo central de alta capacidad ubicado en una **instalación remota/laboratorio**; ejecutará el backend FastAPI, base de datos SQLite y el contenedor Docker con Ollama LLaMA 3.2 3B. Se accede a través de Internet mediante túnel seguro HTTPS/WSS como Cloudflare Tunnel o ngrok).
+* [x] **Repositorio Hermano de Despliegue e Interfaz:** [`FeriaTecnologica2026`](file:///Users/wilsonjonatan/Documents/8vo%202026/f%20tecno/FeriaTecnologica2026):
+  * **App Móvil:** React Native / Expo (SDK 58) con monitor hospitalario ECG en vivo, tendencias y exportación médica (PDF/Excel).
+  * **Backend:** FastAPI + SQLite WAL + WebSockets en tiempo real.
+  * **Emulador Wokwi:** Simulación completa por software (`diagram.json`).
+  * **Gateway:** Puente Python Serial/Bluetooth -> Backend HTTP (`gateway.py`).
 
 ---
 
 ## 4. Arquitectura Eléctrica y Pinout Propuesto
 
 > ⚠️ **Aclaración sobre la fuente de este Pinout:**  
-> Esta asignación de pines proviene de la **recomendación técnica de diseño formulada en el chat previo (*"Diagnóstico de Enfermedades Respiratorias"* del 25 de septiembre de 2026)**.  
-> Se basa en las hojas de datos oficiales de Espressif (bus I2C nativo por defecto en pines 21/22 y bus I2S libre de colisiones con los pines de memoria flash).  
-> **Estado:** Es un **diseño teórico recomendado**, listo para ser cableado y verificado experimentalmente en protoboard. Si por conveniencia física o tipo de placa ESP32 se requiere reasignar algún pin, se puede modificar antes de soldar.
+> Esta asignación de pines ha sido **homologada y unificada** con el repositorio del compañero ([`FeriaTecnologica2026`](file:///Users/wilsonjonatan/Documents/8vo%202026/f%20tecno/FeriaTecnologica2026)) para garantizar que el mismo firmware funcione tanto en el simulador virtual Wokwi como en la placa física ESP32 y la PCB diseñada.
 
 ```
                                   ESP32 DevKit
                              ┌────────────────────┐
                              │                    │
            MAX30102 [VIN] ───┤ 3V3            GND ├─── GND Común
-           INMP441  [VDD] ───┤ 3V3            VIN ├─── TP4056 [OUT+] (vía Switch)
+           INMP441  [VDD] ───┤ 3V3            VIN ├─── TP4056 [OUT+] (vía Switch Rocker)
                              │                    │
-            MAX30102 [SDA] ──┤ GPIO 21            │
+            MAX30102 [SDA] ──┤ GPIO 21 (o 23)     │
             MAX30102 [SCL] ──┤ GPIO 22            │
                              │                    │
              INMP441  [SD] ──┤ GPIO 32            │
-             INMP441  [WS] ──┤ GPIO 25            │
-            INMP441 [SCK] ───┤ GPIO 26            │
+             INMP441  [WS] ──┤ GPIO 15            │
+            INMP441 [SCK] ───┤ GPIO 14            │
             INMP441  [L/R] ──┤ GND (Canal Izq.)   │
                              │                    │
-            Neopixel [DIN] ──┤ GPIO 4             │
+            Neopixel [DIN] ──┤ GPIO 25            │
+            Botón K1 [Pin1] ─┤ GPIO 17 (Pull-up)  │
                              │                    │
                              └────────────────────┘
 ```
 
-| Componente | Pin del Módulo | Pin sugerido en ESP32 | Función / Notas de Diseño |
+| Componente | Pin del Módulo | Pin unificado ESP32 | Función / Notas de Diseño |
 | :--- | :--- | :--- | :--- |
 | **MAX30102** | VIN / GND | **3V3 / GND** | Alimentación lógica y sensores ópticos a 3.3V |
-| | SDA / SCL | **GPIO 21 / GPIO 22** | Bus I2C de datos y reloj |
+| | SDA / SCL | **GPIO 21 / GPIO 22** | Bus I2C de datos y reloj (GPIO 23 soportado como fallback) |
 | **INMP441** | VDD / GND | **3V3 / GND** | Alimentación del micrófono MEMS a 3.3V |
 | | L/R | **GND** | Selector de canal (a GND configura canal izquierdo mono) |
 | | SD | **GPIO 32** | I2S Serial Data (salida de datos de audio) |
-| | WS | **GPIO 25** | I2S Word Select / LRCLK (reloj de trama/canal) |
-| | SCK | **GPIO 26** | I2S Serial Clock / BCLK (reloj de bits) |
+| | WS | **GPIO 15** | I2S Word Select / LRCLK (reloj de trama/canal) |
+| | SCK | **GPIO 14** | I2S Serial Clock / BCLK (reloj de bits) |
 | **Neopixel WS2812** | VDD / GND | **VIN / GND** | Alimentación desde la batería/fuente (5V/3.7V) |
-| | DIN | **GPIO 4** | Señal de datos digitales (1-Wire) |
+| | DIN | **GPIO 25** | Señal de datos digitales (1-Wire) |
+| **Botón K1** | Terminal 1 / 2 | **GPIO 17 / GND** | Pulsador interactivo para alternar modos o despertar de reposo |
 | **Alimentación** | Batería | **B+ / B- (TP4056)** | Conexión directa a la celda Li-Ion/LiPo |
 | | Switch On-Off | **Entre OUT+ y VIN** | Conmuta la alimentación que entra al ESP32 |
 
 ---
 
-## 5. POSIBLES PASOS A SEGUIR Y TAREAS PENDIENTES (Hoja de Ruta)
+## 5. Arquitectura Global de Despliegue (Flujo con Servidor Remoto Mac Studio e Internet)
+
+Dado que la **Apple Mac Studio se encuentra en una ubicación física remota**, se implementa un enlace por Internet a través de un túnel seguro:
+
+```
+┌─────────────────────────────────┐
+│     DISPOSITIVO EMBEBIDO        │
+│          (ESP32)                │
+│  - Sensor MAX30102 (SpO2/BPM)   │
+│  - Micrófono INMP441 (Audio I2S)│
+│  - Semáforo Neopixel (8 LEDs)   │
+│  - Botón K1 (IO17)              │
+└──────────────┬──────────────────┘
+               │
+               │ [Bluetooth BLE / SPP o WiFi Local]
+               ▼
+┌───────────────────────────────────────────────────────────────┐
+│               NODO LOCAL EN LA FERIA / STAND                  │
+│       (Celular del Paciente o Laptop con Gateway Python)      │
+├───────────────────────────────────────────────────────────────┤
+│ • App Móvil React Native (conecta al ESP32 por BLE nativo).   │
+│ • Gateway Python (`gateway.py`) por puerto USB Serial / BT.   │
+│ • Conexión a Internet vía Datos Móviles (4G/5G) o Wi-Fi.      │
+└──────────────────────────────┬────────────────────────────────┘
+                               │
+                               │ [TÚNEL SEGURO HTTPS / WSS VÍA INTERNET]
+                               │ (Cloudflare Tunnel / ngrok persistente)
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│         SERVIDOR REMOTO: APPLE MAC STUDIO (EN REMOTO)         │
+│  (Host de alta potencia para procesamiento, base de datos e IA)│
+├───────────────────────────────────────────────────────────────┤
+│ 1. Gateway Ingestor / WebSocket: Recibe telemetría a 10 Hz    │
+│ 2. Backend API: FastAPI (`main.py` en puerto 8000)            │
+│ 3. Persistencia Médica: SQLite en modo WAL (`telemetry.db`)   │
+│ 4. Motor de Diagnóstico: Modelos ML acústicos (code/)         │
+│ 5. Asistente Clínico IA: Contenedor Docker con Ollama          │
+│    (Modelo LLaMA 3.2 3B acelerado por Apple Silicon)          │
+└───────────────────────────────────────────────────────────────┘
+```
+
+> 🌐 **Consideraciones Críticas de Red e Internet:**
+> 1. **Acceso Remoto al Backend:** La Mac Studio expone su puerto 8000 hacia el exterior mediante un túnel seguro con URL pública fija (ej. Cloudflare Tunnel o ngrok). Dicha URL pública (`https://...`) se configura en `EXPO_PUBLIC_API_URL` de la App Móvil y en `BACKEND_URL` de `gateway.py`.
+> 2. **Requerimiento de Internet en el Stand:** En el evento se requiere conexión a Internet (Wi-Fi del recinto o punto de acceso personal / *hotspot* 4G/5G).
+> 3. **Tolerancia a Fallos (Operación Autónoma Offline):** Si la conexión a Internet se interrumpe momentáneamente, el **ESP32 sigue operando de forma 100% independiente**, manteniendo la medición de pulso, $SpO_2$ y el semáforo visual de triaje Neopixel en el hardware sin interrupción.
+
+---
+
+## 6. POSIBLES PASOS A SEGUIR Y TAREAS PENDIENTES (Hoja de Ruta)
 
 ### Fase Inmediata: Consolidación de la Base de Captura de Datos (Prioridad Alta)
 Antes de construir implementaciones específicas, se debe asegurar que el flujo de adquisición de datos funcione de forma fiable:
@@ -135,7 +192,7 @@ Una vez consolidada la base de captura, el equipo elegirá la implementación a 
 
 ---
 
-## 6. Reglas de Desarrollo para Asistentes de IA
+## 7. Reglas de Desarrollo para Asistentes de IA
 
 1. **No asumir componentes inexistentes:** Todo el código o diagrama debe estar pensado para los componentes listados en la Sección 3 (ESP32, MAX30102, INMP441, Neopixel 8 LEDs, TP4056, Switch, Batería 3.7V). Si se propone una pantalla OLED o un buzzer, debe marcarse como *opcional / mejora futura*.
 2. **Modularidad estricta:** Mantener la capa de lectura de sensores desacoplada de la lógica de aplicación para facilitar el cambio de implementaciones futuras.
