@@ -112,7 +112,7 @@ def evaluate_recording(result: dict) -> list[dict]:
         prob, thr = result.get("probability"), result.get("threshold")
         a = _fire(sid, "hallazgo_pulmonar", location=loc, finding="; ".join(parts) or "sonido anormal",
                   recording_id=result["recording_id"], details=det, demo=demo,
-                  probabilidad_anormal=f"{prob:.0%}" if prob is not None else None,
+                  puntuacion_modelo=f"{prob:.0%}" if prob is not None else None,
                   umbral=f"{thr:.0%}" if thr is not None else None)
         return [a] if a else []
     if result["result"] == "anormal":

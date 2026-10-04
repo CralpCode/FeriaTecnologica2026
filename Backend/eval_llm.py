@@ -92,7 +92,7 @@ def main() -> int:
     alert = {"type": "hallazgo_pulmonar", "severity": "caution", "title": "Posible hallazgo pulmonar",
              "message": "La grabación de la zona AR mostró: sonido patológico según el modelo base.",
              "action": "Es un tamizaje, no un diagnóstico: referir a evaluación médica.",
-             "data": {"location": "AR", "probabilidad_anormal": "35%", "umbral": "30%"}}
+             "data": {"location": "AR", "puntuacion_modelo": "35%", "umbral": "30%"}}
     alert_fail = 0
     for _ in range(3):
         out = llm_tasks.alert_text(alert) or {}

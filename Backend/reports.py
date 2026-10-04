@@ -81,7 +81,7 @@ def build_session_pdf(report_id: int, session_id: str, content: dict, llm_genera
         rows = [["Hora", "Tipo", "Foco / zona", "Resultado", "Puntaje", "Detalle"]]
         for g in grab:
             rows.append([str(g.get("hora", ""))[11:19], g.get("tipo", ""), g.get("foco", ""), g.get("resultado", ""),
-                         g.get("probabilidad_anormal") or "—", _detail_text(g.get("detalles") or {})])
+                         g.get("puntuacion_modelo") or "—", _detail_text(g.get("detalles") or {})])
         story.append(_table(rows, [50, 50, 95, 80, 45, 200]))
     else:
         story.append(Paragraph("No se realizaron grabaciones.", body))

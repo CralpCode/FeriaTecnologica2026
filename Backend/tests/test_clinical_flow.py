@@ -161,6 +161,10 @@ class ClinicalFlowTests(unittest.TestCase):
         self.assertIn('no es de esta persona', fired[0]['message'])
         # Sus signos vitales de ejemplo nunca se usan
         self.assertIsNone(clinical.recent_vitals('person_a')['heartRate'])
+        # El resumen del LLM siempre deja claro que hay un caso demo
+        with patch('ai_engine.llm_chat', return_value='{"resumen": "Se detectó un sonido pulmonar anormal."}'):
+            content, _ = llm_tasks.session_report('person_a')
+        self.assertTrue(content['resumen_llm'].startswith(clinical.DEMO_NOTICE))
 
     def test_failed_repeat_supersedes_same_site_and_other_sites_retained(self):
         for rid, site, result in [('a', 'AV', 'anormal'), ('b', 'MV', 'normal'), ('c', 'AV', 'calidad_insuficiente')]:

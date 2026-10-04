@@ -27,6 +27,8 @@ BASE_RULES = (
     "7. Si hay 'patrón compatible con' una enfermedad, dilo SIEMPRE como sugerencia a confirmar por un médico, "
     "nunca como diagnóstico. Las características del soplo describen cómo suena, no su causa.\n"
     "8. Nunca inventes cifras, umbrales ni porcentajes: si mencionas un número, debe aparecer tal cual en los datos.\n"
+    "9. Nunca digas que un valor es normal, estable, sano o 'dentro del rango': el prototipo no puede concluir "
+    "normalidad. Tampoco supongas reposo, edad ni ausencia de síntomas si no están en los datos.\n"
 )
 
 KNOWLEDGE_PATH = Path(__file__).resolve().parent / "knowledge" / "proyecto.md"
@@ -83,7 +85,7 @@ def _session_context(session_id: str) -> dict:
              "foco": LOCATION_NAMES.get(r["location"], r["location"] or "sin especificar"),
              "resultado": r["result"],
              "detalles": r.get("details") or {},
-             "probabilidad_anormal": f"{r['probability']:.0%}" if r["probability"] is not None else None,
+             "puntuacion_modelo": f"{r['probability']:.0%}" if r["probability"] is not None else None,
              "umbral": f"{r['threshold']:.0%}" if r["threshold"] is not None else None,
              "hora": r["created_at"]}
             for r in recs
@@ -195,6 +197,8 @@ def _llm_summary(ctx: dict) -> str | None:
     if not text or not numbers_ok(text, data):
         print("[LLM informe] resumen descartado: vacío o con cifras que no están en los datos")
         return None
+    if ctx["valoracion"].get("demo") and "demostraci" not in text.lower():
+        text = clinical_assessment.DEMO_NOTICE + " " + text
     return text
 
 
@@ -206,7 +210,7 @@ def _fallback_report(ctx: dict) -> dict:
         hallazgos.append(f"SpO2 promedio {s['spo2_prom']} % (mínimo {s['spo2_min']} %).")
     anormales = [g for g in ctx["grabaciones"] if g["resultado"] == "anormal"]
     for g in ctx["grabaciones"]:
-        p = f" ({g['probabilidad_anormal']})" if g["probabilidad_anormal"] else ""
+        p = f" ({g['puntuacion_modelo']})" if g["puntuacion_modelo"] else ""
         hallazgos.append(f"Foco {g['foco']}: {g['resultado']}{p}.")
     alerta = bool(anormales or any(a["severidad"] == "crítica" for a in ctx["alertas"]))
     return {
@@ -237,6 +241,7 @@ def chat(session_id: str, message: str) -> str:
         + "Si la respuesta no está en ninguna de las dos fuentes, dilo y no inventes.\n"
         + "Si preguntan algo que el dispositivo no mide o que requiere diagnóstico, explícalo con amabilidad.\n"
         + "Si la persona cuenta síntomas en el chat, pídele que los registre en la valoración de Auscultación.\n"
+        + "La 'puntuacion_modelo' es la puntuación de la red neuronal, no una probabilidad ni una certeza clínica.\n"
         + f"BASE DE CONOCIMIENTO DEL PROYECTO:\n{project_knowledge()}\n"
         + f"DATOS DE LA SESIÓN (fuente única de verdad):\n{json.dumps(ctx, ensure_ascii=False, default=str)}"
     )
