@@ -161,8 +161,11 @@ def read_root():
 def list_active_sessions():
     """Lista todas las sesiones activas y registradas en el sistema."""
     db_sessions = database.get_distinct_sessions()
+    hidden = database.archived_ids()
     combined = {}
     for item in db_sessions:
+        if item["session_id"] in hidden:
+            continue
         sid = item["session_id"]
         combined[sid] = {
             "session_id": sid,
@@ -172,6 +175,8 @@ def list_active_sessions():
             "is_live": False
         }
     for sid, info in _sessions_cache.items():
+        if sid in hidden:
+            continue
         is_live = (time.time() - info["timestamp"]) <= 20
         if sid in combined:
             combined[sid]["is_live"] = is_live
@@ -662,10 +667,29 @@ def list_reports(session_id: Optional[str] = Query(None)):
     return database.list_reports(session_id=session_id)
 
 
+@app.post("/api/sessions/{session_id}/archive")
+def archive_session(session_id: str):
+    """Oculta una sesión de las listas (historial y sesiones). No borra grabaciones, informes ni alertas."""
+    sid = _get_effective_session(session_id)
+    if not database.session_exists(sid):
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    database.archive_session(sid)
+    return {"session_id": sid, "archived": True}
+
+
+@app.post("/api/sessions/{session_id}/unarchive")
+def unarchive_session(session_id: str):
+    sid = _get_effective_session(session_id)
+    if not database.session_exists(sid):
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    database.unarchive_session(sid)
+    return {"session_id": sid, "archived": False}
+
+
 @app.get("/api/history")
-def sessions_history(limit: int = Query(100)):
-    """Historial por paciente (sesión), con el nivel de triaje actual de cada una."""
-    rows = database.get_sessions_overview(limit)
+def sessions_history(limit: int = Query(100), archived: bool = Query(False)):
+    """Historial por paciente (sesión), con el nivel de triaje actual de cada una. archived=true: las archivadas."""
+    rows = database.get_sessions_overview(limit, archived=archived)
     for r in rows:
         r["triaje"] = triage.evaluate(r["session_id"])["nivel"]
     return rows

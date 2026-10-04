@@ -80,6 +80,10 @@ def init_db():
         conn.execute("""CREATE TABLE IF NOT EXISTS clinical_context (
             session_id TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at TEXT NOT NULL
         )""")
+        # Sesiones archivadas: solo se ocultan de las listas; sus datos no se tocan
+        conn.execute("""CREATE TABLE IF NOT EXISTS archived_sessions (
+            session_id TEXT PRIMARY KEY, archived_at TEXT NOT NULL
+        )""")
         vcols = {r[1] for r in conn.execute("PRAGMA table_info(vitals_log)")}
         if "measurement_metadata" not in vcols:
             conn.execute("ALTER TABLE vitals_log ADD COLUMN measurement_metadata TEXT DEFAULT '{}'")
@@ -444,8 +448,9 @@ def list_reports(session_id: str = None, limit: int = 50) -> list[dict]:
              "has_pdf": bool(r["pdf_path"]) and os.path.exists(r["pdf_path"])} for r in rows]
 
 
-def get_sessions_overview(limit: int = 100) -> list[dict]:
-    """Una fila por sesión (paciente): lecturas, grabaciones, alertas e informes, ordenadas por última actividad."""
+def get_sessions_overview(limit: int = 100, archived: bool | None = False) -> list[dict]:
+    """Una fila por sesión (paciente): lecturas, grabaciones, alertas e informes, ordenadas por última actividad.
+    archived: False = solo las visibles, True = solo las archivadas, None = todas."""
     conn = get_db_connection()
     out: dict[str, dict] = {}
 
@@ -475,5 +480,47 @@ def get_sessions_overview(limit: int = 100) -> list[dict]:
     # Se omiten las sesiones vacías (se crea una cada vez que alguien abre la app sin medir nada)
     rows = [d for d in out.values()
             if d["recordings"] or d["reports"] or d["alerts"] or d["readings"] >= 5]
+    hidden = archived_ids()
+    for d in rows:
+        d["archived"] = d["session_id"] in hidden
+    if archived is not None:
+        rows = [d for d in rows if d["archived"] == archived]
     rows.sort(key=lambda d: d["last_seen"] or "", reverse=True)
     return rows[:limit]
+
+
+def session_exists(session_id: str) -> bool:
+    """True si la sesión tiene algún dato guardado (lecturas, grabaciones, alertas, informes o contexto)."""
+    conn = get_db_connection()
+    found = any(conn.execute(q, (session_id,)).fetchone() for q in (
+        "SELECT 1 FROM vitals_log WHERE device_id = ? LIMIT 1",
+        "SELECT 1 FROM recordings WHERE session_id = ? LIMIT 1",
+        "SELECT 1 FROM alerts WHERE session_id = ? LIMIT 1",
+        "SELECT 1 FROM reports WHERE session_id = ? LIMIT 1",
+        "SELECT 1 FROM clinical_context WHERE session_id = ? LIMIT 1",
+    ))
+    conn.close()
+    return found
+
+
+def archived_ids() -> set[str]:
+    conn = get_db_connection()
+    ids = {r["session_id"] for r in conn.execute("SELECT session_id FROM archived_sessions")}
+    conn.close()
+    return ids
+
+
+def archive_session(session_id: str) -> None:
+    """Oculta la sesión de las listas. No borra ni cambia sus datos."""
+    conn = get_db_connection()
+    with conn:
+        conn.execute("INSERT OR IGNORE INTO archived_sessions (session_id, archived_at) VALUES (?, ?)",
+                     (session_id, datetime.now().isoformat()))
+    conn.close()
+
+
+def unarchive_session(session_id: str) -> None:
+    conn = get_db_connection()
+    with conn:
+        conn.execute("DELETE FROM archived_sessions WHERE session_id = ?", (session_id,))
+    conn.close()
