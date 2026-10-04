@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 import database
-from ml import classifier, lung
+from ml import classifier, equalizer, lung
 
 REC_DIR = Path(__file__).resolve().parent / "recordings"
 REC_DIR.mkdir(exist_ok=True)
@@ -91,7 +91,8 @@ def finish(rec_id: str) -> dict:
         w.setframerate(rec["sample_rate"])
         w.writeframes(raw)
     pcm.unlink(missing_ok=True)
-    return _classify_and_store(rec_id, wav, len(raw) / 2 / rec["sample_rate"])
+    # Audio del ESP32: se corrige con la respuesta medida de la pieza, si existe la medición
+    return _classify_and_store(rec_id, wav, len(raw) / 2 / rec["sample_rate"], device=True)
 
 
 def save_upload(session_id: str, location: str, data: bytes, mode: str | None = None, source: str = "unknown") -> dict:
@@ -106,11 +107,16 @@ def save_upload(session_id: str, location: str, data: bytes, mode: str | None = 
     return _classify_and_store(rec_id, wav, n / sr)
 
 
-def _classify_and_store(rec_id: str, wav: Path, duration: float) -> dict:
+def _classify_and_store(rec_id: str, wav: Path, duration: float, device: bool = False) -> dict:
     database.update_recording(rec_id, status="processing", wav_path=str(wav), duration_s=round(duration, 2))
     try:
         mode = database.get_recording(rec_id).get("mode") or "corazon"
-        out = (lung if mode == "pulmon" else classifier).classify_wav(wav)
+        # Archivos subidos (casos demo, pruebas) ya vienen de estetoscopios clínicos: no se ecualizan
+        profile = equalizer.profile_for(mode) if device else None
+        eq = (lambda y, sr: equalizer.apply(y, sr, profile)) if profile else None
+        out = (lung if mode == "pulmon" else classifier).classify_wav(wav, eq=eq)
+        if eq is not None and out.get("result") not in ("calidad_insuficiente", None):
+            out["details"] = {**(out.get("details") or {}), "ecualizacion": equalizer.describe(profile)}
         database.update_recording(
             rec_id, status="done", finished_at=datetime.now().isoformat(),
             probability=out["probability"], threshold=out["threshold"],

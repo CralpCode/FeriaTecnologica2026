@@ -49,7 +49,8 @@ def model_info() -> dict:
     return out
 
 
-def classify_wav(path: str | Path) -> dict:
+def classify_wav(path: str | Path, eq=None) -> dict:
+    """eq: función (y, sr) -> y del ecualizador (ml/equalizer.py); se aplica tras el control de calidad."""
     y, sr = sf.read(str(path), dtype="float32", always_2d=False)
     if y.ndim > 1:
         y = y.mean(axis=1)
@@ -68,6 +69,8 @@ def classify_wav(path: str | Path) -> dict:
         return {**base, "result": "calidad_insuficiente", "details": {},
                 "reason": "Señal casi en silencio: revisar contacto del estetoscopio"}
 
+    if eq is not None:
+        y = eq(y, sr)
     sounds, disease = _load("lung_sounds_cnn"), _load("lung_disease_cnn")
     # Modelo base del equipo (regresión logística): se usa solo, o como comparación si hay CNN
     baseline = lung_baseline.classify_audio(y, sr)

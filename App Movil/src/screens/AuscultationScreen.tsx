@@ -344,7 +344,10 @@ const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) => {
           <PlayButton url={apiService.recordingAudioUrl(result.recording_id)} mode={result.mode} />
         )}
       </View>
-      <Text style={styles.statusText}>Foco {focusName(result.location)} · {result.duration_s?.toFixed(1)} s</Text>
+      <Text style={styles.statusText}>
+        Foco {focusName(result.location)} · {result.duration_s?.toFixed(1)} s
+        {result.details?.ecualizacion ? ` · Ecualizado (perfil ${result.details.ecualizacion.perfil})` : ''}
+      </Text>
       {result.probability !== null ? (
         <>
           <View style={styles.barTrack}>
