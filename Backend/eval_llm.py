@@ -5,11 +5,18 @@ No se "entrena" el modelo: se ajustan las instrucciones (llm_tasks.BASE_RULES) y
 conocimiento (knowledge/proyecto.md) hasta que esta evaluación pase. Correr después de cada cambio:
 
     python eval_llm.py            # requiere Ollama encendido
+
+Usa una base de datos temporal (los datos de prueba nunca llegan a la base real), salvo que se
+indique otra con SPIROSCAN_DB_PATH.
 """
-import json
+import os
 import re
 import sys
+import tempfile
 import time
+
+if not os.getenv("SPIROSCAN_DB_PATH"):
+    os.environ["SPIROSCAN_DB_PATH"] = os.path.join(tempfile.mkdtemp(prefix="eval_llm_"), "eval.db")
 
 import database
 import llm_tasks
@@ -51,10 +58,14 @@ def seed_session():
         conn.execute("DELETE FROM recordings WHERE session_id = ?", (SID,))
         conn.execute("DELETE FROM alerts WHERE session_id = ?", (SID,))
     conn.close()
+    # Datos de prueba rotulados, solo en la base temporal: lecturas con todos los indicadores de calidad.
+    quality = {"source": "real", "heartRateValid": True, "bloodOxygenValid": True, "spo2Calibrated": True,
+               "signalQuality": "good", "sampleAgeMs": 0, "finger": True}
     for spo2 in (96, 95, 88, 87, 89):
-        database.save_reading({"bpm": 92, "spo2": spo2, "hrv": 40, "session_id": SID})
+        database.save_reading({"bpm": 92, "spo2": spo2, "hrv": 40, "session_id": SID, **quality})
     database.create_recording("rec_eval_1", SID, "MV", 16000)
-    database.update_recording("rec_eval_1", status="done", result="anormal", probability=0.91, threshold=0.82)
+    database.update_recording("rec_eval_1", status="done", result="anormal", probability=0.91, threshold=0.82,
+                              source="real")
     llm_tasks._history.pop(SID, None)
 
 
@@ -82,14 +93,13 @@ def main() -> int:
              "message": "La grabación de la zona AR mostró: sonido patológico según el modelo base.",
              "action": "Es un tamizaje, no un diagnóstico: referir a evaluación médica.",
              "data": {"location": "AR", "probabilidad_anormal": "35%", "umbral": "30%"}}
-    allowed = set(re.findall(r"\d+(?:[.,]\d+)?", json.dumps(alert, ensure_ascii=False)))
     alert_fail = 0
     for _ in range(3):
         out = llm_tasks.alert_text(alert) or {}
         text = f"{out.get('message', '')} {out.get('action', '')}"
-        extra = [n for n in re.findall(r"\d+(?:[.,]\d+)?", text) if n not in allowed]
-        alert_fail += bool(extra) or not out
-        print(f"\n{'✅' if not extra and out else '❌'} Alerta pulmonar (números inventados: {extra or 'ninguno'})")
+        ok = bool(out) and llm_tasks.numbers_ok(text, alert)
+        alert_fail += not ok
+        print(f"\n{'✅' if ok else '❌'} Alerta pulmonar (cifras {'verificadas' if ok else 'inventadas o sin respuesta'})")
         print("   " + text)
     total = len(CASES) + 3
     ok = total - failures - alert_fail

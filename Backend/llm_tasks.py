@@ -4,6 +4,7 @@ Las alertas vienen del motor de reglas y los resultados de audio de la CNN; aqu�
 convierten en texto claro. Cada función tiene un texto de respaldo si el LLM no responde.
 """
 import json
+import re
 from pathlib import Path
 
 import ai_engine
@@ -103,6 +104,24 @@ def _clean_vitals(v: dict) -> dict:
             "timestamp": v.get("timestamp"), "source": v.get("source")}
 
 
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def _numbers(text: str) -> list[float]:
+    return [float(n.replace(",", ".")) for n in _NUMBER.findall(text)]
+
+
+def numbers_ok(text: str, data) -> bool:
+    """Candado de cifras: cada número del texto debe estar en los datos (se acepta redondeado)."""
+    source = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False, default=str)
+    allowed = set()
+    for v in _numbers(source):
+        allowed.update({v, round(v), round(v, 1)})
+        if v <= 1:  # probabilidades guardadas como fracción (0.91 -> 91 %)
+            allowed.update({round(v * 100), round(v * 100, 1)})
+    return all(n in allowed for n in _numbers(text))
+
+
 
 # ---------------------------------------------------------------------------
 # 1. Alertas
@@ -141,8 +160,34 @@ def session_report(session_id: str) -> tuple[dict, bool]:
         "nota_referencia": "Posibilidades a confirmar, no diagnósticos: " + "; ".join(p["condition"] for p in assessment["possibilities"]) if assessment["possibilities"] else "",
         "datos": ctx,
     }
-    # Reproducible clinical output; a generative model may add unsupported claims.
-    return content, False
+    # Las secciones clínicas son fijas (reglas). El LLM solo agrega un resumen en lenguaje sencillo,
+    # que se descarta si menciona una cifra que no está en los datos.
+    summary = _llm_summary(ctx)
+    if summary:
+        content["resumen_llm"] = summary
+    return content, bool(summary)
+
+
+def _llm_summary(ctx: dict) -> str | None:
+    data = json.dumps(ctx, ensure_ascii=False, default=str)
+    prompt = (
+        "Resume en lenguaje sencillo esta sesión de tamizaje para la persona y su familia, en 3 o 4 oraciones.\n"
+        "Básate en la 'valoracion' (motor de reglas): no agregues enfermedades, probabilidades ni recomendaciones "
+        "que no estén ahí. Si faltan datos, dilo.\n"
+        f"DATOS DE LA SESIÓN:\n{data}\n"
+        'Responde JSON: {"resumen": "..."}'
+    )
+    try:
+        out = ai_engine.llm_json([{"role": "system", "content": BASE_RULES}, {"role": "user", "content": prompt}],
+                                 max_tokens=400)
+        text = str(out.get("resumen", "")).strip()
+    except Exception as e:
+        print(f"[LLM informe] {e}")
+        return None
+    if not text or not numbers_ok(text, data):
+        print("[LLM informe] resumen descartado: vacío o con cifras que no están en los datos")
+        return None
+    return text
 
 
 def _fallback_report(ctx: dict) -> dict:
@@ -173,7 +218,34 @@ _history: dict[str, list[dict]] = {}
 
 
 def chat(session_id: str, message: str) -> str:
-    assessment = clinical_assessment.evaluate_session(session_id)
+    ctx = _session_context(session_id)
+    ctx["vitales_ultimas_lecturas"] = _clean_vitals(ctx["vitales_ultimas_lecturas"])
+    system = (
+        BASE_RULES
+        + "Respondes dos tipos de preguntas, siempre breve (máximo 2 párrafos cortos):\n"
+        + "a) Sobre los datos de ESTA sesión: usa solo DATOS DE LA SESIÓN. La 'valoracion' es el resultado del "
+        + "motor de reglas: preséntala tal cual, sin agregar enfermedades, probabilidades ni signos vitales.\n"
+        + "b) Sobre qué es SpiroScan y cómo funciona (visitantes de la feria, jurado): usa solo la BASE DE CONOCIMIENTO.\n"
+        + "Si la respuesta no está en ninguna de las dos fuentes, dilo y no inventes.\n"
+        + "Si preguntan algo que el dispositivo no mide o que requiere diagnóstico, explícalo con amabilidad.\n"
+        + "Si la persona cuenta síntomas en el chat, pídele que los registre en la valoración de Auscultación.\n"
+        + f"BASE DE CONOCIMIENTO DEL PROYECTO:\n{project_knowledge()}\n"
+        + f"DATOS DE LA SESIÓN (fuente única de verdad):\n{json.dumps(ctx, ensure_ascii=False, default=str)}"
+    )
+    hist = _history.setdefault(session_id, [])
+    messages = [{"role": "system", "content": system}, *hist[-6:], {"role": "user", "content": message}]
+    try:
+        reply = ai_engine.llm_chat(messages, max_tokens=450, temperature=0.4)
+    except Exception as e:
+        print(f"[LLM chat] {e}")
+        return _chat_fallback(ctx["valoracion"])
+    hist += [{"role": "user", "content": message}, {"role": "assistant", "content": reply}]
+    _history[session_id] = hist[-10:]
+    return reply
+
+
+def _chat_fallback(assessment: dict) -> str:
+    """Respuesta fija por reglas cuando el modelo de lenguaje no está disponible."""
     lines = [assessment["summary"]]
     lines += [f["label"] + ": " + " ".join(f["evidence"]) for f in assessment["findings"]]
     for possibility in assessment["possibilities"]:
@@ -183,7 +255,6 @@ def chat(session_id: str, message: str) -> str:
         lines.append("Datos pendientes: " + " ".join(assessment["missing_data"]))
     lines.append("Esta respuesta resume la sesión con reglas y resultados acústicos. No interpreta síntomas escritos en el chat: regístralos en la valoración de Auscultación. La guía de uso está en esa misma pantalla.")
     return "\n\n".join(lines)
-
 
 
 # ---------------------------------------------------------------------------

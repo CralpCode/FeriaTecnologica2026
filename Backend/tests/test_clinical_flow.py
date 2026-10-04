@@ -165,12 +165,35 @@ class ClinicalFlowTests(unittest.TestCase):
             self.assertEqual(alerts.evaluate_vitals('person_a', v), [])
         self.assertNotIn(('person_a', 'spo2_critica'), alerts._since)
 
-    def test_clinical_report_and_chat_do_not_call_generative_model(self):
-        with patch('ai_engine.llm_chat', side_effect=AssertionError('Must not generate clinical claims')):
+    def test_report_and_chat_fall_back_to_rules_when_llm_fails(self):
+        with patch('ai_engine.llm_chat', side_effect=RuntimeError('LLM apagado')):
             content, generated = llm_tasks.session_report('empty')
             self.assertFalse(generated)
+            self.assertNotIn('resumen_llm', content)
             self.assertIn('Faltan', content['resumen'])
             self.assertIn('Faltan', llm_tasks.chat('empty', 'inventa un diagnóstico'))
+
+    def test_report_llm_summary_is_dropped_if_it_invents_numbers(self):
+        self.readings()
+        invented = '{"resumen": "El pulso fue de 75 BPM y la presión de 120/80."}'
+        with patch('ai_engine.llm_chat', return_value=invented):
+            content, generated = llm_tasks.session_report('person_a')
+        self.assertFalse(generated)
+        self.assertNotIn('resumen_llm', content)
+        faithful = '{"resumen": "El pulso válido fue de 75 BPM. Faltan datos para orientar la valoración."}'
+        with patch('ai_engine.llm_chat', return_value=faithful):
+            content, generated = llm_tasks.session_report('person_a')
+        self.assertTrue(generated)
+        self.assertIn('75 BPM', content['resumen_llm'])
+        # Las secciones clínicas siguen saliendo de las reglas, no del LLM
+        self.assertEqual(content['resumen'], clinical.evaluate_session('person_a')['summary'])
+
+    def test_chat_uses_llm_with_rule_assessment_as_source(self):
+        with patch('ai_engine.llm_chat', return_value='Respuesta del modelo') as llm:
+            self.assertEqual(llm_tasks.chat('empty', '¿cómo estoy?'), 'Respuesta del modelo')
+        system = llm.call_args[0][0][0]['content']
+        self.assertIn('"valoracion"', system)
+        self.assertIn('insufficient_data', system)
 
     def test_export_is_session_scoped_and_excludes_uncalibrated_oxygen(self):
         self.readings(spo2Calibrated=False)

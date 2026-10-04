@@ -1,4 +1,4 @@
-"""PDF del informe de sesión (vitales + auscultación + alertas + texto redactado por el LLM)."""
+"""PDF del informe de sesión (vitales + auscultación + alertas + valoración por reglas + resumen del LLM)."""
 from datetime import datetime
 import hashlib
 from pathlib import Path
@@ -40,6 +40,12 @@ def build_session_pdf(report_id: int, session_id: str, content: dict, llm_genera
         Paragraph("Resumen", h2),
         Paragraph(escape(content.get("resumen", "")), body),
     ]
+    if content.get("resumen_llm"):
+        story += [Paragraph("Resumen en lenguaje sencillo", h2),
+                  Paragraph(escape(content["resumen_llm"]), body),
+                  Paragraph("Redactado por un modelo de lenguaje local a partir de los datos de esta sesión; "
+                            "sus cifras se verificaron contra esos datos. Las demás secciones salen de reglas fijas.",
+                            small)]
 
     if content.get("hallazgos"):
         story.append(Paragraph("Hallazgos", h2))
