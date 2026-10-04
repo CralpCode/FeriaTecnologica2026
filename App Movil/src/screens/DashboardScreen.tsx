@@ -63,7 +63,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
       {/* 1. MONITOR DE PULSO (animación al ritmo medido) */}
       <HospitalEcgMonitor
-        heartRate={vitals.heartRate}
+        heartRate={valid.heartRate ? vitals.heartRate : 0}
         bloodOxygen={vitals.bloodOxygen}
         audioDecibels={0}
         isAlert={heartStatus.status === 'critical'}

@@ -25,6 +25,7 @@ import llm_tasks
 import reports
 import triage
 import clinical_assessment
+import measurement_quality
 from ml import classifier, lung, lung_baseline
 
 app = FastAPI(
@@ -95,30 +96,9 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-class TelemetryInput(BaseModel):
-    model_config = ConfigDict(allow_inf_nan=False)
-    bpm: int = Field(ge=0, le=300)
-    spo2: float = Field(ge=0, le=100)
-    audio_rms: Optional[float] = None
-    audio_peak: Optional[float] = None
-    source: Literal["real", "simulated", "unknown"] = "unknown"
-    heartRateValid: StrictBool = False
-    bloodOxygenValid: StrictBool = False
-    spo2Calibrated: StrictBool = False
-    signalQuality: str = "unknown"
-    sampleAgeMs: Optional[float] = Field(None, ge=0)
-    finger: Optional[StrictBool] = None
-    audioUnit: Optional[str] = None
-    # El firmware aún envía systolic/diastolic/temperature; se aceptan pero NO se guardan
-    # (el MAX30102 no mide presión arterial ni temperatura corporal).
-    systolic: Optional[int] = None
-    diastolic: Optional[int] = None
-    temperature: Optional[float] = None
-    hrv: Optional[int] = 0
-    stress: Optional[int] = 0
-    device_id: Optional[str] = "default"
-    session_id: Optional[str] = None
-    session_name: Optional[str] = None
+# /api/telemetry no usa un modelo estricto: lo que manda el ESP32 es externo y puede venir incompleto o
+# con tipos raros. measurement_quality.clean_packet lo limpia sin fallar (ver receive_telemetry).
+TELEMETRY_MAX_BYTES = 8 * 1024
 
 class AnalyzeInput(BaseModel):
     vitals: Optional[dict] = None
@@ -257,10 +237,25 @@ async def disconnect_device():
     return {"status": "disconnected", "is_phone_connected": False}
 
 @app.post("/api/telemetry")
-async def receive_telemetry(payload: TelemetryInput):
-    data_dict = payload.model_dump()
-    sid = _get_effective_session(data_dict.get("session_id") or _linked_session() or data_dict.get("device_id"))
+async def receive_telemetry(request: Request):
+    body = await request.body()
+    if len(body) > TELEMETRY_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Paquete de telemetría demasiado grande")
+    try:
+        raw = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=422, detail="El cuerpo debe ser JSON")
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=422, detail="El cuerpo debe ser un objeto JSON")
+    data_dict, avisos = measurement_quality.clean_packet(raw)
+    sid = _get_effective_session(data_dict.get("session_id") or _linked_session() or data_dict.get("device_id") or "default")
     data_dict["session_id"] = sid
+    if data_dict.pop("legacy"):
+        # Formato original del firmware: la calidad la decide el servidor; SpO2, HRV y estrés no se guardan.
+        data_dict.update(measurement_quality.validate_legacy(sid, data_dict))
+        data_dict.update({"spo2": None, "hrv": None, "stress": None})
+    elif data_dict.get("source") is None:
+        data_dict["source"] = "unknown"
     saved = database.save_reading(data_dict)
     saved["device_connected"] = True
     
@@ -280,7 +275,7 @@ async def receive_telemetry(payload: TelemetryInput):
         await _publish_alert(alert)
     await _publish_triage_if_changed(sid)
     
-    return {"status": "ok", "saved": saved, "session_id": sid}
+    return {"status": "ok", "saved": saved, "session_id": sid, "avisos": avisos}
 
 @app.post("/api/sessions/{session_id}/disconnect")
 async def disconnect_session(session_id: str):
@@ -545,7 +540,9 @@ async def audio_start(payload: AudioStartInput):
         payload.session_id or _linked_session() or payload.device_id)
     location = payload.location or (armed["location"] if armed else "")
     try:
-        rec_id = audio_service.start(sid, location, payload.sample_rate, armed.get("mode") if armed else None, payload.source)
+        # Sin "source": solo el ESP32 usa este flujo (los emuladores envían "simulated"), así que es audio del dispositivo.
+        source = payload.source if "source" in payload.model_fields_set else "real"
+        rec_id = audio_service.start(sid, location, payload.sample_rate, armed.get("mode") if armed else None, source)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await manager.broadcast({"type": "RECORDING_STARTED", "session_id": sid,

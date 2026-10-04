@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { API_CONFIG, getSessionId } from '../config/api';
 import { VitalSigns, RawDevicePacket } from '../types/vitals';
 import { nativeBle } from './NativeBleBridge';
+import { isLegacyPacket, LegacyPulseValidator } from './measurementQuality';
 
 export { RawDevicePacket };
 
@@ -19,6 +20,7 @@ class DeviceBridgeService {
   private shouldAutoReconnect: boolean = true;
   private reconnectAttempts: number = 0;
   private smoothedBpm: number = 0;
+  private legacyPulse = new LegacyPulseValidator();
 
   public getConnected(): boolean {
     if (Platform.OS !== 'web') {
@@ -304,6 +306,7 @@ class DeviceBridgeService {
     this.isConnected = false;
     this.deviceName = null;
     this.smoothedBpm = 0;
+    this.legacyPulse.reset();
 
     if (Platform.OS !== 'web') {
       nativeBle.disconnect().catch(() => {});
@@ -335,12 +338,16 @@ class DeviceBridgeService {
     }
 
     const isFingerPresent = raw.finger === true;
-    const heartRateValid = (raw.heartRateValid ?? raw.heart_rate_valid) === true;
-    const bloodOxygenValid = (raw.bloodOxygenValid ?? raw.spo2_valid) === true;
-    const spo2Calibrated = (raw.spo2Calibrated ?? raw.spo2_calibrated) === true;
+    // Formato original del firmware (sin indicadores de calidad): se valida aquí con la misma regla del servidor
+    // y su SpO2, HRV y estrés no se muestran (el firmware original no tiene SpO2 calibrada).
+    const legacy = isLegacyPacket(raw);
+    const legacyCheck = legacy ? this.legacyPulse.check(raw.bpm, raw.finger) : null;
+    const heartRateValid = legacyCheck ? legacyCheck.stable : (raw.heartRateValid ?? raw.heart_rate_valid) === true;
+    const bloodOxygenValid = legacy ? false : (raw.bloodOxygenValid ?? raw.spo2_valid) === true;
+    const spo2Calibrated = legacy ? false : (raw.spo2Calibrated ?? raw.spo2_calibrated) === true;
     // Preserve the measured values; never smooth away clinically relevant changes.
     const finalHeartRate = Number.isFinite(raw.bpm) ? raw.bpm : 0;
-    const currentSpo2 = Number.isFinite(raw.spo2) ? raw.spo2 : 0;
+    const currentSpo2 = !legacy && Number.isFinite(raw.spo2) ? raw.spo2 : 0;
 
     const updatedVitals: VitalSigns = {
       heartRate: finalHeartRate,
@@ -349,8 +356,8 @@ class DeviceBridgeService {
       systolicPressure: 0,
       diastolicPressure: 0,
       temperature: 0,
-      hrv: raw.hrv || 0,
-      stressLevel: raw.stress ?? raw.stress_score ?? 0,
+      hrv: legacy ? 0 : raw.hrv || 0,
+      stressLevel: legacy ? 0 : raw.stress ?? raw.stress_score ?? 0,
       audio_rms: raw.audio_rms || 0.0,
       audio_peak: raw.audio_peak || 0.0,
       steps: 0,
@@ -359,12 +366,14 @@ class DeviceBridgeService {
       device_connected: true,
       finger: isFingerPresent,
       audioUnit: raw.audioUnit,
-      source: raw.source || 'unknown',
+      source: legacy ? (raw.test === true ? 'simulated' : 'real') : raw.source || 'unknown',
       heartRateValid,
       bloodOxygenValid,
       spo2Calibrated,
-      signalQuality: raw.signalQuality ?? raw.signal_quality ?? null,
-      sampleAgeMs: raw.sampleAgeMs ?? raw.sample_age_ms ?? null,
+      signalQuality: legacyCheck
+        ? (legacyCheck.stable ? 'good' : legacyCheck.finger ? 'unstable' : 'no_finger')
+        : raw.signalQuality ?? raw.signal_quality ?? null,
+      sampleAgeMs: legacy ? 0 : raw.sampleAgeMs ?? raw.sample_age_ms ?? null,
     };
 
     this.notifyVitalsListeners(updatedVitals);
@@ -380,21 +389,24 @@ class DeviceBridgeService {
       await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // Solo se reenvía lo que trae el paquete (undefined no viaja en JSON): así el servidor
+        // reconoce el formato original y aplica su propia validación, sin indicadores inventados.
         body: JSON.stringify({
           bpm: data.bpm,
           spo2: data.spo2,
-          stress: data.stress !== undefined ? data.stress : (data.stress_score || 0),
-          hrv: data.hrv || 0,
+          stress: data.stress ?? data.stress_score,
+          hrv: data.hrv,
           audio_rms: data.audio_rms,
           audio_peak: data.audio_peak,
-          finger: data.finger === true,
+          finger: data.finger,
+          test: data.test,
           audioUnit: data.audioUnit,
-          source: data.source || 'unknown',
-          heartRateValid: (data.heartRateValid ?? data.heart_rate_valid) === true,
-          bloodOxygenValid: (data.bloodOxygenValid ?? data.spo2_valid) === true,
-          spo2Calibrated: (data.spo2Calibrated ?? data.spo2_calibrated) === true,
-          signalQuality: data.signalQuality ?? data.signal_quality ?? null,
-          sampleAgeMs: data.sampleAgeMs ?? data.sample_age_ms ?? null,
+          source: data.source,
+          heartRateValid: data.heartRateValid ?? data.heart_rate_valid,
+          bloodOxygenValid: data.bloodOxygenValid ?? data.spo2_valid,
+          spo2Calibrated: data.spo2Calibrated ?? data.spo2_calibrated,
+          signalQuality: data.signalQuality ?? data.signal_quality,
+          sampleAgeMs: data.sampleAgeMs ?? data.sample_age_ms,
           device_id: 'SpiroScan-Band',
           session_id: getSessionId(),
         }),

@@ -108,8 +108,13 @@ class ClinicalFlowTests(unittest.TestCase):
         r = self.client.post('/api/telemetry', json=self.packet())
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.json()['saved']['heartRateValid'])
-        for data in (self.packet(spo2=101), self.packet(bpm=-2), self.packet(heartRateValid='true')):
-            self.assertEqual(self.client.post('/api/telemetry', json=data).status_code, 422)
+        # Datos externos: no se rechaza el paquete, pero lo imposible no se guarda ni se usa.
+        for data, channel in ((self.packet(spo2=101), 'bloodOxygen'), (self.packet(bpm=-2), 'heartRate'),
+                              (self.packet(heartRateValid='true'), 'heartRate')):
+            r = self.client.post('/api/telemetry', json=data)
+            self.assertEqual(r.status_code, 200)
+            self.assertTrue(r.json()['avisos'])
+            self.assertIsNone(measurement_quality.usable_value(r.json()['saved'], channel))
 
     def test_context_drives_explainable_possibilities_without_probabilities(self):
         a = clinical.assess({'age_years': 45, 'symptoms': {'cough': True, 'fever': True}}, {}, [])

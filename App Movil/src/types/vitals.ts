@@ -8,6 +8,7 @@ export interface MeasurementQuality {
   signalQuality?: string | null;
   audioUnit?: string;
   sampleAgeMs?: number | null;
+  validadoPor?: string;           // "servidor" si el paquete venía en el formato original del firmware
 }
 
 export interface VitalSigns extends MeasurementQuality {
@@ -93,6 +94,7 @@ export interface RawDevicePacket extends MeasurementQuality {
   audio_rms: number;
   audio_peak: number;
   finger?: boolean;
+  test?: boolean;
   device_id?: string;
   heart_rate_valid?: boolean;
   spo2_valid?: boolean;

@@ -99,8 +99,9 @@ def save_reading(data: dict):
     conn = get_db_connection()
     now_iso = datetime.now().isoformat()
     
-    bpm = int(data.get("bpm", data.get("heartRate", 0)))
-    spo2 = float(data.get("spo2", data.get("bloodOxygen", 0.0)))
+    # 0 = sin lectura (un valor ausente o no válido nunca se rellena)
+    bpm = int(data.get("bpm") or data.get("heartRate") or 0)
+    spo2 = float(data.get("spo2") or data.get("bloodOxygen") or 0.0)
     audio_rms = float(data.get("audio_rms") or 0.0)
     audio_peak = float(data.get("audio_peak") or 0.0)
     device_id = str(data.get("session_id", data.get("device_id", "default")))
