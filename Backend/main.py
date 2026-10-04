@@ -962,7 +962,7 @@ def analyze_pulmonary(payload: PulmonaryAnalyzeInput):
     if payload.audio_peak is not None:
         vitals["audio_peak"] = payload.audio_peak
     if not vitals or vitals.get("heartRate", 0) == 0:
-        latest = database.get_latest_reading(session_id=sid)
+        latest = database.get_latest_valid_reading(session_id=sid)
         for k, v in latest.items():
             if k not in vitals or vitals[k] == 0:
                 vitals[k] = v
@@ -971,9 +971,48 @@ def analyze_pulmonary(payload: PulmonaryAnalyzeInput):
 @app.post("/api/ai/chat")
 def chat_ai(payload: ChatInput):
     sid = _get_effective_session(payload.session_id)
-    vitals = payload.vitals if payload.vitals else database.get_latest_reading(session_id=sid)
+    vitals = dict(payload.vitals) if isinstance(payload.vitals, dict) else {}
+
+    # Normalizar nombres de propiedades comunes
+    if "bpm" in vitals and "heartRate" not in vitals:
+        vitals["heartRate"] = vitals["bpm"]
+    if "spo2" in vitals and "bloodOxygen" not in vitals:
+        vitals["bloodOxygen"] = vitals["spo2"]
+    if "systolic" in vitals and "systolicPressure" not in vitals:
+        vitals["systolicPressure"] = vitals["systolic"]
+    if "diastolic" in vitals and "diastolicPressure" not in vitals:
+        vitals["diastolicPressure"] = vitals["diastolic"]
+    if "stress" in vitals and "stressLevel" not in vitals:
+        vitals["stressLevel"] = vitals["stress"]
+
+    hr = int(vitals.get("heartRate") or 0)
+    spo2 = float(vitals.get("bloodOxygen") or 0.0)
+
+    # Si no vienen constantes válidas en el payload, recurrir a la última medición guardada
+    if hr == 0 and spo2 == 0.0:
+        cached = _sessions_cache.get(sid)
+        if cached and isinstance(cached.get("vitals"), dict):
+            c_v = cached["vitals"]
+            c_hr = int(c_v.get("heartRate") or c_v.get("bpm") or 0)
+            c_spo2 = float(c_v.get("bloodOxygen") or c_v.get("spo2") or 0.0)
+            if c_hr > 0 or c_spo2 > 0:
+                vitals = {**c_v, **vitals}
+                vitals["heartRate"] = c_hr
+                vitals["bloodOxygen"] = c_spo2
+                hr, spo2 = c_hr, c_spo2
+
+        if hr == 0 and spo2 == 0.0:
+            valid_db = database.get_latest_valid_reading(session_id=sid)
+            if valid_db and (valid_db.get("heartRate", 0) > 0 or valid_db.get("bloodOxygen", 0) > 0):
+                for k, v in valid_db.items():
+                    if k not in vitals or vitals[k] in (0, 0.0, None, ""):
+                        vitals[k] = v
+                vitals["heartRate"] = valid_db["heartRate"]
+                vitals["bloodOxygen"] = valid_db["bloodOxygen"]
+                hr, spo2 = valid_db["heartRate"], valid_db["bloodOxygen"]
+
     reply = ai_engine.generate_chat_reply(payload.message, vitals, session_id=sid)
-    return {"reply": reply, "message": reply, "session_id": sid}
+    return {"reply": reply, "message": reply, "session_id": sid, "vitals_used": vitals}
 
 @app.post("/api/ai/llm/generate")
 def direct_llm_generate(payload: LLMDirectInput):

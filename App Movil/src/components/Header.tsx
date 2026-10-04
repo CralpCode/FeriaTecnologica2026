@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
-import { useVitals } from '../context/VitalsContext';
+import { useDeviceConnection } from '../context/VitalsContext';
 import { DeviceConnectionModal } from './DeviceConnectionModal';
 
 interface HeaderProps {
@@ -18,7 +18,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSettings,
   onOpenInfo,
 }) => {
-  const { isDeviceDirectConnected, device, isBackendOnline, currentSessionId } = useVitals();
+  const { isDeviceDirectConnected, device, isBackendOnline } = useDeviceConnection();
   const [deviceModalVisible, setDeviceModalVisible] = useState(false);
 
   return (
@@ -30,9 +30,7 @@ export const Header: React.FC<HeaderProps> = ({
           </View>
           <View style={styles.textContainer}>
             <Text style={styles.title}>{title}</Text>
-            <Text style={styles.subtitle}>
-              {subtitle} • <Text style={{ color: Colors.primary, fontWeight: '700' }}>{currentSessionId}</Text>
-            </Text>
+            <Text style={styles.subtitle}>{subtitle}</Text>
           </View>
         </View>
 
@@ -93,11 +91,13 @@ export const Header: React.FC<HeaderProps> = ({
         </View>
       </View>
 
-      {/* Modal de Conexión de Dispositivo */}
-      <DeviceConnectionModal
-        visible={deviceModalVisible}
-        onClose={() => setDeviceModalVisible(false)}
-      />
+      {/* Modal de Conexión de Dispositivo (Renderizado condicional perezoso para máxima velocidad) */}
+      {deviceModalVisible && (
+        <DeviceConnectionModal
+          visible={deviceModalVisible}
+          onClose={() => setDeviceModalVisible(false)}
+        />
+      )}
     </>
   );
 };

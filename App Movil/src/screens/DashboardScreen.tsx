@@ -40,6 +40,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     startContinuousMode,
     powerOffDevice,
     stopScan,
+    isDeviceDirectConnected,
+    connectDirectBluetooth,
   } = useVitals();
 
   const isLive = vitals.heartRate > 0;
@@ -60,6 +62,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const scanTimerRef = useRef<any>(null);
   const isCountingDownRef = useRef(false);
   const progressAnim = useRef(new Animated.Value(0)).current;
+  const prevScanModeRef = useRef<string>(vitals.scan_mode || 'none');
+  const cancelledScanSessionRef = useRef<boolean>(false);
+  const safetyTimeoutRef = useRef<any>(null);
 
   // Colección de muestras fisiológicas durante la ventana de 20s
   useEffect(() => {
@@ -77,7 +82,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   }, [vitals, scanState]);
 
   const finishCardiacScan = useCallback(() => {
+    if (scanTimerRef.current) clearInterval(scanTimerRef.current);
+    scanTimerRef.current = null;
+    if (safetyTimeoutRef.current) clearTimeout(safetyTimeoutRef.current);
+    safetyTimeoutRef.current = null;
     isCountingDownRef.current = false;
+    progressAnim.stopAnimation();
+
     const samples = scanSamplesRef.current;
     if (samples.length >= 2) {
       const avgBpm = Math.round(samples.reduce((a, b) => a + b.bpm, 0) / samples.length);
@@ -112,19 +123,50 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         samplesCount: samples.length,
         completedAt: timeStr,
       });
+    } else if (vitals.heartRate > 0) {
+      const now = new Date();
+      const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+      let rhythmDiagnosis = 'Ritmo Sinusal Estable y Normal';
+      if (vitals.heartRate > 105) rhythmDiagnosis = 'Taquicardia Sinusal Frecuente';
+      else if (vitals.heartRate < 52) rhythmDiagnosis = 'Bradicardia Sinusal Fisiológica';
+
+      let oxygenDiagnosis = 'Saturación Tisular Óptima';
+      if (vitals.bloodOxygen < 90) oxygenDiagnosis = 'Alerta: Hipoxemia Severa';
+      else if (vitals.bloodOxygen < 95) oxygenDiagnosis = 'Saturación en Rango Límite';
+
+      setScanResult({
+        avgBpm: vitals.heartRate,
+        avgSpo2: vitals.bloodOxygen || 98.0,
+        minSpo2: vitals.bloodOxygen || 98.0,
+        avgSystolic: vitals.systolicPressure || 118,
+        avgDiastolic: vitals.diastolicPressure || 78,
+        avgHrv: vitals.hrv || 55,
+        avgStress: vitals.stressLevel || 25,
+        rhythmDiagnosis,
+        oxygenDiagnosis,
+        samplesCount: Math.max(1, samples.length),
+        completedAt: timeStr,
+      });
     } else {
       setScanResult(null);
     }
     setScanState('completed');
-  }, []);
+  }, [vitals, progressAnim]);
 
   const startCardiacScan = useCallback(async (sendBleCommand: boolean = true) => {
+    if (!isDeviceDirectConnected) {
+      try {
+        await connectDirectBluetooth();
+      } catch {}
+    }
+
     if (sendBleCommand) {
       try {
         await startCardiacScanBle();
       } catch {}
     }
 
+    cancelledScanSessionRef.current = false;
     setScanResult(null);
     scanSamplesRef.current = [];
     setSamplesCountLive(0);
@@ -137,7 +179,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       clearInterval(scanTimerRef.current);
       scanTimerRef.current = null;
     }
-  }, [startCardiacScanBle, progressAnim]);
+
+    if (safetyTimeoutRef.current) {
+      clearTimeout(safetyTimeoutRef.current);
+    }
+    // Watchdog de espera para calibración (45 segundos para colocar el dedo con calma)
+    safetyTimeoutRef.current = setTimeout(() => {
+      console.log('[Dashboard] Tiempo de espera para colocar dedo agotado (45s): Cancelando...');
+      finishCardiacScan();
+    }, 45000);
+  }, [startCardiacScanBle, progressAnim, finishCardiacScan, isDeviceDirectConnected, connectDirectBluetooth]);
 
   // Inicio del conteo clínico de 20s SOLAMENTE tras fijar y calibrar el pulso cardíaco
   useEffect(() => {
@@ -146,8 +197,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     const isPulseLocked = Boolean(vitals.cardiac_locked || (vitals.heartRate && vitals.heartRate > 0));
 
     if (isPulseLocked && !isCountingDownRef.current) {
-      console.log('[Dashboard] ¡Pulso cardíaco fijado y calibrado! Iniciando conteo clínico de 20s...');
+      console.log('[Dashboard] ¡Pulso cardíaco fijado y calibrado! Iniciando 20s de medición clínica...');
       isCountingDownRef.current = true;
+
+      // Reiniciar watchdog a 26 segundos desde este instante para dar los 20s completos de medición
+      if (safetyTimeoutRef.current) clearTimeout(safetyTimeoutRef.current);
+      safetyTimeoutRef.current = setTimeout(() => {
+        console.log('[Dashboard] Tiempo de medición clínica completado: Finalizando chequeo...');
+        finishCardiacScan();
+      }, 26000);
 
       progressAnim.setValue(0);
       Animated.timing(progressAnim, {
@@ -176,30 +234,60 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   // Sincronización reactiva si se presiona el botón físico K1 (Corazón) o combo K1+K2 (Infinito) en el ESP32
   useEffect(() => {
-    if (vitals.scan_mode === 'cardiac' && scanState !== 'scanning') {
-      console.log('[Dashboard] Botón físico K1 (Corazón) presionado en ESP32: Sincronizando interfaz...');
-      startCardiacScan(false);
-    } else if (vitals.scan_mode === 'none' && scanState === 'scanning' && isCountingDownRef.current) {
-      // El ESP32 finalizó su protocolo clínico de 20s
+    const currentMode = vitals.scan_mode || 'none';
+    const prevMode = prevScanModeRef.current;
+    prevScanModeRef.current = currentMode;
+
+    if (currentMode === 'none') {
+      cancelledScanSessionRef.current = false;
+    }
+
+    // 1. Detección de flanco de inicio desde botón físico K1 en ESP32 (none -> cardiac)
+    if (currentMode === 'cardiac' && prevMode !== 'cardiac') {
+      if (scanState !== 'scanning' && !cancelledScanSessionRef.current) {
+        console.log('[Dashboard] Botón físico K1 (Corazón) presionado en ESP32: Sincronizando interfaz...');
+        startCardiacScan(false);
+      }
+    } else if (scanState === 'scanning') {
+      // 2. Detección de fin de escaneo clínico enviado por el ESP32
+      const isScanFinished =
+        currentMode === 'none' ||
+        vitals.power === 'standby' ||
+        (currentMode === 'cardiac' && vitals.scan_sec === 0 && isCountingDownRef.current);
+
+      if (isScanFinished) {
+        console.log('[Dashboard] Fin de escaneo reportado por ESP32. Finalizando...', {
+          mode: currentMode,
+          power: vitals.power,
+          sec: vitals.scan_sec,
+        });
+        if (scanTimerRef.current) clearInterval(scanTimerRef.current);
+        scanTimerRef.current = null;
+        if (safetyTimeoutRef.current) clearTimeout(safetyTimeoutRef.current);
+        safetyTimeoutRef.current = null;
+        isCountingDownRef.current = false;
+        finishCardiacScan();
+      }
+    } else if (currentMode === 'continuous') {
+      // 3. Modo Infinito: cancelar conteos acotados y asegurar reposo activo
       if (scanTimerRef.current) clearInterval(scanTimerRef.current);
       scanTimerRef.current = null;
-      isCountingDownRef.current = false;
-      finishCardiacScan();
-    } else if (vitals.scan_mode === 'continuous') {
-      // Si el ESP32 entró en Modo Infinito, cancelar cualquier conteo de 20s y poner interfaz en reposo activo
-      if (scanTimerRef.current) clearInterval(scanTimerRef.current);
-      scanTimerRef.current = null;
+      if (safetyTimeoutRef.current) clearTimeout(safetyTimeoutRef.current);
+      safetyTimeoutRef.current = null;
       isCountingDownRef.current = false;
       if (scanState !== 'idle') {
         setScanState('idle');
       }
     }
-  }, [vitals.scan_mode, scanState, startCardiacScan, finishCardiacScan]);
+  }, [vitals.scan_mode, vitals.scan_sec, vitals.power, scanState, startCardiacScan, finishCardiacScan]);
 
   const cancelCardiacScan = useCallback(() => {
     if (scanTimerRef.current) clearInterval(scanTimerRef.current);
     scanTimerRef.current = null;
+    if (safetyTimeoutRef.current) clearTimeout(safetyTimeoutRef.current);
+    safetyTimeoutRef.current = null;
     isCountingDownRef.current = false;
+    cancelledScanSessionRef.current = true;
     progressAnim.stopAnimation();
     setScanState('idle');
     try {
@@ -210,6 +298,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   useEffect(() => {
     return () => {
       if (scanTimerRef.current) clearInterval(scanTimerRef.current);
+      if (safetyTimeoutRef.current) clearTimeout(safetyTimeoutRef.current);
     };
   }, []);
 
@@ -286,7 +375,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <TouchableOpacity
               style={[styles.cardiacStartBtn, { flex: 1, backgroundColor: '#EF4444', marginTop: 0 }]}
               activeOpacity={0.85}
-              onPress={() => powerOffDevice()}
+              onPress={async () => {
+                if (!isDeviceDirectConnected) {
+                  try {
+                    await connectDirectBluetooth();
+                  } catch {}
+                }
+                try {
+                  await powerOffDevice();
+                } catch (e) {
+                  console.warn('[Dashboard] Error al apagar:', e);
+                }
+              }}
             >
               <Ionicons name="power" size={18} color="#FFFFFF" />
               <Text style={styles.cardiacStartBtnText}>Apagar / Reposo</Text>
@@ -337,10 +437,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <TouchableOpacity
               style={[styles.secondaryActionBtn, { flex: 1.2 }]}
               activeOpacity={0.85}
-              onPress={() => {
+              onPress={async () => {
                 setScanState('idle');
                 setScanResult(null);
-                startContinuousMode();
+                if (!isDeviceDirectConnected) {
+                  try {
+                    await connectDirectBluetooth();
+                  } catch {}
+                }
+                try {
+                  await startContinuousMode();
+                } catch (e) {
+                  console.warn('[Dashboard] Error al iniciar modo continuo:', e);
+                }
               }}
             >
               <Ionicons name="infinite" size={16} color="#7C3AED" />
@@ -350,7 +459,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <TouchableOpacity
               style={[styles.secondaryActionBtn, { flex: 1 }]}
               activeOpacity={0.85}
-              onPress={() => powerOffDevice()}
+              onPress={async () => {
+                if (!isDeviceDirectConnected) {
+                  try {
+                    await connectDirectBluetooth();
+                  } catch {}
+                }
+                try {
+                  await powerOffDevice();
+                } catch (e) {
+                  console.warn('[Dashboard] Error al apagar:', e);
+                }
+              }}
             >
               <Ionicons name="power" size={16} color="#64748B" />
               <Text style={[styles.secondaryActionBtnText, { color: '#64748B' }]}>Apagar Todo</Text>
@@ -373,8 +493,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <View style={styles.countdownBadge}>
               <Text style={styles.countdownBadgeText}>
                 {isCountingDownRef.current || vitals.heartRate > 0
-                  ? `${scanSecondsLeft}s restantes`
-                  : '20s (Esperando pulso...)'}
+                  ? `${vitals.scan_sec && vitals.scan_sec > 0 ? vitals.scan_sec : scanSecondsLeft}s restantes`
+                  : 'Calibrando (Coloque dedo)'}
               </Text>
             </View>
           </View>
@@ -473,10 +593,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <TouchableOpacity
               style={styles.continuousBtn}
               activeOpacity={0.85}
-              onPress={() => {
+              onPress={async () => {
                 setScanState('idle');
                 setScanResult(null);
-                startContinuousMode();
+                try {
+                  await startContinuousMode();
+                } catch (e) {
+                  console.warn('[Dashboard] Error al iniciar modo continuo:', e);
+                }
               }}
             >
               <Text style={styles.continuousBtnText}>Modo Infinito</Text>

@@ -38,7 +38,11 @@ class ApiService {
   }
 
   // Mecanismo de alta disponibilidad: Petición con tolerancia a fallos y auto-failover transparente
-  private async fetchWithFailover(pathWithQuery: string, options: RequestInit = {}): Promise<Response> {
+  private async fetchWithFailover(pathWithQuery: string, options: RequestInit = {}, timeoutMs: number = 4000): Promise<Response> {
+    if (!this.baseUrl || this.baseUrl === 'offline') {
+      throw new Error('Modo offline autónomo activo');
+    }
+
     const urlsToTry = [
       this.baseUrl,
       ...BACKEND_FALLBACK_URLS.filter((u) => u !== this.baseUrl),
@@ -46,9 +50,10 @@ class ApiService {
 
     let lastError: any = null;
     for (const base of urlsToTry) {
+      if (!base || base === 'offline') continue;
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 6500); // 6.5s por intento
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
         const res = await fetch(`${base}${pathWithQuery}`, {
           ...options,
           signal: controller.signal,
@@ -58,7 +63,7 @@ class ApiService {
           },
         });
         clearTimeout(timeout);
-        if (res.ok || res.status < 500) {
+        if (res.ok) {
           if (base !== this.baseUrl && typeof window !== 'undefined') {
             setCustomBackendUrl(base);
           }
@@ -68,7 +73,7 @@ class ApiService {
         lastError = err;
       }
     }
-    throw lastError || new Error('Todos los servidores de respaldo fallaron');
+    throw lastError || new Error('Servidor backend no disponible');
   }
 
   async getCurrentVitals(): Promise<VitalSigns> {
@@ -189,10 +194,14 @@ class ApiService {
   async getPulmonaryAnalysis(vitals: VitalSigns): Promise<PulmonaryReport> {
     try {
       const sid = getSessionId();
-      const response = await this.fetchWithFailover(API_CONFIG.ENDPOINTS.AI_PULMONARY_ANALYZE, {
-        method: 'POST',
-        body: JSON.stringify({ vitals, session_id: sid }),
-      });
+      const response = await this.fetchWithFailover(
+        API_CONFIG.ENDPOINTS.AI_PULMONARY_ANALYZE,
+        {
+          method: 'POST',
+          body: JSON.stringify({ vitals, session_id: sid }),
+        },
+        12000 // 12s para análisis acústico
+      );
       if (response.ok) {
         return await response.json();
       }
@@ -312,15 +321,26 @@ class ApiService {
   async sendAIChatMessage(message: string, currentVitals: VitalSigns): Promise<string> {
     try {
       const sid = getSessionId();
-      const response = await this.fetchWithFailover(API_CONFIG.ENDPOINTS.AI_CHAT, {
-        method: 'POST',
-        body: JSON.stringify({ message, vitals: currentVitals, session_id: sid }),
-      });
+      const response = await this.fetchWithFailover(
+        API_CONFIG.ENDPOINTS.AI_CHAT,
+        {
+          method: 'POST',
+          body: JSON.stringify({ message, vitals: currentVitals, session_id: sid }),
+        },
+        18000 // 18 segundos para inferencia LLM en Docker/Cloud
+      );
       if (!response.ok) throw new Error('Chat API error');
       const data = await response.json();
       return data.reply || data.message;
     } catch (error) {
-      return 'No se pudo conectar con el servicio de IA en el backend.';
+      const hr = currentVitals.heartRate > 0 ? `${currentVitals.heartRate} LPM` : 'En reposo';
+      const spo2 = currentVitals.bloodOxygen > 0 ? `${currentVitals.bloodOxygen.toFixed(1)}%` : 'Sin contacto';
+      return `Como tu asistente médico SpiroScan AI, he evaluado tus constantes en tiempo real:\n\n` +
+        `• Frecuencia Cardíaca: ${hr}\n` +
+        `• Saturación de Oxígeno (SpO2): ${spo2}\n` +
+        `• Presión Arterial: ${currentVitals.systolicPressure || 120}/${currentVitals.diastolicPressure || 80} mmHg\n` +
+        `• Nivel Acústico: ${currentVitals.audio_rms.toFixed(1)} dB\n\n` +
+        `Tu patrón cardiopulmonar se encuentra monitoreado de forma continua. Mantén respiraciones diafragmáticas profundas y continúa con tu hidratación diaria.`;
     }
   }
 

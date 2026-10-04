@@ -131,27 +131,31 @@ class NativeBleServiceImpl implements NativeBleService {
       console.warn('[Native BLE] No hay dispositivo conectado para enviar comando');
       return false;
     }
+    const cleanCmd = cmd.trim();
+    const base64Val = asciiToBase64(cleanCmd);
+    console.log(`[Native BLE] Despachando comando "${cleanCmd}" (Base64: ${base64Val})...`);
+
+    // Intento 1: Con respuesta (GATT Write Request estándar con ACK a nivel de enlace)
     try {
-      const base64Val = asciiToBase64(cmd);
-      await this.connectedDevice.writeCharacteristicWithoutResponseForService(
+      await this.connectedDevice.writeCharacteristicWithResponseForService(
         SERVICE_UUID,
         CHAR_UUID,
         base64Val
       );
-      console.log('[Native BLE] Comando BLE enviado con éxito:', cmd);
+      console.log(`[Native BLE] ¡Comando "${cleanCmd}" entregado con éxito (writeWithResponse)!`);
       return true;
-    } catch (err) {
-      console.warn('[Native BLE] Error enviando comando withoutResponse, intentando con respuesta:', err);
+    } catch (errWithResp: any) {
+      console.warn(`[Native BLE] writeWithResponse falló (${errWithResp?.message || errWithResp}). Reintentando con writeWithoutResponse...`);
       try {
-        await this.connectedDevice.writeCharacteristicWithResponseForService(
+        await this.connectedDevice.writeCharacteristicWithoutResponseForService(
           SERVICE_UUID,
           CHAR_UUID,
-          asciiToBase64(cmd)
+          base64Val
         );
-        console.log('[Native BLE] Comando BLE enviado con respuesta:', cmd);
+        console.log(`[Native BLE] Comando "${cleanCmd}" enviado (writeWithoutResponse).`);
         return true;
       } catch (fallbackErr) {
-        console.error('[Native BLE] Error definitivo al enviar comando BLE:', fallbackErr);
+        console.error(`[Native BLE] Error total al enviar comando "${cleanCmd}":`, fallbackErr);
         return false;
       }
     }
@@ -160,19 +164,37 @@ class NativeBleServiceImpl implements NativeBleService {
   private parseOrBufferPacket(text: string): RawDevicePacket | null {
     this.packetBuffer += text;
 
-    // Buscar si hay un objeto JSON completo en el buffer
-    const start = this.packetBuffer.indexOf('{');
-    const end = this.packetBuffer.lastIndexOf('}');
-
-    if (start !== -1 && end > start) {
-      const candidate = this.packetBuffer.substring(start, end + 1);
-      try {
-        const parsed = JSON.parse(candidate);
-        this.packetBuffer = this.packetBuffer.substring(end + 1);
-        return parsed;
-      } catch {
-        // Paquete fragmentado aún
+    while (this.packetBuffer.length > 0) {
+      const start = this.packetBuffer.indexOf('{');
+      if (start === -1) {
+        this.packetBuffer = '';
+        return null;
       }
+
+      // Descartar basura antes del primer '{'
+      if (start > 0) {
+        this.packetBuffer = this.packetBuffer.substring(start);
+      }
+
+      let parsed: RawDevicePacket | null = null;
+      let searchPos = 1;
+      let end = this.packetBuffer.indexOf('}', searchPos);
+
+      while (end !== -1) {
+        const candidate = this.packetBuffer.substring(0, end + 1);
+        try {
+          parsed = JSON.parse(candidate);
+          this.packetBuffer = this.packetBuffer.substring(end + 1);
+          return parsed;
+        } catch {
+          // Si falló el parseo, este '}' no era el cierre del objeto, buscar el siguiente
+          searchPos = end + 1;
+          end = this.packetBuffer.indexOf('}', searchPos);
+        }
+      }
+
+      // Si no encontramos un objeto JSON completo válido con los '}' actuales, esperar más fragmentos
+      break;
     }
 
     if (this.packetBuffer.length > 2048) {
@@ -221,7 +243,7 @@ class NativeBleServiceImpl implements NativeBleService {
         }
       }, 15000);
 
-      mgr.startDeviceScan(null, null, async (error: BleError | null, scannedDevice: Device | null) => {
+      mgr.startDeviceScan(null, { allowDuplicates: false }, async (error: BleError | null, scannedDevice: Device | null) => {
         if (error) {
           if (!resolved) {
             resolved = true;
@@ -244,20 +266,24 @@ class NativeBleServiceImpl implements NativeBleService {
           this.isScanning = false;
           mgr.stopDeviceScan();
 
+          // Respiro de 80ms para que el chip Bluetooth de Android libere el modo escaneo
+          // antes de abrir la conexión GATT (evita congelamientos de la pila Fluoride/Bluedroid)
+          await new Promise((r) => setTimeout(r, 80));
+
           try {
             console.log('[Native BLE] Conectando a:', name, scannedDevice.id);
-            const connected = await scannedDevice.connect({ timeout: 10000 });
+            const connected = await scannedDevice.connect({ timeout: 8000 });
 
-            // CRÍTICO PARA ANDROID: Negociar MTU alto (512 bytes) para recibir el paquete JSON completo
+            // Negociar MTU alto (512 bytes) con timeout de seguridad para recepción JSON ágil
             if (Platform.OS === 'android') {
               try {
-                await connected.requestMTU(512);
+                await Promise.race([
+                  connected.requestMTU(512),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('MTU timeout')), 1200)),
+                ]);
                 console.log('[Native BLE] MTU 512 negociado exitosamente.');
               } catch (mtuErr) {
-                console.warn('[Native BLE] No se pudo solicitar MTU 512, reintentando con 256:', mtuErr);
-                try {
-                  await connected.requestMTU(256);
-                } catch {}
+                console.warn('[Native BLE] MTU 512 omitido o no respondido a tiempo.');
               }
             }
 
@@ -315,21 +341,31 @@ class NativeBleServiceImpl implements NativeBleService {
                         : raw.charCodeAt(1);
 
                       if (bpm > 0) {
-                        const nowMs = Date.now();
-                        const breathOffset = Math.sin(nowMs / 2400) * 0.45;
-                        const dynamicSpo2 = Number((98.2 + breathOffset).toFixed(1));
-
                         onData({
                           bpm,
-                          spo2: dynamicSpo2,
-                          systolic: 118,
-                          diastolic: 76,
-                          temperature: 36.6,
-                          stress: Math.round(Math.max(10, Math.min(95, (bpm - 50) * 1.2))),
-                          hrv: 65,
-                          audio_rms: 20.0,
-                          audio_peak: 26.0,
+                          spo2: 0,
+                          systolic: 0,
+                          diastolic: 0,
+                          temperature: 0,
+                          stress: 0,
+                          hrv: 0,
+                          audio_rms: 0,
+                          audio_peak: 0,
                           finger: true,
+                          device_id: 'SpiroScan-Band',
+                        });
+                      } else {
+                        onData({
+                          bpm: 0,
+                          spo2: 0,
+                          systolic: 0,
+                          diastolic: 0,
+                          temperature: 0,
+                          stress: 0,
+                          hrv: 0,
+                          audio_rms: 0,
+                          audio_peak: 0,
+                          finger: false,
                           device_id: 'SpiroScan-Band',
                         });
                       }

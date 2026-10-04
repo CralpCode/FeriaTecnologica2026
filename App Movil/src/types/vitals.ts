@@ -1,6 +1,20 @@
-export type VitalStatus = 'normal' | 'caution' | 'critical';
+export type VitalStatus = 'normal' | 'caution' | 'critical' | 'insufficient_data';
 
-export interface VitalSigns {
+export type VitalMetric =
+  | 'heartRate' | 'bloodOxygen' | 'systolicPressure' | 'diastolicPressure'
+  | 'temperature' | 'hrv' | 'stressLevel' | 'chipTemperature'
+  | 'audio_rms' | 'audio_peak' | 'steps' | 'calories';
+export type MeasurementProvenance = 'measured' | 'derived' | 'estimated' | 'unavailable' | 'unverified';
+
+export interface MeasurementQuality {
+  validity?: Partial<Record<VitalMetric, boolean>>;
+  provenance?: Partial<Record<VitalMetric, MeasurementProvenance>>;
+  spo2_calibrated?: boolean;
+  chipTemperature?: number; // Temperature inside MAX30102, not body temperature.
+  source?: string;
+}
+
+export interface VitalSigns extends MeasurementQuality {
   heartRate: number;            // Latidos por minuto (BPM)
   bloodOxygen: number;          // Saturación SpO2 (%)
   systolicPressure: number;     // Presión sistólica (mmHg)
@@ -22,7 +36,7 @@ export interface VitalSigns {
   power?: 'active' | 'standby'; // Estado energetico del hardware
 }
 
-export interface VitalsHistoryPoint {
+export interface VitalsHistoryPoint extends MeasurementQuality {
   timeLabel: string;
   heartRate: number;
   bloodOxygen: number;
@@ -89,16 +103,21 @@ export interface DeviceInfo {
 export type TimeRange = '24h' | '7d' | '30d';
 
 export interface RawDevicePacket {
-  bpm: number;
-  spo2: number;
-  systolic: number;
-  diastolic: number;
-  temperature?: number;
-  stress?: number;
-  stress_score?: number;
-  hrv?: number;
-  audio_rms: number;
-  audio_peak: number;
+  v?: number;                   // Telemetry contract version (2 carries validity).
+  valid?: number;               // 1=BPM, 2=SpO2 estimate, 4=PRV RMSSD, 8=chip temp, 16=audio.
+  cal?: boolean;                // SpO2 calibration supplied by the device.
+  source?: string;
+  bpm?: number | null;
+  spo2?: number | null;
+  systolic?: number | null;
+  diastolic?: number | null;
+  temperature?: number | null;
+  chip_temp?: number | null;
+  stress?: number | null;
+  stress_score?: number | null;
+  hrv?: number | null;
+  audio_rms?: number | null;
+  audio_peak?: number | null;
   finger?: boolean;
   device_id?: string;
   scan_mode?: 'cardiac' | 'pulmonary' | 'continuous' | 'none';

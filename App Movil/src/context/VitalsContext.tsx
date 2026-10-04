@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef, useMemo } from 'react';
 import { VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange, ChatMessage } from '../types/vitals';
 import { apiService } from '../services/api';
 import { API_CONFIG, setCustomBackendUrl, getCustomBackendUrl, getSessionId, setSessionId, generateNewSessionId } from '../config/api';
@@ -14,31 +14,14 @@ export interface SessionInfo {
   is_live?: boolean;
 }
 
-interface VitalsContextProps {
-  vitals: VitalSigns;
-  aiReport: AIAnalysisReport | null;
-  history: VitalsHistoryPoint[];
-  selectedRange: TimeRange;
-  isStreaming: boolean;
-  activeScenario: string;
+export interface DeviceConnectionContextProps {
   device: DeviceInfo | null;
   connectedType: ConnectedDeviceType;
-  chatMessages: ChatMessage[];
-  isChatLoading: boolean;
   isDeviceDirectConnected: boolean;
   isBackendOnline: boolean;
   backendUrl: string;
   currentSessionId: string;
-  availableSessions: SessionInfo[];
   updateBackendUrl: (url: string) => void;
-  createNewSession: (label?: string) => string;
-  switchSession: (sessionId: string) => void;
-  refreshSessionsList: () => Promise<void>;
-  setSelectedRange: (range: TimeRange) => void;
-  toggleStreaming: () => void;
-  triggerScenario: (scenario: 'normal' | 'tachycardia' | 'hypertension' | 'hypoxia' | 'stress') => void;
-  sendChatMessage: (text: string) => Promise<void>;
-  refreshAllData: () => Promise<void>;
   connectToWokwiEmulator: () => void;
   connectDirectBluetooth: () => Promise<{ success: boolean; message: string; deviceName?: string }>;
   disconnectAllDevices: () => void;
@@ -48,6 +31,32 @@ interface VitalsContextProps {
   startContinuousMode: () => Promise<boolean>;
   stopScan: () => Promise<boolean>;
   powerOffDevice: () => Promise<boolean>;
+}
+
+export const DeviceConnectionContext = createContext<DeviceConnectionContextProps | undefined>(undefined);
+
+export const useDeviceConnection = () => {
+  const context = useContext(DeviceConnectionContext);
+  if (!context) {
+    throw new Error('useDeviceConnection debe ser usado dentro de un VitalsProvider');
+  }
+  return context;
+};
+
+interface VitalsContextProps extends DeviceConnectionContextProps {
+  vitals: VitalSigns;
+  aiReport: AIAnalysisReport | null;
+  history: VitalsHistoryPoint[];
+  selectedRange: TimeRange;
+  isStreaming: boolean;
+  activeScenario: string;
+  chatMessages: ChatMessage[];
+  isChatLoading: boolean;
+  setSelectedRange: (range: TimeRange) => void;
+  toggleStreaming: () => void;
+  triggerScenario: (scenario: 'normal' | 'tachycardia' | 'hypertension' | 'hypoxia' | 'stress') => void;
+  sendChatMessage: (text: string) => Promise<void>;
+  refreshAllData: () => Promise<void>;
 }
 
 const ABSOLUTE_ZERO_VITALS: VitalSigns = {
@@ -129,63 +138,15 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [isChatLoading, setIsChatLoading] = useState<boolean>(false);
   const [isBackendOnline, setIsBackendOnline] = useState<boolean>(true);
   const [backendUrl, setBackendUrl] = useState<string>(API_CONFIG.BASE_URL);
-  const [currentSessionId, setCurrentSessionId] = useState<string>(getSessionId());
-  const [availableSessions, setAvailableSessions] = useState<SessionInfo[]>([]);
-
-  const refreshSessionsList = useCallback(async () => {
-    try {
-      const list = await apiService.getSessionsList();
-      if (Array.isArray(list)) {
-        setAvailableSessions(list);
-      }
-    } catch {}
-  }, []);
-
-  const createNewSession = useCallback((label?: string): string => {
-    const newId = generateNewSessionId(label);
-    setCurrentSessionId(newId);
-    setVitals(ABSOLUTE_ZERO_VITALS);
-    setHistory([]);
-    setChatMessages([
-      {
-        id: `init-${newId}`,
-        sender: 'ai',
-        text: `¡Hola! Sesión independiente iniciada [${newId}]. Monitoreando telemetría del ESP32.`,
-        timestamp: 'Ahora',
-      },
-    ]);
-    refreshSessionsList();
-    return newId;
-  }, [refreshSessionsList]);
-
-  const switchSession = useCallback((sessionId: string) => {
-    if (!sessionId) return;
-    setSessionId(sessionId);
-    setCurrentSessionId(sessionId);
-    setVitals(ABSOLUTE_ZERO_VITALS);
-    setHistory([]);
-    setChatMessages([
-      {
-        id: `init-${sessionId}`,
-        sender: 'ai',
-        text: `Cambiado a sesión [${sessionId}]. Cargando telemetría...`,
-        timestamp: 'Ahora',
-      },
-    ]);
-    apiService.getCurrentVitals().then(setVitals).catch(() => {});
-    apiService.getVitalsHistory(selectedRange).then(setHistory).catch(() => {});
-    refreshSessionsList();
-  }, [selectedRange, refreshSessionsList]);
-
-  useEffect(() => {
-    refreshSessionsList();
-  }, [refreshSessionsList]);
+  const [currentSessionId] = useState<string>(getSessionId());
 
   const lastAiUpdateRef = useRef<number>(0);
   const lastHistoryAppendRef = useRef<number>(0);
   const isFetchingRef = useRef<boolean>(false);
   const connectedTypeRef = useRef<ConnectedDeviceType>(connectedType);
   const userManualDisconnectRef = useRef<boolean>(false);
+  const lastVitalsRenderRef = useRef<number>(0);
+  const lastScanModeRef = useRef<string>('none');
 
   useEffect(() => {
     connectedTypeRef.current = connectedType;
@@ -202,38 +163,62 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   // Chequeo periódico de salud del Backend / Nube
   useEffect(() => {
+    let isMounted = true;
     const checkCloud = async () => {
+      if (!backendUrl || backendUrl === 'offline') {
+        if (isMounted) setIsBackendOnline(false);
+        return;
+      }
       try {
-        const res = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.DEVICE_STATUS}`, {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch(`${backendUrl}${API_CONFIG.ENDPOINTS.DEVICE_STATUS}`, {
           method: 'GET',
+          signal: controller.signal,
         });
-        setIsBackendOnline(res.ok);
+        clearTimeout(timeout);
+        if (isMounted) setIsBackendOnline(res.ok);
       } catch {
-        setIsBackendOnline(false);
+        if (isMounted) setIsBackendOnline(false);
       }
     };
     checkCloud();
-    const timer = setInterval(checkCloud, 12000);
-    return () => clearInterval(timer);
+    const timer = setInterval(checkCloud, 15000);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
   }, [backendUrl]);
 
   // 1. Suscripción al Canal Directo Bluetooth BLE (Funciona con o sin internet)
   useEffect(() => {
     const unsubVitals = deviceBridge.onVitals((incomingVitals) => {
       if (userManualDisconnectRef.current) return;
-      setVitals(incomingVitals);
-      setConnectedType('direct_ble');
-      setDevice({
-        name: deviceBridge.getDeviceName() || 'SpiroScan-Band (Bluetooth BLE)',
-        model: 'ESP32 Bio-Acústico (MAX30102 PPG)',
-        connected: true,
-        battery: 100,
-        lastSync: new Date().toISOString(),
-        firmwareVersion: 'v2.0 (GATT BLE Directo)',
-        signalStrength: 'excellent',
-      });
 
       const now = Date.now();
+
+      // Throttling adaptativo a ~120ms: previene que el hilo JS de React Native colapse al recibir telemetría a 10 Hz
+      // Si cambia de modo (inicio/fin de escaneo, modo continuo), reacciona de forma instantánea
+      if (now - lastVitalsRenderRef.current >= 120 || incomingVitals.scan_mode !== lastScanModeRef.current) {
+        lastVitalsRenderRef.current = now;
+        lastScanModeRef.current = incomingVitals.scan_mode || 'none';
+        setVitals(incomingVitals);
+      }
+
+      // Solo registrar cambio de estado y nuevo objeto device si no estaba conectado previamente
+      if (connectedTypeRef.current !== 'direct_ble') {
+        connectedTypeRef.current = 'direct_ble';
+        setConnectedType('direct_ble');
+        setDevice({
+          name: deviceBridge.getDeviceName() || 'SpiroScan-Band (Bluetooth BLE)',
+          model: 'ESP32 Bio-Acústico (MAX30102 PPG)',
+          connected: true,
+          battery: 100,
+          lastSync: new Date().toISOString(),
+          firmwareVersion: 'v2.0 (GATT BLE Directo)',
+          signalStrength: 'excellent',
+        });
+      }
 
       // Acumular historia localmente (permite consultar gráficos offline sin internet)
       if (incomingVitals.heartRate > 0 && now - lastHistoryAppendRef.current >= 3000) {
@@ -490,46 +475,64 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     [vitals]
   );
 
+  const connectionContextValue = useMemo<DeviceConnectionContextProps>(() => ({
+    device,
+    connectedType,
+    isDeviceDirectConnected: connectedType !== 'none',
+    isBackendOnline,
+    backendUrl,
+    currentSessionId,
+    updateBackendUrl,
+    connectToWokwiEmulator,
+    connectDirectBluetooth,
+    disconnectAllDevices,
+    wakeDevice,
+    startCardiacScan,
+    startPulmonaryScan,
+    startContinuousMode,
+    stopScan,
+    powerOffDevice,
+  }), [
+    device,
+    connectedType,
+    isBackendOnline,
+    backendUrl,
+    currentSessionId,
+    updateBackendUrl,
+    connectToWokwiEmulator,
+    connectDirectBluetooth,
+    disconnectAllDevices,
+    wakeDevice,
+    startCardiacScan,
+    startPulmonaryScan,
+    startContinuousMode,
+    stopScan,
+    powerOffDevice,
+  ]);
+
   return (
-    <VitalsContext.Provider
-      value={{
-        vitals,
-        aiReport,
-        history,
-        selectedRange,
-        isStreaming,
-        activeScenario,
-        device,
-        connectedType,
-        chatMessages,
-        isChatLoading,
-        isDeviceDirectConnected: connectedType !== 'none',
-        isBackendOnline,
-        backendUrl,
-        currentSessionId,
-        availableSessions,
-        updateBackendUrl,
-        createNewSession,
-        switchSession,
-        refreshSessionsList,
-        setSelectedRange,
-        toggleStreaming,
-        triggerScenario,
-        sendChatMessage,
-        refreshAllData: loadInitialData,
-        connectToWokwiEmulator,
-        connectDirectBluetooth,
-        disconnectAllDevices,
-        wakeDevice,
-        startCardiacScan,
-        startPulmonaryScan,
-        startContinuousMode,
-        stopScan,
-        powerOffDevice,
-      }}
-    >
-      {children}
-    </VitalsContext.Provider>
+    <DeviceConnectionContext.Provider value={connectionContextValue}>
+      <VitalsContext.Provider
+        value={{
+          vitals,
+          aiReport,
+          history,
+          selectedRange,
+          isStreaming,
+          activeScenario,
+          chatMessages,
+          isChatLoading,
+          setSelectedRange,
+          toggleStreaming,
+          triggerScenario,
+          sendChatMessage,
+          refreshAllData: loadInitialData,
+          ...connectionContextValue,
+        }}
+      >
+        {children}
+      </VitalsContext.Provider>
+    </DeviceConnectionContext.Provider>
   );
 };
 

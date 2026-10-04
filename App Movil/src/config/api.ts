@@ -1,12 +1,11 @@
-export const PRIMARY_BACKEND_URL = 'https://ralph-physically-territories-gamma.trycloudflare.com';
+export const PRIMARY_BACKEND_URL = 'https://terminology-reward-troy-competitors.trycloudflare.com';
 
 // Mecanismo de alta disponibilidad y tolerancia a fallos con múltiples endpoints ordenados por prioridad
 export const BACKEND_FALLBACK_URLS: string[] = [
-  'https://ralph-physically-territories-gamma.trycloudflare.com', // 1. Principal Cloudflare actual
-  'https://basin-appreciate-studio-freebsd.trycloudflare.com',    // 2. Respaldo Cloudflare secundario
-  'https://antecedently-unsuppositive-teressa.ngrok-free.dev',    // 3. Respaldo túnel Ngrok
-  'http://192.168.1.163:8000',                                    // 4. Respaldo LAN local
-  'http://localhost:8000',                                        // 5. Respaldo Localhost
+  'https://terminology-reward-troy-competitors.trycloudflare.com', // 1. Principal Cloudflare activo
+  'https://antecedently-unsuppositive-teressa.ngrok-free.dev',    // 2. Respaldo túnel Ngrok
+  'http://192.168.1.163:8000',                                    // 3. Respaldo LAN local
+  'http://localhost:8000',                                        // 4. Respaldo Localhost
 ];
 
 export const DEFAULT_CLOUD_BACKEND = PRIMARY_BACKEND_URL;
