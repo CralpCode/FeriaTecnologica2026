@@ -1,6 +1,15 @@
-export type VitalStatus = 'normal' | 'caution' | 'critical';
+export type VitalStatus = 'normal' | 'caution' | 'critical' | 'insufficient_data';
 
-export interface VitalSigns {
+export interface MeasurementQuality {
+  source?: 'real' | 'simulated' | 'unknown';
+  heartRateValid?: boolean;
+  bloodOxygenValid?: boolean;
+  spo2Calibrated?: boolean;
+  signalQuality?: number | null;
+  sampleAgeMs?: number | null;
+}
+
+export interface VitalSigns extends MeasurementQuality {
   heartRate: number;            // Latidos por minuto (BPM)
   bloodOxygen: number;          // Saturación SpO2 (%)
   systolicPressure: number;     // Siempre 0: el MAX30102 no mide presión (se mantiene por compatibilidad)
@@ -17,7 +26,7 @@ export interface VitalSigns {
   finger?: boolean;             // Dedo detectado sobre el sensor
 }
 
-export interface VitalsHistoryPoint {
+export interface VitalsHistoryPoint extends MeasurementQuality {
   timeLabel: string;
   heartRate: number;
   bloodOxygen: number;
@@ -40,13 +49,13 @@ export interface AcousticAnalysisResult {
 export interface AIAnalysisReport {
   id: string;
   timestamp: string;
-  healthScore: number;          // 0 a 100
+  healthScore: number | null;   // Sin puntuación de salud validada: null
   status: VitalStatus;
   title: string;
   summary: string;
   recommendations: string[];
   anomaliesDetected: string[];
-  confidence: number;           // 0 cuando la evaluación es por reglas (no hay certeza de modelo)
+  confidence: number | null;    // Sin probabilidad clínica validada: null
   method?: string;
   acoustic_analysis?: AcousticAnalysisResult | null; // Resultado del modelo base de pulmón (ICBHI)
 }
@@ -71,7 +80,7 @@ export interface DeviceInfo {
 
 export type TimeRange = '24h' | '7d' | '30d';
 
-export interface RawDevicePacket {
+export interface RawDevicePacket extends MeasurementQuality {
   bpm: number;
   spo2: number;
   systolic: number;
@@ -84,6 +93,32 @@ export interface RawDevicePacket {
   audio_peak: number;
   finger?: boolean;
   device_id?: string;
+  heart_rate_valid?: boolean;
+  spo2_valid?: boolean;
+  spo2_calibrated?: boolean;
+  signal_quality?: number | null;
+  sample_age_ms?: number | null;
+}
+
+export interface PatientContext {
+  age_years: number | null;
+  at_rest: boolean | null;
+  altitude_m: number | null;
+  symptoms: Record<'dyspnea' | 'chest_pain' | 'syncope' | 'cyanosis' | 'confusion' | 'severe_breathlessness' | 'cough' | 'fever' | 'wheeze' | 'orthopnea' | 'edema', boolean | null>;
+  history: Record<'asthma' | 'copd' | 'smoking', boolean | null>;
+}
+
+export interface ClinicalAssessment {
+  status: 'insufficient_data' | 'findings' | 'no_specific_findings' | 'urgent';
+  summary: string;
+  findings: { code: string; label: string; evidence: string[] }[];
+  possibilities: { condition: string; why: string[]; confirmation: string[]; source_ids: string[] }[];
+  missing_data: string[];
+  limitations: string[];
+  next_steps: string[];
+  urgent: boolean;
+  sources: { id: string; title: string; url: string }[];
+  disease_probabilities: null;
 }
 
 // ---------------------------------------------------------------------------

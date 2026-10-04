@@ -53,7 +53,8 @@ def _diagnoses(data_dir: Path) -> dict[str, tuple[str, str]]:
             d = {r[0]: r[1] for r in csv.reader(fh) if len(r) >= 2}
         pid = d.get("ID Paciente", "").strip()
         part = d.get("Particion sugerida (train/validation)", "")
-        out[pid] = (d.get("Diagnostico", "").strip(), "train" if part.lower().startswith("entren") else "test")
+        # La ficha es una partición sugerida del equipo, no evidencia de la oficial.
+        out[pid] = (d.get("Diagnostico", "").strip(), "")
     for name in ("patient_diagnosis.csv", "ICBHI_Challenge_diagnosis.txt"):
         for f in data_dir.glob(f"**/{name}"):
             with open(f, encoding="utf-8") as fh:
@@ -96,6 +97,13 @@ def load_icbhi(data_dir: Path = DATA_DIR) -> list[LungRecording]:
         seen.add(wav.name)
         pid, _, zone, _, device = m.groups()
         d, part = diag.get(pid, ("", ""))
-        split = official.get(wav.stem) or part or ("train" if int(pid) % 10 < 6 else "test")
+        split = official.get(wav.stem)
+        if split is None:
+            raise ValueError(f"Falta partición oficial para {wav.name}: se requiere ICBHI_challenge_train_test.txt")
         recs.append(LungRecording(wav, pid, zone, device, d, split, _cycles(wav.with_suffix(".txt"))))
+    patient_splits = {}
+    for r in recs:
+        if r.patient in patient_splits and patient_splits[r.patient] != r.split:
+            raise ValueError(f"Fuga de datos: paciente {r.patient} cruza train/test")
+        patient_splits[r.patient] = r.split
     return recs

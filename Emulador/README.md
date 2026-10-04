@@ -1,4 +1,8 @@
-# 🚀 Emulador Wokwi - Sistema Embebido ESP32 (Feria Tecnológica)
+# Emuladores: exclusivamente demostración, sin datos de pacientes
+
+`device_hardware_streamer.py`, `pc_band_simulator.py` y `Emulador.ino` generan valores sintéticos. No leen sensores reales. Todos sus paquetes llevan `source: "simulated"`, `test: true` y los indicadores de validez de pulso/SpO2 en falso. No deben usarse para entrenar, evaluar exactitud ni orientar un diagnóstico. El nombre histórico `device_hardware_streamer.py` no indica hardware físico. `test_bridge.py` es solamente un stub de conectividad.
+
+## Wokwi ESP32 (Feria Tecnológica)
 
 Proyecto configurado y simulado en **Wokwi** basado en la especificación exacta de componentes y asignación de pines del sistema.
 

@@ -61,7 +61,7 @@ def patient_labels() -> dict[str, dict[str, str]]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="models/heart_cnn_both.pt", help="modelo cardíaco del que se parte")
+    ap.add_argument("--base", default=None, help="extractor con manifiesto de pacientes sin solapamiento con val/test; por defecto se entrena desde cero")
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--patience", type=int, default=8)
     ap.add_argument("--seed", type=int, default=42)
@@ -106,8 +106,17 @@ def main():
         start += k
 
     model = MultiHeadCNN(sizes)
-    base = torch.jit.load(str(ROOT / args.base), map_location="cpu").state_dict()
-    model.features.load_state_dict({k[len("features."):]: v for k, v in base.items() if k.startswith("features.")})
+    if args.base:
+        base_path = ROOT / args.base
+        base_meta = json.loads(base_path.with_suffix(".json").read_text())
+        manifest = base_meta.get("grupos_particiones")
+        if not manifest:
+            raise ValueError("El modelo base carece de manifiesto: no se puede descartar fuga de pacientes")
+        exposed = set(manifest.get("train", [])) | set(manifest.get("val", []))
+        if exposed & (set(groups[va]) | set(groups[te])):
+            raise ValueError("El extractor ya vio pacientes de validación/prueba; use otro base o entrene desde cero")
+        base = torch.jit.load(str(base_path), map_location="cpu").state_dict()
+        model.features.load_state_dict({k[len("features."):]: v for k, v in base.items() if k.startswith("features.")})
     model.to(device)
 
     x_tr = torch.from_numpy(np.concatenate([feats[i] for i in tr]))
@@ -157,7 +166,11 @@ def main():
             b = perm[s:s + 32]
             logits = model(spec_augment(x_tr[b]).to(device))
             yb = y_tr[b].to(device)
-            loss = sum(losses[j](logits[:, a:c], yb[:, j]) for j, (a, c) in enumerate(slices.values()))
+            valid_losses = [losses[j](logits[:, a:c], yb[:, j])
+                            for j, (a, c) in enumerate(slices.values()) if (yb[:, j] >= 0).any()]
+            if not valid_losses:
+                continue
+            loss = sum(valid_losses)
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -175,14 +188,19 @@ def main():
                 break
 
     model.load_state_dict(best_state)
+    validation = score(va)
+    # Toda decisión se fija con validación ANTES de consultar test.
+    visible = {h: m["exactitud_balanceada"] >= max(0.6, m["azar"] + 0.15)
+               for h, m in validation.items()}
     test = score(te)
     print("\n=== PRUEBA (pacientes nunca vistos) ===")
     heads_meta = {}
     for h, m in test.items():
         # Solo se muestra en la app si supera claramente al azar
-        show = m["exactitud_balanceada"] >= max(0.6, m["azar"] + 0.15)
+        show = visible[h]
         a, b = slices[h]
-        heads_meta[h] = {"columnas": [a, b], "clases": classes[h], "mostrar": bool(show), "metricas_prueba": m}
+        heads_meta[h] = {"columnas": [a, b], "clases": classes[h], "mostrar": bool(show),
+                         "metricas_validacion": validation[h], "metricas_prueba": m}
         print(f"{h:11s} exactitud balanceada {m['exactitud_balanceada']:.2f} (azar {m['azar']:.2f}) "
               f"F1 {m['f1_macro']:.2f} n={m['n']} -> {'se muestra' if show else 'NO se muestra'}")
 
@@ -194,6 +212,11 @@ def main():
         "tarea": "caracterización de soplos sistólicos (CirCor 2022)",
         "entrenado": datetime.now().isoformat(timespec="seconds"),
         "base": args.base,
+        "seed": args.seed,
+        "validacion_independiente": True,
+        "validado_dispositivo": False,
+        "grupos_particiones": {name: sorted(set(groups[part])) for name, part in
+                               zip(("train", "val", "test"), (tr, va, te))},
         "pacientes": int(len(set(groups))),
         "particiones": {"train": int(len(tr)), "val": int(len(va)), "test": int(len(te))},
         "caracteristicas": heads_meta,

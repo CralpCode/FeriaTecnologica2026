@@ -66,7 +66,8 @@ static bool ausc_mdns_started = false;
 static volatile int ausc_http_failures = 0;
 
 // Ultima telemetria pendiente de enviar (la escribe el loop, la lee la tarea de envio)
-static char ausc_telem_json[320];
+static char ausc_telem_json[512];
+static unsigned long ausc_telem_queued_ms = 0;
 static volatile bool ausc_telem_pending = false;
 static portMUX_TYPE ausc_telem_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t ausc_telem_task = nullptr;
@@ -179,8 +180,10 @@ static void ausc_telemetry_task(void*) {
     if (!ausc_wifi_ready() || !ausc_server_known() || !ausc_telem_pending) continue;
     portENTER_CRITICAL(&ausc_telem_mux);
     memcpy(json, ausc_telem_json, sizeof(json));
+    bool expired = millis() - ausc_telem_queued_ms > 2000;
     ausc_telem_pending = false;
     portEXIT_CRITICAL(&ausc_telem_mux);
+    if (expired) continue;
 
     String url = ausc_server() + "/api/telemetry";
     ausc_http_begin(http, tls, plain, url);
@@ -204,6 +207,7 @@ void ausc_send_telemetry(const char* json) {
   portENTER_CRITICAL(&ausc_telem_mux);
   strncpy(ausc_telem_json, json, sizeof(ausc_telem_json) - 1);
   ausc_telem_json[sizeof(ausc_telem_json) - 1] = '\0';
+  ausc_telem_queued_ms = millis();
   ausc_telem_pending = true;
   portEXIT_CRITICAL(&ausc_telem_mux);
 }
@@ -282,7 +286,7 @@ bool ausc_start() {
   HTTPClient http;
   ausc_http_begin(http, tls, plain, ausc_server() + "/api/audio/start");
   http.addHeader("Content-Type", "application/json");
-  String body = String("{\"device_id\":\"") + DEVICE_ID + "\",\"sample_rate\":" + AUSC_SAMPLE_RATE + "}";
+  String body = String("{\"device_id\":\"") + DEVICE_ID + "\",\"sample_rate\":" + AUSC_SAMPLE_RATE + ",\"source\":\"real\"}";
   int code = http.POST(body);
   String resp = http.getString();
   http.end();

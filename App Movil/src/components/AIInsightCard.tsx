@@ -5,13 +5,12 @@ import { Colors } from '../theme/colors';
 import { AIAnalysisReport } from '../types/vitals';
 
 interface AIInsightCardProps {
-  report: any | null;
+  report: AIAnalysisReport | null;
   onAskAI?: () => void;
 }
 
 export const AIInsightCard: React.FC<AIInsightCardProps> = ({ report, onAskAI }) => {
   const robotScale = useRef(new Animated.Value(1)).current;
-  const scoreGlow = useRef(new Animated.Value(1)).current;
   const btnScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -30,29 +29,12 @@ export const AIInsightCard: React.FC<AIInsightCardProps> = ({ report, onAskAI })
       ])
     );
 
-    const scoreAnim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(scoreGlow, {
-          toValue: 1.06,
-          duration: 1500,
-          useNativeDriver: true,
-        }),
-        Animated.timing(scoreGlow, {
-          toValue: 1.0,
-          duration: 1500,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-
     robotAnim.start();
-    scoreAnim.start();
 
     return () => {
       robotAnim.stop();
-      scoreAnim.stop();
     };
-  }, [robotScale, scoreGlow]);
+  }, [robotScale]);
 
   if (!report) {
     return (
@@ -63,7 +45,7 @@ export const AIInsightCard: React.FC<AIInsightCardProps> = ({ report, onAskAI })
               <MaterialCommunityIcons name="robot" size={20} color={Colors.primary} />
             </View>
             <View>
-              <Text style={styles.headerTitle}>Asistente Médico IA</Text>
+              <Text style={styles.headerTitle}>Asistente de orientación</Text>
               <Text style={styles.timestampText}>Monitoreo Automático</Text>
             </View>
           </View>
@@ -75,13 +57,12 @@ export const AIInsightCard: React.FC<AIInsightCardProps> = ({ report, onAskAI })
     );
   }
 
-  const isAlert = report.status === 'critical' || report.riskLevel === 'high';
-  const isCaution = report.status === 'caution' || report.riskLevel === 'medium';
+  const isAlert = report.status === 'critical';
+  const isCaution = report.status === 'caution';
   const accentColor = isAlert ? Colors.danger : isCaution ? Colors.warning : Colors.aiPurple;
 
-  const anomalies: string[] = report.anomaliesDetected || report.detectedAnomalies || [];
+  const anomalies: string[] = report.anomaliesDetected || [];
   const recommendations: string[] = report.recommendations || [];
-  const healthScore = report.healthScore !== undefined ? report.healthScore : 85;
   const title = report.title || 'Evaluación de Salud';
   const summary = report.summary || 'Monitoreo biomédico activo.';
 
@@ -100,20 +81,16 @@ export const AIInsightCard: React.FC<AIInsightCardProps> = ({ report, onAskAI })
           </Animated.View>
           <View>
             <View style={styles.tagRow}>
-              <Text style={styles.headerTitle}>Evaluación en Vivo (reglas)</Text>
+              <Text style={styles.headerTitle}>Valoración orientativa</Text>
               <View style={styles.liveBadge}>
-                <Text style={styles.liveText}>REGLAS FIJAS</Text>
+                <Text style={styles.liveText}>ORIENTACIÓN</Text>
               </View>
             </View>
-            <Text style={styles.timestampText}>Evaluado en tiempo real</Text>
+            <Text style={styles.timestampText}>Sin probabilidad de enfermedad validada</Text>
           </View>
         </View>
 
-        {/* Score de Salud Biométrica Animado */}
-        <Animated.View style={[styles.scoreBadge, { borderColor: accentColor, transform: [{ scale: scoreGlow }] }]}>
-          <Text style={[styles.scoreNumber, { color: accentColor }]}>{healthScore}</Text>
-          <Text style={styles.scoreUnit}>/100</Text>
-        </Animated.View>
+
       </View>
 
       {/* Título y Resumen Clínico */}
@@ -185,7 +162,7 @@ export const AIInsightCard: React.FC<AIInsightCardProps> = ({ report, onAskAI })
             </View>
           </View>
           <Text style={styles.acousticDetailText}>
-            Certeza: {report.acoustic_analysis.confidence}% · Score ICBHI: {report.acoustic_analysis.score_icbhi || 61.22}% (Patient-Wise CV)
+            Resultado acústico del modelo. No es certeza de diagnóstico ni identifica una enfermedad.
           </Text>
         </View>
       )}

@@ -3,7 +3,9 @@ import json
 import os
 from datetime import datetime, timedelta
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "telemetry.db")
+DB_PATH = os.getenv("SPIROSCAN_DB_PATH", os.path.join(os.path.dirname(__file__), "telemetry.db"))
+
+from measurement_quality import metadata, usable_value
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -75,8 +77,16 @@ def init_db():
             pdf_path TEXT
         );
         """)
+        conn.execute("""CREATE TABLE IF NOT EXISTS clinical_context (
+            session_id TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at TEXT NOT NULL
+        )""")
+        vcols = {r[1] for r in conn.execute("PRAGMA table_info(vitals_log)")}
+        if "measurement_metadata" not in vcols:
+            conn.execute("ALTER TABLE vitals_log ADD COLUMN measurement_metadata TEXT DEFAULT '{}'")
         # Migraciones simples para bases creadas con versiones anteriores
         cols = {r[1] for r in conn.execute("PRAGMA table_info(recordings)")}
+        if "source" not in cols:
+            conn.execute("ALTER TABLE recordings ADD COLUMN source TEXT DEFAULT 'unknown'")
         if "details" not in cols:
             conn.execute("ALTER TABLE recordings ADD COLUMN details TEXT")
         if "mode" not in cols:
@@ -91,8 +101,8 @@ def save_reading(data: dict):
     
     bpm = int(data.get("bpm", data.get("heartRate", 0)))
     spo2 = float(data.get("spo2", data.get("bloodOxygen", 0.0)))
-    audio_rms = float(data.get("audio_rms", 0.0))
-    audio_peak = float(data.get("audio_peak", 0.0))
+    audio_rms = float(data.get("audio_rms") or 0.0)
+    audio_peak = float(data.get("audio_peak") or 0.0)
     device_id = str(data.get("session_id", data.get("device_id", "default")))
     
     # Solo se guarda lo que el hardware mide. El MAX30102 no mide presión arterial ni
@@ -107,12 +117,13 @@ def save_reading(data: dict):
     with conn:
         conn.execute("""
         INSERT INTO vitals_log 
-        (timestamp, heartRate, bloodOxygen, systolicPressure, diastolicPressure, temperature, hrv, stressLevel, audio_rms, audio_peak, device_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (now_iso, bpm, spo2, systolic, diastolic, temp, hrv, stress, audio_rms, audio_peak, device_id))
+        (timestamp, heartRate, bloodOxygen, systolicPressure, diastolicPressure, temperature, hrv, stressLevel, audio_rms, audio_peak, device_id, measurement_metadata)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (now_iso, bpm, spo2, systolic, diastolic, temp, hrv, stress, audio_rms, audio_peak, device_id, json.dumps(metadata(data))))
     conn.close()
 
     return {
+        **metadata(data),
         "heartRate": bpm,
         "bloodOxygen": spo2,
         "systolicPressure": systolic,
@@ -135,7 +146,7 @@ def get_latest_reading(session_id: str = None):
     if session_id:
         row = conn.execute("SELECT * FROM vitals_log WHERE device_id = ? ORDER BY id DESC LIMIT 1", (session_id,)).fetchone()
     
-    if not row:
+    if not row and session_id is None:
         row = conn.execute("SELECT * FROM vitals_log ORDER BY id DESC LIMIT 1").fetchone()
     conn.close()
 
@@ -145,6 +156,7 @@ def get_latest_reading(session_id: str = None):
             if (datetime.now() - dt).total_seconds() <= 15:
                 is_active = bool(row["heartRate"] > 0 and row["bloodOxygen"] > 0)
                 return {
+                    **json.loads(row["measurement_metadata"] or "{}"),
                     "device_connected": is_active,
                     "heartRate": row["heartRate"],
                     "bloodOxygen": row["bloodOxygen"],
@@ -202,6 +214,7 @@ def get_history_points(time_range: str = "24h", limit: int = 100, session_id: st
             time_label = "Ahora"
 
         points.append({
+            **json.loads(r["measurement_metadata"] or "{}"),
             "timestamp": r["timestamp"],
             "timeLabel": time_label,
             "heartRate": r["heartRate"],
@@ -212,7 +225,7 @@ def get_history_points(time_range: str = "24h", limit: int = 100, session_id: st
             "stressLevel": r["stressLevel"],
             "audio_rms": r["audio_rms"] if "audio_rms" in r.keys() else 0.0,
             "audio_peak": r["audio_peak"] if "audio_peak" in r.keys() else 0.0,
-            "hrv": r["hrv"] if "hrv" in r.keys() else 45,
+            "hrv": r["hrv"] if "hrv" in r.keys() else 0,
             "device_id": r["device_id"] if "device_id" in r.keys() else "default",
             "session_id": r["device_id"] if "device_id" in r.keys() else "default"
         })
@@ -371,18 +384,49 @@ def get_report(report_id: int):
 
 
 def get_vitals_summary(session_id: str) -> dict:
-    """Estadísticas de las lecturas válidas (con dedo en el sensor) de una sesión."""
+    """Only explicitly real, valid measurements; each channel is independent."""
     conn = get_db_connection()
-    row = conn.execute("""
-        SELECT COUNT(*) AS n, MIN(timestamp) AS inicio, MAX(timestamp) AS fin,
-               AVG(heartRate) AS hr_prom, MIN(heartRate) AS hr_min, MAX(heartRate) AS hr_max,
-               AVG(bloodOxygen) AS spo2_prom, MIN(bloodOxygen) AS spo2_min, MAX(bloodOxygen) AS spo2_max,
-               AVG(NULLIF(hrv, 0)) AS hrv_prom
-        FROM vitals_log WHERE device_id = ? AND heartRate > 0 AND bloodOxygen > 0
-    """, (session_id,)).fetchone()
+    rows = conn.execute("SELECT * FROM vitals_log WHERE device_id = ? ORDER BY id", (session_id,)).fetchall()
     conn.close()
-    d = dict(row)
-    for k, v in d.items():
-        if isinstance(v, float):
-            d[k] = round(v, 1)
-    return d
+    points = [_measurement_dict(r) for r in rows]
+    hr = [v for p in points if (v := usable_value(p, "heartRate", check_timestamp=False)) is not None]
+    spo2 = [v for p in points if (v := usable_value(p, "bloodOxygen", check_timestamp=False)) is not None]
+    out = {"n": len(hr), "n_spo2": len(spo2), "inicio": points[0]["timestamp"] if points else None,
+           "fin": points[-1]["timestamp"] if points else None, "hrv_prom": None}
+    for name, values in (("hr", hr), ("spo2", spo2)):
+        out.update({name + "_prom": round(sum(values) / len(values), 1) if values else None,
+                    name + "_min": min(values) if values else None,
+                    name + "_max": max(values) if values else None})
+    return out
+
+
+def _measurement_dict(row):
+    out = dict(row)
+    out.update(json.loads(out.pop("measurement_metadata", None) or "{}"))
+    return out
+
+
+def get_recent_readings(session_id: str, seconds: int = 60) -> list[dict]:
+    since = (datetime.now() - timedelta(seconds=seconds)).isoformat()
+    conn = get_db_connection()
+    rows = conn.execute("SELECT * FROM vitals_log WHERE device_id = ? AND timestamp >= ? ORDER BY id",
+                        (session_id, since)).fetchall()
+    conn.close()
+    return [_measurement_dict(r) for r in rows]
+
+
+def get_clinical_context(session_id: str) -> dict:
+    conn = get_db_connection()
+    row = conn.execute("SELECT content FROM clinical_context WHERE session_id = ?", (session_id,)).fetchone()
+    conn.close()
+    return json.loads(row["content"]) if row else {}
+
+
+def save_clinical_context(session_id: str, content: dict) -> dict:
+    conn = get_db_connection()
+    with conn:
+        conn.execute("INSERT INTO clinical_context (session_id, content, updated_at) VALUES (?, ?, ?) "
+                     "ON CONFLICT(session_id) DO UPDATE SET content=excluded.content, updated_at=excluded.updated_at",
+                     (session_id, json.dumps(content, allow_nan=False), datetime.now().isoformat()))
+    conn.close()
+    return content

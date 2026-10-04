@@ -46,88 +46,21 @@ def llm_available() -> bool:
         return False
 
 
+def assessment_to_report(assessment: dict) -> dict:
+    status = {"urgent": "critical", "findings": "caution", "no_specific_findings": "normal",
+              "insufficient_data": "insufficient_data"}[assessment["status"]]
+    return {"id": str(uuid.uuid4())[:8], "timestamp": datetime.now().isoformat(),
+            "healthScore": None, "confidence": None, "status": status,
+            "title": "Valoración orientativa", "summary": assessment["summary"],
+            "recommendations": assessment["next_steps"],
+            "anomaliesDetected": [f["label"] for f in assessment["findings"]],
+            "method": "reglas_trazables", "acoustic_analysis": None,
+            "assessment": assessment}
+
+
 def analyze_vitals_report(vitals: dict) -> dict:
-    """Evaluación por reglas fijas de los valores que el MAX30102 sí mide (pulso y SpO2)."""
-    hr = vitals.get("heartRate", 0)
-    spo2 = vitals.get("bloodOxygen", 0.0)
-
-    # Modelo base de pulmón (ICBHI): solo si alguien envía las 61 características ya calculadas.
-    acoustic = None
-    if vitals.get("audio_features"):
-        from ml import lung_baseline
-        acoustic = lung_baseline.classify_features(vitals["audio_features"])
-        if acoustic.get("prediction") == "no_disponible":
-            acoustic = None
-
-    if hr == 0 and spo2 == 0.0:
-        return {
-            "id": str(uuid.uuid4())[:8],
-            "timestamp": datetime.now().isoformat(),
-            "healthScore": 0,
-            "status": "normal",
-            "title": "Dispositivo en Reposo",
-            "summary": "Esperando lecturas del sensor. Coloca el dedo sobre el MAX30102 o inicia el emulador.",
-            "recommendations": ["Coloca el dedo sobre el sensor óptico y mantenlo quieto unos segundos."],
-            "anomaliesDetected": [],
-            "confidence": 0,
-            "method": "reglas",
-            "acoustic_analysis": acoustic,
-        }
-
-    anomalies = []
-    recommendations = []
-    status = "normal"
-    health_score = 95
-
-    if hr > 120:
-        anomalies.append("Frecuencia cardíaca elevada (> 120 BPM)")
-        recommendations.append("Reposo de 5 minutos y repetir la medición. Si persiste, consultar a personal de salud.")
-        status = "caution"
-        health_score -= 20
-    elif hr < 45:
-        anomalies.append("Frecuencia cardíaca baja (< 45 BPM)")
-        recommendations.append("Repetir la medición; si hay mareo o fatiga, consultar a personal de salud.")
-        status = "caution"
-        health_score -= 15
-    else:
-        recommendations.append("Frecuencia cardíaca dentro del rango esperado en reposo.")
-
-    if spo2 < 90.0:
-        anomalies.append("Saturación de oxígeno baja (< 90 % SpO2)")
-        recommendations.append("Verificar la colocación del sensor y buscar valoración médica si se confirma.")
-        status = "critical"
-        health_score -= 40
-    elif spo2 < 94.0:
-        anomalies.append("Saturación de oxígeno reducida (90-93 %)")
-        recommendations.append("Verificar el ajuste del sensor y repetir la medición.")
-        if status != "critical":
-            status = "caution"
-        health_score -= 10
-    else:
-        recommendations.append("Saturación de oxígeno en rango normal (≥ 94 %).")
-
-    if acoustic and acoustic.get("is_abnormal") == 1:
-        anomalies.append(f"Posibles ruidos respiratorios anormales (modelo base: {acoustic['prediction']})")
-        recommendations.append("Es un tamizaje: se sugiere auscultación por personal de salud.")
-        if status != "critical":
-            status = "caution"
-        health_score -= 15
-
-    health_score = max(20, min(100, health_score))
-    title = "Monitoreo Estable" if status == "normal" else ("Parámetros Alterados" if status == "caution" else "Alerta")
-    summary = f"Lecturas actuales: {hr} BPM, {spo2}% SpO2. Evaluación por reglas; no es un diagnóstico."
-
-    return {
-        "id": str(uuid.uuid4())[:8],
-        "timestamp": datetime.now().isoformat(),
-        "healthScore": health_score,
-        "status": status,
-        "title": title,
-        "summary": summary,
-        "recommendations": recommendations,
-        "anomaliesDetected": anomalies,
-        # Reglas fijas: no hay un "porcentaje de certeza" que reportar.
-        "confidence": 0,
-        "method": "reglas",
-        "acoustic_analysis": acoustic,
-    }
+    """Compatibility for exports. No fabricated health score or default normal."""
+    from clinical_assessment import assess
+    from measurement_quality import usable_value
+    measured = {key: usable_value(vitals, key) for key in ("heartRate", "bloodOxygen")}
+    return assessment_to_report(assess({}, measured, []))

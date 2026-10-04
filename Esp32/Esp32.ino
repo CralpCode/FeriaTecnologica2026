@@ -5,7 +5,7 @@
  * DISPOSITIVO: ESP32-WROOM-32D / ESP32-DEVKITC-V4
  * SENSORES:
  *   - U1: Sensor Optico MAX30102 (Pulsioximetria / PPG por I2C: SDA 21, SCL 22)
- *   - U2: Microfono Digital I2S INMP441 (Acustica Medica / Nivel de Estres)
+ *   - U2: Microfono Digital I2S INMP441 (Acustica Medica / audio digital)
  *   - LED1: LED RGB Direccionable WS2812B (Indicador Clinico de Pulso y Estado: IO25)
  *   - K1: Boton Pulsador de Activacion / Reactivacion (IO17)
  * COMUNICACION:
@@ -15,7 +15,7 @@
  *   - Consola Serial USB (115200 baud): Telemetria 100% Real
  *   - CERO SIMULACION: Todos los valores provienen exclusivamente del hardware fisico.
  * GESTION ENERGETICA:
- *   - Ventana Activa: 2 minutos de transmision continua.
+ *   - Ventana Activa: 24 horas de transmision continua.
  *   - Reposo / Suspension: Apaga perifericos y entra en reposo durante 2 horas.
  *   - Reactivacion: Presionar el boton K1 (IO17) o enviar 'WAKE'.
  * AUSCULTACION:
@@ -33,6 +33,7 @@
 #include <Adafruit_NeoPixel.h>
 #include "MAX30105.h"
 #include "heartRate.h"
+#include "ppg_quality.h"
 
 // ------------------------------------------------------------------------------
 // 1. CONFIGURACION BLE (BLUETOOTH LOW ENERGY / GATT DUAL)
@@ -83,22 +84,15 @@ MAX30105 particleSensor;
 bool sensor_hw_found = false;
 bool finger_detected = false;
 
-// Variables de Calculo de Pulso Cardiaco y Oximetria Real
-const byte RATE_SIZE = 4;
-byte rates[RATE_SIZE];
-byte rateSpot = 0;
-long lastBeat = 0;
-float beatsPerMinute = 0;
+// A fresh PPG pulse estimate is available only after basic acquisition checks.
+// SpO2 requires calibration/validation of this assembled optical system.
+PpgQuality ppg_quality;
+uint32_t ppg_sample_clock_ms = 0;
+unsigned long ppg_last_poll_ms = 0;
 int beat_avg = 0;
-float spo2_val = 0.0f;
-// Temperatura del CHIP MAX30102 (no es temperatura corporal); solo diagnostico por serial.
-float body_temp = 0.0f;
-
-// Variables de Acustica Medica y Estres (INMP441 Real)
-float audio_rms = 0.0f;
-float audio_peak = 0.0f;
-int stress_score = 0;
-int hrv_ms = 0;
+bool heart_rate_valid = false;
+float audio_rms = 0.0f;  // dBFS, not calibrated dB SPL
+float audio_peak = 0.0f; // digital amplitude
 bool beat_detected_flash = false;
 
 // ------------------------------------------------------------------------------
@@ -227,16 +221,21 @@ void setup_max30102() {
 
     if (i2c_err == 0) {
       // Iniciar libreria SparkFun
-      particleSensor.begin(Wire, I2C_SPEED_STANDARD);
+      bool sensor_identified = particleSensor.begin(Wire, I2C_SPEED_STANDARD);
       // SparkFun begin() internamente llama Wire.begin() sin parametros (resetea a 21/22).
       // Re-aplicamos de inmediato los pines configurados por el usuario:
       Wire.begin(sda, scl, 100000);
 
-      particleSensor.setup();
+      // begin() must identify the part; an I2C ACK alone is insufficient.
+      if (!sensor_identified || particleSensor.readPartID() != 0x15) continue;
+      // MAX30102 has red + IR (no green): 100 samples/s without FIFO averaging.
+      particleSensor.setup(0x1F, 1, 2, 100, 411, 4096);
       particleSensor.setPulseAmplitudeRed(0x1F);
       particleSensor.setPulseAmplitudeGreen(0);
       particleSensor.setPulseAmplitudeIR(0x24);
       sensor_hw_found = true;
+      ppg_quality.invalidate("acquiring");
+      ppg_last_poll_ms = millis();
       active_i2c_sda = sda;
       active_i2c_scl = scl;
       Serial.printf("[OK] U1 Sensor MAX30102 DETECTADO Y CONFIGURADO [%s | SDA: IO%d, SCL: IO%d].\r\n",
@@ -251,7 +250,7 @@ void setup_max30102() {
   Serial.println(F("[WARN] Sensor MAX30102 no detectado en I2C en ninguna combinacion de pines."));
   Serial.println(F("========================================================================="));
   Serial.println(F("  >>> DIAGNOSTICO DE CONEXION FISICA (NodeMCU ESP-32S):               <<<"));
-  Serial.println(F("  1. CABLE 5V: Conectar VIN del sensor al pin 5V (esquina junto a USB) <<<"));
+  Serial.println(F("  1. VIN: revisar tension admitida por tu placa MAX30102 antes de conectar <<<"));
   Serial.println(F("  2. CABLE GND: Asegurate de conectar GND (pin 7 del sensor).         <<<"));
   Serial.println(F("  3. CABLES I2C: Conectar SCL a P22 y SDA a P21 (o P23).              <<<"));
   Serial.println(F("========================================================================="));
@@ -288,8 +287,8 @@ void update_audio_rms() {
 
     // Solo si el modulo INMP441 esta fisicamente conectado y detecta senal acustica real
     if (raw_rms > 15.0f && max_peak > 50) {
-      float calculated_db = 20.0f * log10((float)raw_rms) + 12.0f;
-      if (calculated_db > 105.0f) calculated_db = 105.0f;
+      // Digital full scale for the shifted I2S samples, not sound pressure in dB SPL.
+      float calculated_db = 20.0f * log10((float)raw_rms / 131072.0f);
       audio_rms = (audio_rms * 0.75f) + (calculated_db * 0.25f);
       audio_peak = (float)max_peak;
     } else {
@@ -308,146 +307,55 @@ void update_audio_rms() {
 // ------------------------------------------------------------------------------
 void update_biometric_signals() {
   unsigned long now = millis();
-
-  if (sensor_hw_found) {
-    long irValue = particleSensor.getIR();
-    long redValue = particleSensor.getRed();
-
-    bool prev_finger = finger_detected;
-
-    // Solo si el dedo esta fisicamente colocado sobre el sensor
-    if (irValue > 45000) {
-      finger_detected = true;
-
-      // Lectura termica del sensor (cada 3 segundos para no bloquear el bus I2C de pulso)
-      static unsigned long last_temp_read = 0;
-      if (now - last_temp_read >= 3000 || body_temp < 25.0f) {
-        last_temp_read = now;
-        float read_t = particleSensor.readTemperature();
-        if (read_t >= 25.0f && read_t <= 45.0f) {
-          body_temp = read_t;
-        }
-      }
-
-      // Deteccion de latido arterial 100% real por onda pulsada PPG (Sin desbordamiento de 16-bit)
-      static long ir_dc_filter = 0;
-      static long last_ac_signal = 0;
-      static bool peak_armed = true;
-
-      // Filtro DC para canal Infrarrojo
-      if (ir_dc_filter == 0) ir_dc_filter = irValue;
-      ir_dc_filter = (ir_dc_filter * 15 + irValue) / 16;
-      long ac_signal = irValue - ir_dc_filter;
-
-      // Filtro DC para canal Rojo
-      static long red_dc_filter = 0;
-      if (red_dc_filter == 0) red_dc_filter = redValue;
-      red_dc_filter = (red_dc_filter * 15 + redValue) / 16;
-      long red_ac_signal = redValue - red_dc_filter;
-
-      // Rastreo de amplitud pulsátil AC (Picos sistólicos y valles diastólicos)
-      static long ir_ac_max = -99999;
-      static long ir_ac_min = 99999;
-      static long red_ac_max = -99999;
-      static long red_ac_min = 99999;
-
-      if (ac_signal > ir_ac_max) ir_ac_max = ac_signal;
-      if (ac_signal < ir_ac_min) ir_ac_min = ac_signal;
-      if (red_ac_signal > red_ac_max) red_ac_max = red_ac_signal;
-      if (red_ac_signal < red_ac_min) red_ac_min = red_ac_signal;
-
-      // Cruce de umbral ascendente de la onda sistolica real
-      if (ac_signal > 20 && last_ac_signal <= 20 && peak_armed) {
-        long delta = now - lastBeat;
-        if (delta > 360 && delta < 1450) { // 41 a 166 BPM reales
-          lastBeat = now;
-          beatsPerMinute = 60000.0f / (float)delta;
-
-          if (beatsPerMinute >= 45.0f && beatsPerMinute <= 180.0f) {
-            rates[rateSpot++] = (byte)beatsPerMinute;
-            rateSpot %= RATE_SIZE;
-
-            int sum = 0;
-            byte count = 0;
-            for (byte x = 0; x < RATE_SIZE; x++) {
-              if (rates[x] > 0) { sum += rates[x]; count++; }
-            }
-            if (count > 0) beat_avg = sum / count;
-            hrv_ms = constrain((int)abs(delta - (60000 / max(40, beat_avg))), 20, 95);
-
-            beat_detected_flash = true;
-            beat_flash_start = now;
-
-            // Calculo Fisiologico de SpO2 por Proporcion de Ratios AC/DC
-            long ir_p2p = ir_ac_max - ir_ac_min;
-            long red_p2p = red_ac_max - red_ac_min;
-
-            if (ir_p2p > 4 && red_p2p > 4 && ir_dc_filter > 0 && red_dc_filter > 0) {
-              float ratio_r = ((float)red_p2p / (float)red_dc_filter) / ((float)ir_p2p / (float)ir_dc_filter);
-              float instant_spo2 = 110.0f - (22.0f * ratio_r);
-              instant_spo2 = constrain(instant_spo2, 91.0f, 99.8f);
-
-              if (spo2_val < 80.0f) {
-                spo2_val = instant_spo2;
-              } else {
-                spo2_val = (spo2_val * 0.75f) + (instant_spo2 * 0.25f);
-              }
-            } else {
-              // Micro-variación arterial fisiológica en vez de congelar el valor
-              float breath_wave = 0.35f * sin((float)now / 2200.0f) + 0.15f * cos((float)now / 950.0f);
-              float base_val = (spo2_val >= 90.0f && spo2_val <= 99.8f) ? spo2_val : 98.2f;
-              spo2_val = constrain(base_val + breath_wave, 94.0f, 99.6f);
-            }
-
-            // Reinicio de ventanas AC para el siguiente ciclo cardiaco
-            ir_ac_max = -99999; ir_ac_min = 99999;
-            red_ac_max = -99999; red_ac_min = 99999;
-          }
-          peak_armed = false;
-        } else if (delta >= 1450) {
-          lastBeat = now; // Reinicio de sincronia
-        }
-      }
-      if (ac_signal < -10) {
-        peak_armed = true; // Rearme para el proximo latido
-      }
-      last_ac_signal = ac_signal;
-
-      // Indice de estres EXPERIMENTAL (no validado). El MAX30102 no mide presion arterial,
-      // por eso ya no se estima: un valor calculado solo a partir del pulso seria inventado.
-      if (beat_avg > 0) {
-        stress_score = constrain((int)((beat_avg - 50) * 1.25f + (audio_rms * 0.35f)), 10, 98);
-      }
-    } else {
-      // Sensor fisico presente pero SIN DEDO: Todo en 0 de inmediato
-      finger_detected = false;
-      beat_avg = 0;
-      spo2_val = 0.0f;
-      body_temp = 0.0f;
-      stress_score = 0;
-      hrv_ms = 0;
-      for (byte i = 0; i < RATE_SIZE; i++) rates[i] = 0;
-      rateSpot = 0;
-      lastBeat = 0;
-    }
-
-    // Emision reactiva instantanea al colocar o quitar el dedo
-    if (prev_finger != finger_detected && power_state == STATE_TRANSMITTING_ACTIVE) {
-      broadcast_telemetry();
-    }
+  bool prev_finger = finger_detected;
+  if (!sensor_hw_found) {
+    ppg_quality.invalidate("sensor_unavailable");
   } else {
-    // Sensor no encontrado o desconectado: Todo estrictamente en 0
-    finger_detected = false;
-    beat_avg = 0;
-    spo2_val = 0.0f;
-    body_temp = 0.0f;
-    stress_score = 0;
-    hrv_ms = 0;
+    // A gap longer than the library's four-sample FIFO can erase samples.
+    // Discard that segment; never interpret the interrupted timing as pulse.
+    if (now - ppg_last_poll_ms > 30) {
+      particleSensor.clearFIFO();
+      while (particleSensor.available()) particleSensor.nextSample();
+      ppg_quality.invalidate("stale");
+    }
+    ppg_last_poll_ms = now;
+    uint16_t acquired = particleSensor.check();
+    if (acquired >= STORAGE_SIZE) {
+      while (particleSensor.available()) particleSensor.nextSample();
+      particleSensor.clearFIFO();
+      ppg_quality.invalidate("poor");
+    } else {
+      while (particleSensor.available()) {
+        uint32_t ir = particleSensor.getFIFOIR();
+        uint32_t red = particleSensor.getFIFORed();
+        particleSensor.nextSample();
+        ppg_sample_clock_ms += 10; // configured 100 samples/s
+        bool usable = ppg_quality.sample(ir, red, now);
+        // SparkFun's detector operates on actual FIFO samples, including settling.
+        bool beat = checkForBeat((int32_t)ir);
+        if (usable && beat) {
+          ppg_quality.beat(ppg_sample_clock_ms, now);
+          beat_detected_flash = true;
+          beat_flash_start = now;
+        }
+      }
+    }
+    // Recheck the physical device after missing samples, allowing hot reconnection.
+    if (ppg_quality.age(now) > 1000 && now > 1000) {
+      Wire.beginTransmission(0x57);
+      if (Wire.endTransmission() != 0) {
+        sensor_hw_found = false;
+        ppg_quality.invalidate("sensor_unavailable");
+      }
+    }
   }
-
-  if (beat_detected_flash && (now - beat_flash_start > 60)) {
-    beat_detected_flash = false;
+  finger_detected = sensor_hw_found && ppg_quality.contact(now);
+  heart_rate_valid = sensor_hw_found && ppg_quality.valid(now);
+  beat_avg = heart_rate_valid ? ppg_quality.bpm(now) : 0;
+  if (prev_finger != finger_detected && power_state == STATE_TRANSMITTING_ACTIVE) {
+    broadcast_telemetry();
   }
+  if (beat_detected_flash && (now - beat_flash_start > 60)) beat_detected_flash = false;
 }
 
 // ------------------------------------------------------------------------------
@@ -462,7 +370,7 @@ void activate_transmission() {
   strip.show();
 
   Serial.println(F("\r\n========================================================================="));
-  Serial.println(F("  >>> [SPIROSCAN ACTIVADO] Transmision activa iniciada (2 minutos)    <<<"));
+  Serial.println(F("  >>> [SPIROSCAN ACTIVADO] Transmision activa iniciada (24 horas)    <<<"));
   Serial.println(F("=========================================================================\r\n"));
 }
 
@@ -475,7 +383,7 @@ void enter_standby() {
   strip.show();
 
   Serial.println(F("\r\n========================================================================="));
-  Serial.println(F("  >>> [MODO REPOSO] Ventana de 2 minutos completada para ahorro.      <<<"));
+  Serial.println(F("  >>> [MODO REPOSO] Ventana de 24 horas completada para ahorro.      <<<"));
   Serial.println(F("  >>> Sensores y radio en reposo. Proximo chequeo en 2 horas.         <<<"));
   Serial.println(F("  >>> Pulsa el boton K1 (IO17) o envia 'WAKE' para reactivar.         <<<"));
   Serial.println(F("=========================================================================\r\n"));
@@ -534,32 +442,44 @@ void handle_incoming_commands(String cmd) {
 // 10. TRANSMISION DE TELEMETRIA (BLE & SERIAL USB) - 100% REAL
 // ------------------------------------------------------------------------------
 void broadcast_telemetry() {
-  char json_payload[280];
-  snprintf(json_payload, sizeof(json_payload),
-           "{\"bpm\":%d,\"spo2\":%.1f,\"stress\":%d,\"hrv\":%d,\"audio_rms\":%.2f,\"audio_peak\":%.2f,\"finger\":%s,\"test\":false,\"device_id\":\"" DEVICE_ID "\"}",
-           beat_avg, spo2_val, stress_score, hrv_ms,
-           audio_rms, audio_peak, finger_detected ? "true" : "false");
+  unsigned long now = millis();
+  heart_rate_valid = sensor_hw_found && ppg_quality.valid(now);
+  beat_avg = heart_rate_valid ? ppg_quality.bpm(now) : 0;
+  finger_detected = sensor_hw_found && ppg_quality.contact(now);
+  // Zero is a legacy missing-value sentinel, never an observed oxygen saturation.
+  // No manufactured SpO2/HRV/stress/pressure/temperature values are emitted.
+  char json_payload[512];
+  int written = snprintf(json_payload, sizeof(json_payload),
+           "{\"bpm\":%d,\"spo2\":0,\"audio_rms\":%.2f,\"audio_peak\":%.2f,\"finger\":%s,"
+           "\"test\":false,\"source\":\"real\",\"heartRateValid\":%s,\"bloodOxygenValid\":false,"
+           "\"spo2Calibrated\":false,\"signalQuality\":\"%s\",\"sampleAgeMs\":%lu,"
+           "\"audioUnit\":\"dBFS\",\"device_id\":\"" DEVICE_ID "\"}",
+           beat_avg, audio_rms, audio_peak, finger_detected ? "true" : "false",
+           heart_rate_valid ? "true" : "false",
+           sensor_hw_found ? ppg_quality.quality(now) : "sensor_unavailable",
+           (unsigned long)ppg_quality.age(now));
+  if (written < 0 || written >= (int)sizeof(json_payload)) {
+    Serial.println(F("[ERROR] Telemetria demasiado grande; paquete descartado."));
+    return;
+  }
 
-  // 1. Envio por BLE (Directo a Google Chrome / Edge en Celular y PC sin cables)
   if (ble_connected && pTelemetryCharacteristic != NULL) {
-    pTelemetryCharacteristic->setValue((uint8_t*)json_payload, strlen(json_payload));
-    pTelemetryCharacteristic->notify();
-
+    // Never send truncated JSON to clients with a small negotiated ATT MTU.
+    if (pServer->getPeerMTU(pServer->getConnId()) >= strlen(json_payload) + 3) {
+      pTelemetryCharacteristic->setValue((uint8_t*)json_payload, strlen(json_payload));
+      pTelemetryCharacteristic->notify();
+    }
     if (pHrCharacteristic != NULL) {
-      uint8_t hr_packet[2] = { 0, (uint8_t)beat_avg };
+      // Heart Rate Measurement: contact supported, contact detected only when valid.
+      uint8_t hr_packet[2] = { (uint8_t)(heart_rate_valid ? 0x06 : 0x04), (uint8_t)beat_avg };
       pHrCharacteristic->setValue(hr_packet, 2);
       pHrCharacteristic->notify();
     }
   }
-
-  // 2. Envio a Consola Serial USB (115200 baud)
-  Serial.printf("[TELEMETRIA] FC: %3d BPM | SpO2: %4.1f%% | HRV: %2d ms | Estres(exp): %2d/100 | Audio: %4.1f dB | T.chip: %4.1f C | Dedo: %s | BLE: %s | WiFi: %s\r\n",
-                beat_avg, spo2_val, hrv_ms, stress_score, audio_rms, body_temp,
-                finger_detected ? "SI" : "NO", ble_connected ? "CONECTADO" : "ESPERANDO",
-                ausc_wifi_ready() ? (ausc_server_known() ? "OK+SERVIDOR" : "OK, buscando servidor") : "--");
+  Serial.printf("[TELEMETRIA] FC: %d BPM | valida: %s | SpO2: no calibrada | senal: %s | Audio: %.1f dBFS\r\n",
+                beat_avg, heart_rate_valid ? "SI" : "NO",
+                sensor_hw_found ? ppg_quality.quality(now) : "sensor_unavailable", audio_rms);
   Serial.println(json_payload);
-
-  // 3. Envio por WiFi al servidor (1 Hz): la app lee estos datos desde la Mac
   ausc_send_telemetry(json_payload);
 }
 
@@ -635,7 +555,7 @@ void update_led_effects() {
     stream_color = strip.Color(p, 0, p);
   } else {
     // Reactivo al sonido ambiental captado por el micrófono INMP441
-    int audio_bright = constrain((int)(audio_rms * 2.5f), 10, 140);
+    int audio_bright = audio_rms < 0 ? constrain((int)((audio_rms + 90) * 2), 0, 140) : 0;
     stream_color = strip.Color(0, audio_bright, audio_bright / 2);
   }
   if (NUM_LEDS > 6) strip.setPixelColor(6, stream_color);
@@ -668,6 +588,7 @@ class MyServerCallbacks: public BLEServerCallbacks {
 // 12. SETUP & BUCLE PRINCIPAL (LOOP)
 // ------------------------------------------------------------------------------
 void setup() {
+  Serial.setTxBufferSize(1024);
   Serial.begin(115200);
   delay(300);
 
@@ -692,7 +613,7 @@ void setup() {
   // Iniciar BLE (Bluetooth Low Energy / GATT Dual)
   Serial.printf("[*] Iniciando BLE: \"%s\"...\r\n", BLE_DEVICE_NAME);
   BLEDevice::init(BLE_DEVICE_NAME);
-  BLEDevice::setMTU(256);
+  BLEDevice::setMTU(512);
 
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
@@ -763,6 +684,12 @@ void loop() {
 
   // 2b. Modo auscultacion: mientras graba, el I2S es exclusivo de la captura
   if (ausc_busy()) {
+    // Acquisition pauses for audio; old pulse values must immediately become invalid.
+    ppg_quality.invalidate("stale");
+    if (current_millis - previous_millis_telemetry >= 1000) {
+      previous_millis_telemetry = current_millis;
+      broadcast_telemetry();
+    }
     ausc_capture_step();
     update_led_effects();
     return;
@@ -786,9 +713,9 @@ void loop() {
     }
   }
 
-  // 7. Envio periodico de Telemetria en tiempo real ultra-rapido (Cada 100 ms = 10 Hz)
+  // 7. Telemetria a 1 Hz: evita bloquear UART y perder muestras PPG
   if (power_state == STATE_TRANSMITTING_ACTIVE) {
-    if (current_millis - previous_millis_telemetry >= 100) {
+    if (current_millis - previous_millis_telemetry >= 1000) {
       previous_millis_telemetry = current_millis;
       broadcast_telemetry();
     }

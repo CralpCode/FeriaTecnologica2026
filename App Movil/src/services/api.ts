@@ -2,7 +2,7 @@ import { API_CONFIG, getSessionId } from '../config/api';
 import {
   VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange, AcousticAnalysisResult,
   AuscultationFocus, AuscultationMode, RecordingResult, ClinicalAlert, FocusGuide, HeartModelInfo,
-  SessionReport, TriageResult,
+  SessionReport, TriageResult, PatientContext, ClinicalAssessment,
 } from '../types/vitals';
 
 const ZERO_VITALS: VitalSigns = {
@@ -20,6 +20,10 @@ const ZERO_VITALS: VitalSigns = {
   timestamp: '',
   device_connected: false,
   finger: false,
+  source: 'unknown',
+  heartRateValid: false,
+  bloodOxygenValid: false,
+  spo2Calibrated: false,
 };
 
 class ApiService {
@@ -105,13 +109,13 @@ class ApiService {
     if (!vitals || vitals.heartRate === 0) {
       return {
         id: 'zero-vitals',
-        healthScore: 0,
-        status: 'normal',
+        healthScore: null,
+        status: 'insufficient_data',
         title: 'Dispositivo en Espera',
         summary: 'Dispositivo en espera. Enlaza tu ESP32 para ver el análisis médico.',
         recommendations: ['Esperando telemetría del sensor...'],
         anomaliesDetected: [],
-        confidence: 0,
+        confidence: null,
         timestamp: new Date().toISOString(),
       };
     }
@@ -120,19 +124,19 @@ class ApiService {
       const response = await fetch(`${this.baseUrl}${API_CONFIG.ENDPOINTS.AI_ANALYZE}`, {
         method: 'POST',
         headers: this.defaultHeaders,
-        body: JSON.stringify({ vitals }),
+        body: JSON.stringify({ session_id: getSessionId() }),
       });
       if (!response.ok) throw new Error('API error');
       const data = await response.json();
       return {
         id: data.id || `ai-${Date.now()}`,
-        healthScore: data.healthScore ?? 0,
-        status: data.status || 'normal',
+        healthScore: null,
+        status: data.status || 'insufficient_data',
         title: data.title || 'Evaluación por reglas',
         summary: data.summary || '',
         recommendations: data.recommendations || [],
         anomaliesDetected: data.anomaliesDetected || [],
-        confidence: data.confidence ?? 0,
+        confidence: null,
         method: data.method,
         timestamp: data.timestamp || new Date().toISOString(),
         acoustic_analysis: data.acoustic_analysis || null,
@@ -164,7 +168,7 @@ class ApiService {
       const response = await fetch(`${this.baseUrl}${API_CONFIG.ENDPOINTS.AI_CHAT}`, {
         method: 'POST',
         headers: this.defaultHeaders,
-        body: JSON.stringify({ message, vitals: currentVitals, session_id: sid }),
+        body: JSON.stringify({ message, session_id: sid }),
       });
       if (!response.ok) throw new Error('Chat API error');
       const data = await response.json();
@@ -201,6 +205,20 @@ class ApiService {
 
   getTriage(): Promise<TriageResult> {
     return this.request(`/api/triage/${encodeURIComponent(getSessionId())}`);
+  }
+
+  getPatientContext(sessionId: string): Promise<PatientContext> {
+    return this.request(`/api/clinical/context/${encodeURIComponent(sessionId)}`);
+  }
+
+  savePatientContext(sessionId: string, context: PatientContext): Promise<PatientContext> {
+    return this.request(`/api/clinical/context/${encodeURIComponent(sessionId)}`, {
+      method: 'PUT', body: JSON.stringify(context),
+    });
+  }
+
+  getClinicalAssessment(sessionId: string): Promise<ClinicalAssessment> {
+    return this.request(`/api/clinical/assessment/${encodeURIComponent(sessionId)}`);
   }
 
   getModelsInfo(): Promise<{ corazon: HeartModelInfo; pulmon: Record<string, { loaded: boolean }> }> {

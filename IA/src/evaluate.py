@@ -6,6 +6,8 @@ from sklearn.metrics import roc_auc_score, confusion_matrix, f1_score
 def clinical_metrics(y_true, y_prob, threshold: float = 0.5) -> dict:
     y_true = np.asarray(y_true).astype(int)
     y_prob = np.asarray(y_prob, dtype=float)
+    if not len(y_true) or y_true.shape != y_prob.shape or not np.isfinite(y_prob).all():
+        raise ValueError("Se requieren etiquetas y puntajes finitos de igual tamaño, no vacíos")
     y_pred = (y_prob >= threshold).astype(int)
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
     se = tp / (tp + fn) if (tp + fn) else 0.0
@@ -17,7 +19,7 @@ def clinical_metrics(y_true, y_prob, threshold: float = 0.5) -> dict:
         "sensibilidad": float(se),
         "especificidad": float(sp),
         "score_medio": float((se + sp) / 2),
-        "auc": float(roc_auc_score(y_true, y_prob)) if len(set(y_true)) > 1 else float("nan"),
+        "auc": float(roc_auc_score(y_true, y_prob)) if len(set(y_true)) > 1 else None,
         "f1_macro": float(f1_score(y_true, y_pred, average="macro")),
         "exactitud": float((tp + tn) / len(y_true)),
         "matriz_confusion": {"VN": int(tn), "FP": int(fp), "FN": int(fn), "VP": int(tp)},

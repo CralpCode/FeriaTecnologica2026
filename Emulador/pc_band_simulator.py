@@ -5,7 +5,7 @@ ESTACIÓN DE EMULACIÓN DE HARDWARE BIOMÉDICO - SPIROSCAN BAND (PC EMULATOR)
 ==============================================================================
 1. Abre un servidor de enlace directo en el puerto 8765 para tu teléfono.
 2. Espera a que tu teléfono se conecte.
-3. Transmite telemetría biomédica fisiológica en tiempo real al teléfono.
+3. Transmite valores SINTÉTICOS de demostración; no mide ni diagnostica.
 ==============================================================================
 """
 
@@ -37,7 +37,7 @@ except ImportError:
     import requests
 
 PORT = 8765
-DEVICE_ID = "SpiroScan-PC-Band"
+DEVICE_ID = "SpiroScan-PC-SIMULADOR"
 
 class VitalsState:
     def __init__(self):
@@ -99,8 +99,10 @@ async def ws_server_loop():
         
         await websocket.send(json.dumps({
             "type": "DEVICE_HANDSHAKE",
+            "source": "simulated",
+            "test": True,
             "device": DEVICE_ID,
-            "mac": "C4:4F:33:1A:89:BC"
+            "mac": "SIMULATED"
         }))
         
         try:
@@ -115,6 +117,12 @@ async def ws_server_loop():
         while state.running:
             if state.connected_phones:
                 packet = json.dumps({
+                    "source": "simulated",
+                    "test": True,
+                    "heartRateValid": False,
+                    "bloodOxygenValid": False,
+                    "spo2Calibrated": False,
+                    "signalQuality": "simulated",
                     "bpm": state.bpm,
                     "spo2": state.spo2,
                     "systolic": state.systolic,
@@ -143,7 +151,7 @@ def terminal_display_loop():
         status_txt = f"ENLAZADO A {num_conn} TELEFONO(S)" if num_conn > 0 else "ESPERANDO QUE TU TELEFONO SE CONECTE..."
         
         print("================================================================================")
-        print("     ESTACION DE HARDWARE BIOMEDICO PC - SPIROSCAN BAND                          ")
+        print("     SIMULADOR PC - DATOS SINTETICOS, SIN VALIDEZ CLINICA                          ")
         print("================================================================================")
         print(f" Dispositivo: {DEVICE_ID}  |  Puerto: {PORT}")
         print(f" Estado: {status_txt}")
@@ -152,7 +160,7 @@ def terminal_display_loop():
         bpm_bar = "#" * min(20, int((state.bpm - 40) / 6))
         print("+------------------------------------------------------------------------------+")
         print("|  RITMO CARDIACO (BPM)        |  OXIGENO (SpO2)       |  PRESION ARTERIAL     |")
-        print(f"|  {state.bpm:3d} BPM  [{bpm_bar:<15}]  |  {state.spo2:4.1f} %  (Optimo)     |  {state.systolic:3d}/{state.diastolic:2d} mmHg          |")
+        print(f"|  {state.bpm:3d} BPM  [{bpm_bar:<15}]  |  {state.spo2:4.1f} %  (Demo)      |  {state.systolic:3d}/{state.diastolic:2d} mmHg          |")
         print("+------------------------------------------------------------------------------+")
         print("|  MICROFONO AMBIENTAL (I2S)   |  ESTRES AUTONOMO      |  ENLACE DIRECTO       |")
         print(f"|  {state.audio_rms:5.2f} dB (Pico: {state.audio_peak:5.2f} dB) |  Score: {state.stress:2d} / 100       |  ws://192.168.1.163:8765 |")

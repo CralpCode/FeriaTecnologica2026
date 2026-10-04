@@ -38,7 +38,11 @@ def compute_features(recs, ir: np.ndarray | None, ir_tag: str):
     CACHE.mkdir(parents=True, exist_ok=True)
     out = []
     for i, r in enumerate(recs):
-        key = hashlib.md5(f"{r.path}|{ir_tag}|{F.TARGET_SR}|{F.N_MELS}|{F.WINDOW_S}".encode()).hexdigest()
+        # Invalida caché al cambiar audio, respuesta impulsional o extractor.
+        digest = hashlib.sha256(r.path.read_bytes()).hexdigest()
+        extractor = hashlib.sha256(Path(F.__file__).read_bytes()).hexdigest()
+        ir_digest = hashlib.sha256(ir.tobytes()).hexdigest() if ir is not None else "none"
+        key = hashlib.sha256(f"{digest}|{extractor}|{ir_digest}".encode()).hexdigest()
         cf = CACHE / f"{key}.npy"
         if cf.exists():
             x = np.load(cf)
@@ -46,7 +50,8 @@ def compute_features(recs, ir: np.ndarray | None, ir_tag: str):
             y, sr = sf.read(r.path, dtype="float32", always_2d=False)
             if ir is not None:
                 # Corrección acústica: simula que el audio clínico fue grabado con nuestro dispositivo.
-                y = fftconvolve(F.preprocess(y, sr), ir, mode="full")[: len(y)]
+                y = F.preprocess(y, sr)
+                y = fftconvolve(y, ir, mode="full")[:len(y)]
                 sr = F.TARGET_SR
             x = F.features_from_audio(y, sr)
             np.save(cf, x)
@@ -190,12 +195,18 @@ def main():
         "features": {k: getattr(F, k) for k in
                      ["TARGET_SR", "BAND_HZ", "WINDOW_S", "HOP_S", "N_FFT", "HOP_LENGTH", "N_MELS", "FMIN", "FMAX"]},
         "particiones": {"train": int(len(tr)), "val": int(len(va)), "test": int(len(te))},
+        "seed": args.seed,
+        "grupos_particiones": {name: sorted({recs[i].group for i in part})
+                                for name, part in zip(("train", "val", "test"), (tr, va, te))},
+        "probability_kind": "uncalibrated_model_score",
+        "validado_dispositivo": False,
         "metricas_prueba": test,
         "advertencia": warn,
         "limitaciones": [
             "Tamizaje: no diagnostica; sugiere referir a ecocardiograma.",
             "PhysioNet 2016 no publica ID de paciente: la partición es por registro.",
-            "Validado solo con datasets públicos, no con pacientes.",
+            "Evaluado con grabaciones públicas; sin validación prospectiva ni del dispositivo propio.",
+            "Ausencia de soplo no equivale a ausencia de enfermedad; las etiquetas de CirCor y PhysioNet no son equivalentes.",
         ],
     }
     (MODELS / f"{args.out}.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False))

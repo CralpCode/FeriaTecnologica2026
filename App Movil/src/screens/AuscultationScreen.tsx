@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Activi
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useClinical } from '../context/ClinicalContext';
+import { ClinicalAssessmentPanel } from '../components/ClinicalAssessmentPanel';
 import { apiService } from '../services/api';
 import { AuscultationFocus, AuscultationMode, FocusGuide, HeartModelInfo, RecordingResult } from '../types/vitals';
 
@@ -91,6 +92,8 @@ export const AuscultationScreen: React.FC = () => {
           Tamizaje con IA: detecta posibles sonidos cardíacos o pulmonares anormales para sugerir una referencia médica. No es un diagnóstico.
         </Text>
       </View>
+
+      <ClinicalAssessmentPanel />
 
       {/* 0. Corazón o pulmones */}
       <View style={styles.modeRow}>
@@ -268,7 +271,7 @@ const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) => {
             <View style={[styles.barThreshold, { left: `${thr * 100}%` }]} />
           </View>
           <Text style={styles.modelNote}>
-            Probabilidad de sonido anormal: {pct(prob)} · umbral de referencia: {pct(thr)}
+            Salida del clasificador de sonido: {pct(prob)} · umbral: {pct(thr)}. No es probabilidad de enfermedad ni certeza clínica.
           </Text>
         </>
       ) : (
@@ -302,7 +305,7 @@ const DetailsView: React.FC<{ result: RecordingResult }> = ({ result }) => {
       {traits.map(([k, t]) => (
         <Text key={k} style={styles.detailsLine}>
           • {TRAIT_NAMES[k] || k}: <Text style={{ fontWeight: '700' }}>{t.valor}</Text>
-          <Text style={styles.detailsMeta}>  (seguridad {pct(t.confianza)} · el modelo acierta {pct(t.exactitud_modelo)})</Text>
+          <Text style={styles.detailsMeta}>  (salida del modelo {pct(t.confianza)} · exactitud en su conjunto de prueba {pct(t.exactitud_modelo)})</Text>
         </Text>
       ))}
       {sounds.length > 0 && <Text style={styles.detailsTitle}>Ruidos respiratorios</Text>}
@@ -316,7 +319,7 @@ const DetailsView: React.FC<{ result: RecordingResult }> = ({ result }) => {
       {d.patron && (
         <Text style={styles.detailsLine}>
           • Patrón compatible con: <Text style={{ fontWeight: '700' }}>{d.patron.compatible_con}</Text>
-          <Text style={styles.detailsMeta}>  ({pct(d.patron.probabilidad)} · sugerencia, no diagnóstico)</Text>
+          <Text style={styles.detailsMeta}>  (descripción acústica; no identifica una enfermedad)</Text>
         </Text>
       )}
       {d.modelo_base && (

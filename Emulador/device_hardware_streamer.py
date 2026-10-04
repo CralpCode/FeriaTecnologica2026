@@ -1,3 +1,6 @@
+"""SIMULADOR: sus valores aleatorios son exclusivamente datos de demostración.
+No lee MAX30102/INMP441 ni debe usarse en una valoración clínica.
+"""
 import asyncio
 import json
 import math
@@ -6,8 +9,8 @@ import time
 import websockets
 
 PORT = 8765
-DEVICE_NAME = "SpiroScan-Band (ESP32)"
-DEVICE_MAC = "C4:4F:33:1A:89:BC"
+DEVICE_NAME = "SpiroScan SIMULADOR (sin sensores)"
+DEVICE_MAC = "SIMULATED"
 
 # Estado interno de los sensores de la pulsera
 sensor_state = {
@@ -29,7 +32,7 @@ async def sensor_simulation_loop():
         base_bpm = 74 if sensor_state["scenario"] == "rest" else 122
         base_spo2 = 98.5 if sensor_state["scenario"] == "rest" else 96.8
         
-        # Oscilaciones fisiológicas reales
+        # Oscilaciones sintéticas de demostración; no son mediciones fisiológicas
         sinus = 5.0 * math.sin(now * 1.5)
         mayer = 3.0 * math.cos(now * 0.6)
         
@@ -44,10 +47,18 @@ async def sensor_simulation_loop():
         if connected_phones:
             raw_packet = json.dumps({
                 "type": "RAW_SENSOR_DATA",
+                "source": "simulated",
+                "test": True,
                 "device": DEVICE_NAME,
                 "mac": DEVICE_MAC,
                 "battery": sensor_state["battery"],
                 "data": {
+                    "source": "simulated",
+                    "test": True,
+                    "heartRateValid": False,
+                    "bloodOxygenValid": False,
+                    "spo2Calibrated": False,
+                    "signalQuality": "simulated",
                     "bpm": sensor_state["bpm"],
                     "spo2": sensor_state["spo2"],
                     "systolic": sensor_state["systolic"],
@@ -71,9 +82,11 @@ async def handle_phone_connection(websocket):
     # Enviar paquete de bienvenida del dispositivo
     await websocket.send(json.dumps({
         "type": "DEVICE_HANDSHAKE",
+        "source": "simulated",
+        "test": True,
         "device": DEVICE_NAME,
         "mac": DEVICE_MAC,
-        "protocol": "BLE_DIRECT_STREAM_v1.4",
+        "protocol": "SIMULATION_WEBSOCKET_v1",
         "battery": sensor_state["battery"]
     }))
     
@@ -95,7 +108,7 @@ async def handle_phone_connection(websocket):
 
 async def main():
     print("=" * 75)
-    print(f"  PULSERA INTELIGENTE {DEVICE_NAME} - SERVIDOR DE ENLACE DIRECTO (BLE/LOCAL)")
+    print(f"  DEMOSTRACION {DEVICE_NAME} - TODOS LOS DATOS SON SINTETICOS")
     print(f"  Esperando que la App Móvil se conecte directamente en el puerto {PORT}...")
     print("=" * 75)
     

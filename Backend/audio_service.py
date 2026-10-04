@@ -46,12 +46,12 @@ def _wav_path(rec_id: str) -> Path:
     return REC_DIR / f"{rec_id}.wav"
 
 
-def start(session_id: str, location: str, sample_rate: int, mode: str | None = None) -> str:
+def start(session_id: str, location: str, sample_rate: int, mode: str | None = None, source: str = "unknown") -> str:
     location = _check_location(location)
     rec_id = f"rec_{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:4]}"
     _pcm_path(rec_id).write_bytes(b"")
     database.create_recording(rec_id, session_id, location, sample_rate)
-    database.update_recording(rec_id, mode=resolve_mode(location, mode))
+    database.update_recording(rec_id, mode=resolve_mode(location, mode), source=source)
     return rec_id
 
 
@@ -85,7 +85,7 @@ def finish(rec_id: str) -> dict:
     return _classify_and_store(rec_id, wav, len(raw) / 2 / rec["sample_rate"])
 
 
-def save_upload(session_id: str, location: str, data: bytes, mode: str | None = None) -> dict:
+def save_upload(session_id: str, location: str, data: bytes, mode: str | None = None, source: str = "unknown") -> dict:
     location = _check_location(location)
     rec_id = f"rec_{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:4]}"
     wav = _wav_path(rec_id)
@@ -93,7 +93,7 @@ def save_upload(session_id: str, location: str, data: bytes, mode: str | None = 
     with wave.open(str(wav), "rb") as w:
         sr, n = w.getframerate(), w.getnframes()
     database.create_recording(rec_id, session_id, location, sr)
-    database.update_recording(rec_id, mode=resolve_mode(location, mode))
+    database.update_recording(rec_id, mode=resolve_mode(location, mode), source=source)
     return _classify_and_store(rec_id, wav, n / sr)
 
 
@@ -116,6 +116,7 @@ def _classify_and_store(rec_id: str, wav: Path, duration: float) -> dict:
         "recording_id": rec_id,
         "session_id": rec["session_id"],
         "location": rec["location"],
+        "source": rec["source"],
         "mode": rec.get("mode") or "corazon",
         "duration_s": rec["duration_s"],
         **out,

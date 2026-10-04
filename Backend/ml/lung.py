@@ -57,6 +57,10 @@ def classify_wav(path: str | Path) -> dict:
     quality = signal_quality(y)
     quality["duration_s"] = round(duration, 2)
     base = {"probability": None, "threshold": None, "quality": quality, "model": "pulmon"}
+    base.update({"probability_kind": "uncalibrated_model_score", "clinical_diagnosis": False})
+    if quality["non_finite"] or quality["clipped"] or quality["flat"]:
+        return {**base, "result": "calidad_insuficiente", "details": {},
+                "reason": "Señal inválida, saturada o sin variación; repetir la grabación"}
     if duration < MIN_DURATION_S:
         return {**base, "result": "calidad_insuficiente", "details": {},
                 "reason": f"Grabación muy corta ({duration:.1f} s; mínimo {MIN_DURATION_S:.0f} s)"}
@@ -85,6 +89,7 @@ def classify_wav(path: str | Path) -> dict:
     details: dict = {}
     abnormal = False
     top_prob = 0.0
+    usable_outputs = 0
 
     if sounds is not None:
         model, meta = sounds
@@ -95,8 +100,9 @@ def classify_wav(path: str | Path) -> dict:
         found = {}
         for j, name in enumerate(meta["salidas"]):
             m = meta["metricas_prueba"][name]
-            if not m.get("mostrar"):
+            if not m.get("mostrar") or not np.isfinite(score[j]):
                 continue
+            usable_outputs += 1
             present = bool(score[j] >= m["umbral"])
             found[name] = {"presente": present, "probabilidad": round(float(score[j]), 3),
                            "umbral": round(m["umbral"], 3), "sensibilidad_modelo": round(m["sensibilidad"], 2)}
@@ -111,12 +117,16 @@ def classify_wav(path: str | Path) -> dict:
         k = int(np.argmax(p))
         cls = meta["clases"][k]
         per = meta["metricas_prueba"]["por_clase"][cls]
-        if per.get("mostrar"):
+        if per.get("mostrar") and np.isfinite(p).all():
+            usable_outputs += 1
             details["patron"] = {"compatible_con": cls, "probabilidad": round(float(p[k]), 3),
                                  "sensibilidad_modelo": round(per["sensibilidad"], 2)}
             abnormal |= cls != "sano"
 
     if baseline.get("estado") == "ok":
         details["modelo_base"] = baseline
+    if not usable_outputs:
+        return {**base, "result": "indeterminado", "details": details,
+                "reason": "Ninguna salida del modelo cumple los criterios de uso; no se puede concluir normalidad"}
     return {**base, "result": "anormal" if abnormal else "normal", "reason": None,
             "probability": round(top_prob, 4) if "ruidos" in details else None, "details": details}

@@ -134,6 +134,9 @@ def task_sounds(recs, args, device):
     thr = [youden(Y[va, j], pv[:, j]) for j in range(2)]
     metrics = {}
     for j, name in enumerate(SOUND_LABELS):
+        vy, vp = Y[va, j], pv[:, j] >= thr[j]
+        val_auc = float(roc_auc_score(vy, pv[:, j])) if len(set(vy)) > 1 else 0.0
+        val_se = float(recall_score(vy, vp, zero_division=0))
         yt, pred = Y[te, j], pt[:, j] >= thr[j]
         metrics[name] = {
             "sensibilidad": float(recall_score(yt, pred, zero_division=0)),
@@ -141,6 +144,9 @@ def task_sounds(recs, args, device):
             "auc": float(roc_auc_score(yt, pt[:, j])) if len(set(yt)) > 1 else float("nan"),
             "umbral": thr[j],
             "n_positivos": int(yt.sum()),
+            "mostrar": bool(val_auc >= 0.7 and val_se >= 0.5),
+            "criterio_mostrar": "AUC y sensibilidad exclusivamente en validación",
+            "validacion": {"auc": val_auc, "sensibilidad": val_se},
         }
     # Puntaje oficial ICBHI (4 clases por ciclo)
     true4 = (Y[te, 0] * 1 + Y[te, 1] * 2).astype(int)
@@ -148,13 +154,14 @@ def task_sounds(recs, args, device):
     se = float(np.mean(pred4[true4 > 0] == true4[true4 > 0])) if (true4 > 0).any() else float("nan")
     sp = float(np.mean(pred4[true4 == 0] == 0)) if (true4 == 0).any() else float("nan")
     metrics["icbhi"] = {"sensibilidad": se, "especificidad": sp, "puntaje": (se + sp) / 2}
-    for name, m in metrics.items():
-        m["mostrar"] = bool(name == "icbhi" or (m["auc"] >= 0.7 and m["sensibilidad"] >= 0.5))
+    metrics["icbhi"]["mostrar"] = True
     return model, X[te[:1]], {
         "tarea": "crepitantes y sibilancias (ICBHI 2017)",
         "salidas": SOUND_LABELS,
         "metricas_prueba": metrics,
         "agregacion": "promedio de las 2 ventanas más altas de la grabación",
+        "validado_grabacion_sin_segmentacion": False,
+        "advertencia_agregacion": "Métricas por ciclo anotado; no validan ventanas sin segmentación ni la agregación del servidor",
         "particiones": {"train": int(len(tr)), "val": int(len(va)), "test": int(len(te))},
     }
 
@@ -198,12 +205,17 @@ def task_disease(recs, args, device):
         return float(balanced_accuracy_score(y, p.argmax(1)))
 
     model = train_loop(model, x_tr, y_tr, loss_fn, val_fn, args.epochs, args.patience, device)
+    yv, pv = patient_probs(va)
+    val_bal = float(balanced_accuracy_score(yv, pv.argmax(1)))
+    val_recalls = recall_score(yv, pv.argmax(1), labels=list(range(len(classes))), average=None, zero_division=0)
+    visible = {k: bool(val_recalls[k] >= 0.5 and (yv == k).sum() >= 2) for k in range(len(classes))}
     y, p = patient_probs(te)
     pred = p.argmax(1)
     recalls = recall_score(y, pred, labels=list(range(len(classes))), average=None, zero_division=0)
     present = set(y.tolist())
     per_class = {c: {"sensibilidad": float(recalls[k]), "pacientes_prueba": int((y == k).sum()),
-                     "mostrar": bool(k in present and recalls[k] >= 0.5 and (y == k).sum() >= 2)}
+                     "mostrar": visible[k], "sensibilidad_validacion": float(val_recalls[k]),
+                     "pacientes_validacion": int((yv == k).sum())}
                  for k, c in enumerate(classes)}
     bal = float(balanced_accuracy_score(y, pred))
     return model, torch.from_numpy(feats[te[0]][:1]), {
@@ -216,7 +228,10 @@ def task_disease(recs, args, device):
             "por_clase": per_class,
             "matriz_confusion": confusion_matrix(y, pred, labels=list(range(len(classes)))).tolist(),
         },
-        "mostrar": bool(bal >= max(0.5, 1 / len(classes) + 0.15)),
+        "mostrar": bool(val_bal >= max(0.5, 1 / len(classes) + 0.15)),
+        "criterio_mostrar": "Exclusivamente validación; test no decide salidas",
+        "metricas_validacion": {"exactitud_balanceada_pacientes": val_bal},
+        "validado_grabacion_individual": False,
         "particiones": {"train": int(len(tr)), "val": int(len(va)), "test": int(len(te))},
     }
 
@@ -243,6 +258,9 @@ def main():
     out = "lung_sounds_cnn" if args.task == "ruidos" else "lung_disease_cnn"
     meta.update({
         "entrenado": datetime.now().isoformat(timespec="seconds"),
+        "seed": args.seed,
+        "probability_kind": "uncalibrated_model_score",
+        "validado_dispositivo": False,
         "features": {k: getattr(LF, k) for k in
                      ["TARGET_SR", "BAND_HZ", "WINDOW_S", "HOP_S", "N_FFT", "HOP_LENGTH", "N_MELS", "FMIN", "FMAX"]},
         "limitaciones": [

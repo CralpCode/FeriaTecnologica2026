@@ -25,7 +25,9 @@ FMIN, FMAX = 100.0, 2000.0
 def preprocess(y: np.ndarray, sr: int) -> np.ndarray:
     y = np.asarray(y, dtype=np.float32)
     if y.ndim > 1:
-        y = y.mean(axis=0)
+        y = y.mean(axis=1)  # soundfile: muestras x canales
+    if not len(y) or not np.isfinite(y).all() or sr <= 0:
+        raise ValueError("Audio vacío, no finito o frecuencia inválida")
     if sr != TARGET_SR:
         y = librosa.resample(y, orig_sr=sr, target_sr=TARGET_SR, res_type="soxr_hq")
     sos = butter(4, BAND_HZ, btype="bandpass", fs=TARGET_SR, output="sos")

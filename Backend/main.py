@@ -3,12 +3,12 @@ import time
 import uuid
 import json
 import asyncio
-from typing import List, Optional, Union, Dict, Any
+from typing import List, Optional, Union, Dict, Any, Literal
 from datetime import datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Request, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 try:
     from dotenv import load_dotenv
@@ -24,6 +24,7 @@ import audio_service
 import llm_tasks
 import reports
 import triage
+import clinical_assessment
 from ml import classifier, lung, lung_baseline
 
 app = FastAPI(
@@ -94,10 +95,19 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 class TelemetryInput(BaseModel):
-    bpm: int
-    spo2: float
-    audio_rms: Optional[float] = 18.5
-    audio_peak: Optional[float] = 28.0
+    model_config = ConfigDict(allow_inf_nan=False)
+    bpm: int = Field(ge=0, le=300)
+    spo2: float = Field(ge=0, le=100)
+    audio_rms: Optional[float] = None
+    audio_peak: Optional[float] = None
+    source: Literal["real", "simulated", "unknown"] = "unknown"
+    heartRateValid: StrictBool = False
+    bloodOxygenValid: StrictBool = False
+    spo2Calibrated: StrictBool = False
+    signalQuality: str = "unknown"
+    sampleAgeMs: Optional[float] = Field(None, ge=0)
+    finger: Optional[StrictBool] = None
+    audioUnit: Optional[str] = None
     # El firmware aún envía systolic/diastolic/temperature; se aceptan pero NO se guardan
     # (el MAX30102 no mide presión arterial ni temperatura corporal).
     systolic: Optional[int] = None
@@ -110,7 +120,7 @@ class TelemetryInput(BaseModel):
     session_name: Optional[str] = None
 
 class AnalyzeInput(BaseModel):
-    vitals: dict
+    vitals: Optional[dict] = None
     session_id: Optional[str] = None
 
 class ChatInput(BaseModel):
@@ -130,7 +140,8 @@ class AudioStartInput(BaseModel):
     session_id: Optional[str] = None
     device_id: Optional[str] = None
     location: Optional[str] = ""
-    sample_rate: int = 16000
+    sample_rate: int = Field(16000, ge=4000, le=48000)
+    source: Literal["real", "simulated", "unknown"] = "unknown"
 
 class AudioArmInput(BaseModel):
     session_id: str
@@ -387,7 +398,7 @@ def generate_pdf_report(points: list, time_range: str) -> bytes:
     header_data = [
         [
             Paragraph("<b>SpiroScan AI</b><br/><font size=8 color='#64748B'>Sistema Hospitalario de Telemetría Biológica IoT</font>", title_style),
-            Paragraph("<font color='#1D4ED8'><b>REPORTE CLÍNICO OFICIAL</b></font><br/><font size=8 color='#64748B'>Verificado por Algoritmo Bio-IA</font>", badge_style)
+            Paragraph("<font color='#1D4ED8'><b>INFORME EXPERIMENTAL</b></font><br/><font size=8 color='#64748B'>Prototipo sin validación clínica</font>", badge_style)
         ]
     ]
     header_table = Table(header_data, colWidths=[360, 180])
@@ -417,7 +428,7 @@ def generate_pdf_report(points: list, time_range: str) -> bytes:
         "bloodOxygen": float(avg_spo2),
     }
     ai_diag = ai_engine.analyze_vitals_report(sample_vitals)
-    health_score = ai_diag.get("healthScore", 95)
+    health_score = ai_diag.get("healthScore")
     diag_status = ai_diag.get("status", "normal")
     diag_title = ai_diag.get("title", "Monitoreo Clínico")
     diag_summary = ai_diag.get("summary", "")
@@ -447,8 +458,8 @@ def generate_pdf_report(points: list, time_range: str) -> bytes:
     stat_spo2 = Paragraph(f"<font size=7 color='#0284C7'><b>OXÍGENO (SpO2)</b></font><br/><font size=13 color='#0284C7'><b>{avg_spo2}%</b></font><br/><font size=6.5 color='#64748B'>Mín: {min_spo2}%</font>", body_style)
     stat_bp = Paragraph(f"<font size=7 color='#D97706'><b>VARIABILIDAD (HRV)</b></font><br/><font size=13 color='#D97706'><b>{avg_hrv}</b></font> <font size=7.5>ms</font><br/><font size=6.5 color='#64748B'>Promedio del periodo</font>", body_style)
     status_hex = '#059669' if diag_status == 'normal' else ('#D97706' if diag_status == 'caution' else '#DC2626')
-    status_label = 'Estable' if diag_status == 'normal' else ('Precaución' if diag_status == 'caution' else 'Crítico')
-    stat_score = Paragraph(f"<font size=7 color='{status_hex}'><b>EVALUACIÓN POR REGLAS</b></font><br/><font size=13 color='{status_hex}'><b>{health_score}/100</b></font><br/><font size=6.5 color='#64748B'>{status_label}</font>", body_style)
+    status_label = 'Estable' if diag_status == 'normal' else ('Precaución' if diag_status == 'caution' else ('Crítico' if diag_status == 'critical' else 'Datos insuficientes'))
+    stat_score = Paragraph(f"<font size=7 color='{status_hex}'><b>EVALUACIÓN POR REGLAS</b></font><br/><font size=13 color='{status_hex}'><b>No validada</b></font><br/><font size=6.5 color='#64748B'>{status_label}</font>", body_style)
 
     stats_table = Table([[stat_hr, stat_spo2, stat_bp, stat_score]], colWidths=[135, 135, 135, 135])
     stats_table.setStyle(TableStyle([
@@ -747,7 +758,7 @@ def export_report(time_range: str = Query("24h", alias="range")):
         "bloodOxygen": float(avg_spo2),
     }
     ai_diag = ai_engine.analyze_vitals_report(sample_vitals)
-    health_score = ai_diag.get("healthScore", 95)
+    health_score = ai_diag.get("healthScore")
     diag_status = ai_diag.get("status", "normal")
     diag_title = ai_diag.get("title", "Monitoreo Clínico")
     diag_summary = ai_diag.get("summary", "")
@@ -893,7 +904,7 @@ def export_report(time_range: str = Query("24h", alias="range")):
                     <div class="brand">SpiroScan AI</div>
                     <div style="font-size: 11px; color: #64748B; margin-top: 2px;">Sistema Hospitalario de Telemetría Biológica IoT</div>
                 </div>
-                <div class="badge">REPORTE CLÍNICO OFICIAL</div>
+                <div class="badge">INFORME EXPERIMENTAL</div>
             </div>
 
             <div class="meta-bar">
@@ -929,7 +940,7 @@ def export_report(time_range: str = Query("24h", alias="range")):
                 </div>
                 <div class="stat-card" style="border-left: 4px solid {status_color};">
                     <div class="meta-label">Evaluación por reglas</div>
-                    <div class="stat-num" style="color: {status_color};">{health_score}/100</div>
+                    <div class="stat-num" style="color: {status_color};">No validada</div>
                     <div style="font-size: 10px; color: #64748B;">{status_label}</div>
                 </div>
             </div>
@@ -978,9 +989,26 @@ def export_report(time_range: str = Query("24h", alias="range")):
     
     return HTMLResponse(content=html)
 
+@app.get("/api/clinical/context/{session_id}")
+def clinical_context(session_id: str):
+    return clinical_assessment.ClinicalContext.model_validate(database.get_clinical_context(session_id)).model_dump()
+
+
+@app.put("/api/clinical/context/{session_id}")
+async def update_clinical_context(session_id: str, payload: clinical_assessment.ClinicalContext):
+    result = database.save_clinical_context(session_id, payload.model_dump())
+    await _publish_triage_if_changed(session_id)
+    return result
+
+
+@app.get("/api/clinical/assessment/{session_id}")
+def get_clinical_assessment(session_id: str):
+    return clinical_assessment.evaluate_session(session_id)
+
+
 @app.post("/api/ai/vitals/analyze")
 def analyze_vitals(payload: AnalyzeInput):
-    return ai_engine.analyze_vitals_report(payload.vitals)
+    return ai_engine.assessment_to_report(clinical_assessment.evaluate_session(_get_effective_session(payload.session_id)))
 
 @app.post("/api/ai/audio/classify")
 def classify_audio_telemetry(payload: AudioClassifyInput):
@@ -1009,7 +1037,7 @@ def direct_llm_generate(payload: LLMDirectInput):
 
 async def _publish_alert(alert: dict):
     await manager.broadcast({"type": "ALERT", "session_id": alert["session_id"], "data": alert})
-    asyncio.create_task(_rewrite_alert(alert))
+    # Keep the deterministic clinical message; unconstrained LLM prose is not clinical evidence.
 
 
 async def _rewrite_alert(alert: dict):
@@ -1091,7 +1119,7 @@ async def audio_start(payload: AudioStartInput):
         payload.session_id or _linked_session() or payload.device_id)
     location = payload.location or (armed["location"] if armed else "")
     try:
-        rec_id = audio_service.start(sid, location, payload.sample_rate, armed.get("mode") if armed else None)
+        rec_id = audio_service.start(sid, location, payload.sample_rate, armed.get("mode") if armed else None, payload.source)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await manager.broadcast({"type": "RECORDING_STARTED", "session_id": sid,
@@ -1125,11 +1153,11 @@ async def audio_finish(recording_id: str = Query(...)):
 
 @app.post("/api/audio/upload")
 async def audio_upload(file: UploadFile = File(...), session_id: str = Form("default"), location: str = Form(""),
-                       mode: Optional[str] = Form(None)):
+                       mode: Optional[str] = Form(None), source: Literal["real", "simulated", "unknown"] = Form("unknown")):
     data = await file.read()
     try:
         result = await asyncio.to_thread(audio_service.save_upload, _get_effective_session(session_id),
-                                         location, data, mode)
+                                         location, data, mode, source)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -1254,13 +1282,7 @@ async def websocket_endpoint(websocket: WebSocket):
 # pulso y SpO2 (el dispositivo no mide presión ni temperatura).
 # ---------------------------------------------------------------------------
 DEMO_AUDIOS_DIR = os.path.join(os.path.dirname(__file__), "demo_audios")
-DEMO_EXAMPLE_VITALS = {
-    "sano": {"bpm": 72, "spo2": 98.5},
-    "sibilancias": {"bpm": 96, "spo2": 93.0},
-    "crepitantes": {"bpm": 88, "spo2": 91.0},
-    "ambos": {"bpm": 106, "spo2": 88.5},
-    "neumonia": {"bpm": 102, "spo2": 89.0},
-}
+
 
 
 def _demo_samples() -> dict:
@@ -1297,9 +1319,8 @@ async def inject_demo_sample(sample_id: str, session_id: Optional[str] = Query(N
         raise HTTPException(status_code=404, detail=f"Muestra '{sample_id}' no encontrada")
     sample = samples[sample_id]
     sid = _get_effective_session(session_id)
-    v = DEMO_EXAMPLE_VITALS.get(sample_id, {"bpm": 75, "spo2": 98.0})
 
-    saved = database.save_reading({"bpm": v["bpm"], "spo2": v["spo2"], "session_id": sid})
+    saved = database.save_reading({"bpm": 0, "spo2": 0, "session_id": sid, "source": "simulated", "heartRateValid": False, "bloodOxygenValid": False})
     saved.update({"device_connected": True, "demo": True})
     _sessions_cache[sid] = {"vitals": saved, "timestamp": time.time(),
                             "last_active": datetime.now().isoformat(), "name": f"Demo ICBHI {sample['patient_id']}"}
@@ -1317,7 +1338,7 @@ async def inject_demo_sample(sample_id: str, session_id: Optional[str] = Query(N
     details = {"modelo_base": acoustic, "demo": {"caso": sample_id, "paciente_icbhi": sample["patient_id"],
                                                  "diagnostico_icbhi": sample["diagnosis"],
                                                  "ciclo": sample["cycle_class_name"]}}
-    database.update_recording(rec_id, mode="pulmon", status="done", finished_at=datetime.now().isoformat(),
+    database.update_recording(rec_id, mode="pulmon", source="simulated", status="done", finished_at=datetime.now().isoformat(),
                               result="anormal" if abnormal else "normal",
                               probability=acoustic.get("probability_abnormal"),
                               threshold=acoustic.get("umbral"), details=details, model="modelo_base_demo")

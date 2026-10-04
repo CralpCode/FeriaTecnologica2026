@@ -62,50 +62,24 @@ const ABSOLUTE_ZERO_VITALS: VitalSigns = {
   timestamp: new Date().toISOString(),
   device_connected: false,
   finger: false,
+  source: 'unknown',
+  heartRateValid: false,
+  bloodOxygenValid: false,
+  spo2Calibrated: false,
 };
 
-const generateLocalMedicalReport = (v: VitalSigns): AIAnalysisReport => {
-  const anomalies: string[] = [];
-  let status: 'normal' | 'caution' | 'critical' = 'normal';
-  let score = 96;
-
-  if (v.bloodOxygen > 0 && v.bloodOxygen < 90) {
-    anomalies.push(`Saturación muy baja (SpO2 ${v.bloodOxygen.toFixed(1)}%)`);
-    status = 'critical';
-    score -= 40;
-  } else if (v.bloodOxygen > 0 && v.bloodOxygen < 94) {
-    anomalies.push(`Saturación reducida (${v.bloodOxygen.toFixed(1)}%)`);
-    status = 'caution';
-    score -= 15;
-  }
-
-  if (v.heartRate > 120) {
-    anomalies.push(`Frecuencia cardíaca elevada (${v.heartRate} BPM)`);
-    if (status !== 'critical') status = 'caution';
-    score -= 15;
-  } else if (v.heartRate > 0 && v.heartRate < 45) {
-    anomalies.push(`Frecuencia cardíaca baja (${v.heartRate} BPM)`);
-    if (status !== 'critical') status = 'caution';
-    score -= 15;
-  }
-
-  return {
-    id: `local-diag-${Date.now()}`,
-    timestamp: new Date().toISOString(),
-    healthScore: Math.max(20, Math.min(100, score)),
-    status,
-    title: anomalies.length > 0 ? 'Valores Fuera de Rango (Sin Servidor)' : 'Valores en Rango (Sin Servidor)',
-    summary: anomalies.length > 0
-      ? `Evaluación local por reglas (no es un diagnóstico): ${anomalies.join(', ')}.`
-      : 'Evaluación local por reglas: pulso y SpO2 dentro de los rangos esperados. No es un diagnóstico.',
-    recommendations: anomalies.length > 0
-      ? ['Guarde reposo y respire pausadamente', 'Verifique la colocación del oxímetro', 'Consulte a un especialista si los valores persisten']
-      : ['Frecuencia y saturación estables', 'Monitoreo preventivo continuo activo'],
-    anomaliesDetected: anomalies,
-    confidence: 0,
-    method: 'reglas',
-  };
-};
+const generateLocalMedicalReport = (_v: VitalSigns): AIAnalysisReport => ({
+  id: `unavailable-${Date.now()}`,
+  timestamp: new Date().toISOString(),
+  healthScore: null,
+  confidence: null,
+  status: 'insufficient_data',
+  title: 'Valoración no disponible',
+  summary: 'No hay conexión con el servicio de valoración. No se pueden inferir enfermedades ni descartar problemas con estos datos.',
+  recommendations: ['Revisa la conexión y completa los síntomas en Auscultación.', 'Si hay síntomas de alarma, busca atención médica sin esperar al sistema.'],
+  anomaliesDetected: [],
+  method: 'unavailable',
+});
 
 const VitalsContext = createContext<VitalsContextProps | undefined>(undefined);
 
@@ -137,6 +111,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const newId = generateNewSessionId(label);
     setCurrentSessionId(newId);
     setVitals(ABSOLUTE_ZERO_VITALS);
+    setAiReport(null);
     setHistory([]);
     setChatMessages([
       {
@@ -155,6 +130,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     setSessionId(sessionId);
     setCurrentSessionId(sessionId);
     setVitals(ABSOLUTE_ZERO_VITALS);
+    setAiReport(null);
     setHistory([]);
     setChatMessages([
       {
@@ -239,6 +215,10 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           temperature: incomingVitals.temperature,
           stressLevel: incomingVitals.stressLevel,
           hrv: incomingVitals.hrv,
+          source: incomingVitals.source,
+          heartRateValid: incomingVitals.heartRateValid,
+          bloodOxygenValid: incomingVitals.bloodOxygenValid,
+          spo2Calibrated: incomingVitals.spo2Calibrated,
         };
         setHistory((prev) => {
           const updated = [...prev, newPoint];
@@ -396,18 +376,10 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     const nowIso = new Date().toISOString();
     const timeLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const exampleVitals: Record<string, { bpm: number; spo2: number }> = {
-      sano: { bpm: 72, spo2: 98.5 },
-      sibilancias: { bpm: 96, spo2: 93.0 },
-      crepitantes: { bpm: 88, spo2: 91.0 },
-      ambos: { bpm: 106, spo2: 88.5 },
-      mixto: { bpm: 106, spo2: 88.5 },
-      neumonia: { bpm: 102, spo2: 89.0 },
-    };
-    const v = exampleVitals[sampleId] || { bpm: 75, spo2: 98.0 };
 
     setConnectedType('demo_icbhi');
-    setVitals({ ...ABSOLUTE_ZERO_VITALS, heartRate: v.bpm, bloodOxygen: v.spo2, timestamp: nowIso, device_connected: true, finger: true });
+    setAiReport(null);
+    setVitals({ ...ABSOLUTE_ZERO_VITALS, timestamp: nowIso, source: 'simulated' });
     setDevice({
       name: `Demo ICBHI (paciente #${sampleData.patient_id})`,
       model: 'Datos de ejemplo',
@@ -426,7 +398,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         setIsBackendOnline(true);
         const ac = res.report.acoustic_analysis;
         if (ac) {
-          modelText = `Modelo base: ${ac.prediction} (probabilidad de patológico ${Math.round(ac.probability_abnormal * 100)} %).`;
+          modelText = `Modelo base: ${ac.prediction} (salida acústica del modelo ${Math.round(ac.probability_abnormal * 100)} %).`;
         }
       }
     } catch {
@@ -443,7 +415,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           `[DEMO ICBHI] Caso del paciente #${sampleData.patient_id} (${sampleData.diagnosis}).\n` +
           `• Etiqueta real del ciclo en ICBHI: ${sampleData.cycle_class_name} (${truth}).\n` +
           `• ${modelText}\n` +
-          `• Pulso y SpO2 son datos de ejemplo para la demostración.`,
+          `• El audio pertenece a un conjunto de investigación; no es una medición del usuario. No se inventan pulso ni SpO2.`,
         timestamp: timeLabel,
       },
     ]);
@@ -505,19 +477,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         setChatMessages((prev) => [...prev, aiMsg]);
       } catch (error) {
         setIsBackendOnline(false);
-        let localReply = `(Modo Local Autónomo - Sin Conexión al Backend)\n\n` +
-          `Operando directamente con el hardware ESP32 vía Bluetooth BLE:\n` +
-          `• Frecuencia Cardíaca: ${vitals.heartRate > 0 ? `${vitals.heartRate} LPM` : 'En espera de contacto'}\n` +
-          `• Saturación SpO2: ${vitals.bloodOxygen > 0 ? `${vitals.bloodOxygen.toFixed(1)}%` : 'En espera'}\n` +
-          `• Nivel Sonoro Acústico: ${vitals.audio_rms.toFixed(1)} dB\n\n`;
-
-        if (vitals.heartRate === 0) {
-          localReply += 'Coloca tu dedo firmemente en el sensor MAX30102 para iniciar la adquisición.';
-        } else if (vitals.bloodOxygen < 90) {
-          localReply += 'Atención: saturación por debajo de 90 %. Verifica el sensor y, si se confirma, busca valoración médica.';
-        } else {
-          localReply += 'Los valores medidos están dentro de los rangos esperados.';
-        }
+        const localReply = 'El servidor no está disponible. No puedo valorar enfermedades ni afirmar que los datos sean normales. Reconecta y utiliza el formulario de valoración de esta sesión. Si hay síntomas de alarma, busca atención médica de inmediato.';
 
         const aiMsg: ChatMessage = {
           id: `ai-${Date.now()}`,

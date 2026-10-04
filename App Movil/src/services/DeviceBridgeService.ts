@@ -334,32 +334,13 @@ class DeviceBridgeService {
       return;
     }
 
-    const isFingerPresent = raw.finger !== undefined ? raw.finger : (raw.bpm > 0);
-
-    // 1. Filtro y estabilizador exponencial del Ritmo Cardíaco (BPM)
-    // Absorbe artefactos de movimiento y rebotes ópticos sin retrasar la respuesta fisiológica
-    let currentBpm = raw.bpm || 0;
-    if (isFingerPresent && currentBpm > 0) {
-      if (this.smoothedBpm === 0) {
-        // Inicialización reactiva inmediata al colocar el dedo (cero retardo)
-        this.smoothedBpm = currentBpm;
-      } else {
-        // Supresión de saltos extremos atípicos por microdeslizamiento del dedo (> 35 BPM en 100ms)
-        const bpmDelta = currentBpm - this.smoothedBpm;
-        if (Math.abs(bpmDelta) > 35) {
-          currentBpm = this.smoothedBpm + Math.sign(bpmDelta) * 15;
-        }
-        // Filtro exponencial ponderado clínico (EMA): amortigua fluctuaciones bruscas
-        this.smoothedBpm = (this.smoothedBpm * 0.82) + (currentBpm * 0.18);
-      }
-    } else {
-      // Sin dedo o sin pulso: apagado inmediato a 0 sin latencia
-      this.smoothedBpm = 0;
-    }
-    const finalHeartRate = Math.round(this.smoothedBpm);
-
-    // 2. SpO2 tal como lo mide el sensor: sin oscilaciones añadidas ni límites que oculten valores bajos.
-    const currentSpo2 = isFingerPresent && finalHeartRate > 0 ? Number((raw.spo2 || 0).toFixed(1)) : 0.0;
+    const isFingerPresent = raw.finger === true;
+    const heartRateValid = (raw.heartRateValid ?? raw.heart_rate_valid) === true;
+    const bloodOxygenValid = (raw.bloodOxygenValid ?? raw.spo2_valid) === true;
+    const spo2Calibrated = (raw.spo2Calibrated ?? raw.spo2_calibrated) === true;
+    // Preserve the measured values; never smooth away clinically relevant changes.
+    const finalHeartRate = Number.isFinite(raw.bpm) ? raw.bpm : 0;
+    const currentSpo2 = Number.isFinite(raw.spo2) ? raw.spo2 : 0;
 
     const updatedVitals: VitalSigns = {
       heartRate: finalHeartRate,
@@ -377,6 +358,12 @@ class DeviceBridgeService {
       timestamp: new Date().toISOString(),
       device_connected: true,
       finger: isFingerPresent,
+      source: raw.source || 'unknown',
+      heartRateValid,
+      bloodOxygenValid,
+      spo2Calibrated,
+      signalQuality: raw.signalQuality ?? raw.signal_quality ?? null,
+      sampleAgeMs: raw.sampleAgeMs ?? raw.sample_age_ms ?? null,
     };
 
     this.notifyVitalsListeners(updatedVitals);
@@ -399,7 +386,13 @@ class DeviceBridgeService {
           hrv: data.hrv || 0,
           audio_rms: data.audio_rms,
           audio_peak: data.audio_peak,
-          finger: data.finger !== undefined ? data.finger : (data.bpm > 0),
+          finger: data.finger === true,
+          source: data.source || 'unknown',
+          heartRateValid: (data.heartRateValid ?? data.heart_rate_valid) === true,
+          bloodOxygenValid: (data.bloodOxygenValid ?? data.spo2_valid) === true,
+          spo2Calibrated: (data.spo2Calibrated ?? data.spo2_calibrated) === true,
+          signalQuality: data.signalQuality ?? data.signal_quality ?? null,
+          sampleAgeMs: data.sampleAgeMs ?? data.sample_age_ms ?? null,
           device_id: 'SpiroScan-Band',
           session_id: getSessionId(),
         }),

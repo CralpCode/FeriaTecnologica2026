@@ -29,7 +29,9 @@ def preprocess(y: np.ndarray, sr: int) -> np.ndarray:
     """Remuestrea a TARGET_SR (con filtro antialiasing), filtra 20-600 Hz y normaliza."""
     y = np.asarray(y, dtype=np.float32)
     if y.ndim > 1:
-        y = y.mean(axis=0)
+        y = y.mean(axis=1)  # soundfile: muestras x canales
+    if not len(y) or not np.isfinite(y).all() or sr <= 0:
+        raise ValueError("Audio vacío, no finito o frecuencia inválida")
     if sr != TARGET_SR:
         y = librosa.resample(y, orig_sr=sr, target_sr=TARGET_SR, res_type="soxr_hq")
     sos = butter(4, BAND_HZ, btype="bandpass", fs=TARGET_SR, output="sos")
@@ -61,6 +63,10 @@ def logmel(window: np.ndarray) -> np.ndarray:
 def signal_quality(y_raw: np.ndarray) -> dict:
     """Indicadores simples de calidad de la grabación (antes de normalizar)."""
     y_raw = np.asarray(y_raw, dtype=np.float32)
+    finite = bool(np.isfinite(y_raw).all())
+    if not finite:
+        return {"rms": None, "clipping_ratio": None, "too_quiet": False,
+                "clipped": False, "non_finite": True, "flat": False}
     rms = float(np.sqrt(np.mean(y_raw ** 2))) if len(y_raw) else 0.0
     clipped = float(np.mean(np.abs(y_raw) >= 0.99)) if len(y_raw) else 0.0
     return {
@@ -68,6 +74,8 @@ def signal_quality(y_raw: np.ndarray) -> dict:
         "clipping_ratio": clipped,
         "too_quiet": rms < MIN_RMS,
         "clipped": clipped > 0.01,
+        "non_finite": False,
+        "flat": bool(len(y_raw) and np.std(y_raw) < MIN_RMS),
     }
 
 

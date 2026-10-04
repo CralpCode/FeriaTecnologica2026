@@ -23,13 +23,17 @@ THRESHOLD = 0.30
 
 
 def _result(p_abn: float, classes: list[str], model_name: str) -> dict:
-    """Resultado con la probabilidad REAL del modelo como confianza (sin escalas artificiales)."""
+    """Puntaje del clasificador; no es probabilidad clínica calibrada."""
+    if not math.isfinite(p_abn) or not 0 <= p_abn <= 1:
+        raise ValueError("Puntaje del modelo no válido")
     pred = 1 if p_abn >= THRESHOLD else 0
     return {
         "prediction": classes[pred] if pred < len(classes) else ("Patologico" if pred else "Normal"),
         "is_abnormal": pred,
         "confidence": round((p_abn if pred else 1 - p_abn) * 100.0, 1),
         "probability_abnormal": round(p_abn, 4),
+        "probability_kind": "uncalibrated_model_score",
+        "score_provenance": "reported_by_author_not_revalidated",
         "umbral": THRESHOLD,
         "model_name": model_name,
         "score_icbhi": REPORTED_ICBHI_SCORE,
@@ -83,11 +87,16 @@ def model_info() -> dict:
 
 def _vector(features, names: list[str]) -> list[float]:
     if isinstance(features, dict):
-        return [float(features.get(k, 0.0)) for k in names]
-    if isinstance(features, (list, tuple)):
-        v = [float(x) for x in list(features)[:len(names)]]
-        return v + [0.0] * (len(names) - len(v))
-    return [0.0] * len(names)
+        if any(k not in features for k in names):
+            raise ValueError("Faltan características; no se rellenan datos con ceros")
+        v = [float(features[k]) for k in names]
+    elif isinstance(features, (list, tuple)) and len(features) == len(names):
+        v = [float(x) for x in features]
+    else:
+        raise ValueError("Se requiere el vector completo de características")
+    if not v or not all(math.isfinite(x) for x in v):
+        raise ValueError("Características vacías o no finitas")
+    return v
 
 
 def classify_features(features) -> dict:
@@ -133,5 +142,5 @@ def classify_audio(y, sr: int) -> dict:
         return {"estado": "pendiente_extractor",
                 "detalle": "Falta el código con que el equipo calculó las 61 características."}
     out = classify_features(lung_baseline_features.extract(y, sr))
-    out["estado"] = "ok"
+    out["estado"] = "ok" if "probability_abnormal" in out else "no_disponible"
     return out
