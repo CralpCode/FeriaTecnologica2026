@@ -6,6 +6,7 @@ import time
 
 import database
 from measurement_quality import usable_value
+from clinical_assessment import DEMO_NOTICE
 
 SUSTAIN_S = {"spo2_critica": 10, "spo2_baja": 30, "fc_alta": 10, "fc_baja": 10, "sin_dedo": 15}
 COOLDOWN_S = 120  # no repetir el mismo tipo de alerta en la misma sesión antes de esto
@@ -50,6 +51,8 @@ def _fire(session_id: str, type_: str, **fmt) -> dict | None:
         return None
     _last_alert[key] = now
     severity, title, message, action = TEMPLATES[type_]
+    if fmt.get("demo"):
+        title, message = "DEMO · " + title, DEMO_NOTICE + " " + message
     return database.create_alert(session_id, type_, severity, title, message.format(**fmt), action, fmt)
 
 
@@ -91,7 +94,9 @@ def evaluate_vitals(session_id: str, vitals: dict) -> list[dict]:
 
 
 def evaluate_recording(result: dict) -> list[dict]:
-    if result.get("source") != "real" or (result.get("details") or {}).get("demo"):
+    # Los casos demo ICBHI sí alertan, marcados DEMO; lo simulado o de origen desconocido no.
+    demo = bool((result.get("details") or {}).get("demo"))
+    if result.get("source") != "real" and not demo:
         return []
     sid = result["session_id"]
     loc = result.get("location") or "sin especificar"
@@ -106,7 +111,7 @@ def evaluate_recording(result: dict) -> list[dict]:
         _last_alert.pop((sid, "hallazgo_pulmonar"), None)
         prob, thr = result.get("probability"), result.get("threshold")
         a = _fire(sid, "hallazgo_pulmonar", location=loc, finding="; ".join(parts) or "sonido anormal",
-                  recording_id=result["recording_id"], details=det,
+                  recording_id=result["recording_id"], details=det, demo=demo,
                   probabilidad_anormal=f"{prob:.0%}" if prob is not None else None,
                   umbral=f"{thr:.0%}" if thr is not None else None)
         return [a] if a else []
@@ -114,12 +119,12 @@ def evaluate_recording(result: dict) -> list[dict]:
         # Cada grabación anormal es un hallazgo independiente: sin enfriamiento.
         _last_alert.pop((sid, "soplo"), None)
         a = _fire(sid, "soplo", location=loc, prob=result["probability"], thr=result["threshold"],
-                  recording_id=result["recording_id"],
+                  recording_id=result["recording_id"], demo=demo,
                   caracteristicas=(result.get("details") or {}).get("caracteristicas_soplo", {}))
         return [a] if a else []
     if result["result"] == "calidad_insuficiente":
         _last_alert.pop((sid, "calidad_audio"), None)
         a = _fire(sid, "calidad_audio", location=loc, reason=result.get("reason") or "señal inválida",
-                  recording_id=result["recording_id"])
+                  recording_id=result["recording_id"], demo=demo)
         return [a] if a else []
     return []

@@ -10,11 +10,14 @@ def evaluate(session_id: str) -> dict:
              "no_specific_findings": "verde"}[a["status"]]
     v = a["vitals_used"]
     return {"session_id": session_id, "nivel": level, "titulo": a["summary"],
-            "motivos": [f["label"] for f in a["findings"]] or a["missing_data"][:2],
+            "motivos": [("DEMO · " if clinical_assessment.DEMO_NOTICE in f["evidence"] else "") + f["label"]
+                        for f in a["findings"]] or a["missing_data"][:2],
             "datos_usados": {"vitales_ultimo_minuto": {
                 "spo2": v["bloodOxygen"], "fc": v["heartRate"],
                 "lecturas": max(v.get("counts", {}).values(), default=0),
             } if v["bloodOxygen"] is not None or v["heartRate"] is not None else None,
                 "corazon": None, "pulmon": None},
             "reglas_version": RULES_VERSION,
-            "aviso": "Orientación experimental; faltantes y resultados negativos no descartan enfermedad."}
+            "demo": a["demo"],
+            "aviso": ((clinical_assessment.DEMO_NOTICE + " ") if a["demo"] else "")
+            + "Orientación experimental; faltantes y resultados negativos no descartan enfermedad."}

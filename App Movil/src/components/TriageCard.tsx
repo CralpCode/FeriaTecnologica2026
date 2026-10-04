@@ -13,7 +13,7 @@ const LEVEL_STYLE: Record<TriageLevel, { color: string; soft: string; label: str
 
 /** Semáforo de triaje: SpO2 + pulso + corazón + pulmón combinados por reglas fijas del equipo. */
 export const TriageCard: React.FC<{ triage: TriageResult | null }> = ({ triage }) => {
-  const t = triage || { nivel: 'gris' as TriageLevel, titulo: 'Faltan datos para evaluar', motivos: [], aviso: '' };
+  const t: TriageResult = triage || { session_id: '', nivel: 'gris', titulo: 'Faltan datos para evaluar', motivos: [], aviso: '' };
   const s = LEVEL_STYLE[t.nivel];
   return (
     <View style={[styles.card, { borderColor: s.color, backgroundColor: s.soft }]}>
@@ -32,6 +32,12 @@ export const TriageCard: React.FC<{ triage: TriageResult | null }> = ({ triage }
         </View>
         <MaterialCommunityIcons name={s.icon as any} size={24} color={s.color} />
       </View>
+      {t.demo && (
+        <View style={styles.demo}>
+          <MaterialCommunityIcons name="flask-outline" size={14} color="#6B21A8" />
+          <Text style={styles.demoText}>DEMO · caso de demostración ICBHI, no es de esta persona</Text>
+        </View>
+      )}
       {t.motivos.map((m, i) => (
         <Text key={i} style={styles.reason}>• {m}</Text>
       ))}
@@ -51,4 +57,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 15, fontWeight: '800' },
   reason: { fontSize: 13, color: Colors.textPrimary, lineHeight: 19 },
   note: { fontSize: 11, color: Colors.textSecondary, marginTop: 6 },
+  demo: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: '#F3E8FF',
+          borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 6 },
+  demoText: { fontSize: 11, fontWeight: '800', color: '#6B21A8' },
 });

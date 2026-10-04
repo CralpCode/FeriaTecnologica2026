@@ -10,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 _tmp = tempfile.TemporaryDirectory()
 os.environ['SPIROSCAN_DB_PATH'] = str(Path(_tmp.name) / 'unit_test.db')
+os.environ['LLM_BASE_URL'] = 'http://127.0.0.1:9/v1'  # sin LLM real en las pruebas
 import database
 import clinical_assessment as clinical
 import measurement_quality
@@ -137,11 +138,29 @@ class ClinicalFlowTests(unittest.TestCase):
         self.assertTrue(a['urgent'])
         self.assertEqual(a['possibilities'], [])
 
-    def test_demo_recordings_cannot_change_assessment_or_alerts(self):
-        database.create_recording('demo_1', 'person_a', 'AV', 16000)
-        database.update_recording('demo_1', source='simulated', status='done', result='anormal')
+    def test_simulated_recordings_cannot_change_assessment_or_alerts(self):
+        database.create_recording('sim_1', 'person_a', 'AV', 16000)
+        database.update_recording('sim_1', source='simulated', status='done', result='anormal')
         self.assertEqual(clinical.recent_recordings('person_a'), [])
         self.assertEqual(alerts.evaluate_recording({'source': 'simulated', 'result': 'anormal'}), [])
+
+    def test_icbhi_demo_counts_but_is_labelled(self):
+        details = {'modelo_base': {'is_abnormal': 1}, 'demo': {'caso': 'x', 'paciente_icbhi': '101'}}
+        database.create_recording('demo_1', 'person_a', 'AL', 0)
+        database.update_recording('demo_1', mode='pulmon', source='simulated', status='done', result='anormal',
+                                  details=details)
+        tri = self.client.get('/api/triage/person_a').json()
+        self.assertEqual(tri['nivel'], 'amarillo')
+        self.assertTrue(tri['demo'])
+        self.assertIn('no es de esta persona', tri['aviso'])
+        self.assertTrue(tri['motivos'][0].startswith('DEMO · '))
+        fired = alerts.evaluate_recording({'recording_id': 'demo_1', 'session_id': 'person_a', 'location': 'AL',
+                                           'mode': 'pulmon', 'result': 'anormal', 'details': details,
+                                           'probability': 0.8, 'threshold': 0.5})
+        self.assertTrue(fired[0]['title'].startswith('DEMO · '))
+        self.assertIn('no es de esta persona', fired[0]['message'])
+        # Sus signos vitales de ejemplo nunca se usan
+        self.assertIsNone(clinical.recent_vitals('person_a')['heartRate'])
 
     def test_failed_repeat_supersedes_same_site_and_other_sites_retained(self):
         for rid, site, result in [('a', 'AV', 'anormal'), ('b', 'MV', 'normal'), ('c', 'AV', 'calidad_insuficiente')]:

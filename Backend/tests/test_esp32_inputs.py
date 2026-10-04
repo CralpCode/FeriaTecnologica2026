@@ -13,6 +13,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 _tmp = tempfile.TemporaryDirectory()
 os.environ['SPIROSCAN_DB_PATH'] = str(Path(_tmp.name) / 'unit_test.db')
+os.environ['LLM_BASE_URL'] = 'http://127.0.0.1:9/v1'  # sin LLM real en las pruebas
 os.environ['SPIROSCAN_MDNS'] = '0'
 import database
 import clinical_assessment as clinical

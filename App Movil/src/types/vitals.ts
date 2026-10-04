@@ -154,6 +154,7 @@ export interface TriageResult {
   titulo: string;
   motivos: string[];
   aviso: string;
+  demo?: boolean;               // incluye un caso de demostración ICBHI (no es de esta persona)
 }
 
 export interface RecordingResult {

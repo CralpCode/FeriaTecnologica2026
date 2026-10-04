@@ -128,7 +128,7 @@ def numbers_ok(text: str, data) -> bool:
 # ---------------------------------------------------------------------------
 
 def alert_text(alert: dict) -> dict | None:
-    """Reescribe una alerta en lenguaje claro. Devuelve None si el LLM falla (queda la plantilla)."""
+    """Reescribe una alerta en lenguaje claro. Devuelve None si el LLM falla o inventa cifras (queda la plantilla)."""
     prompt = (
         "Reescribe esta alerta generada por reglas para quien está usando el dispositivo.\n"
         f"Alerta: {json.dumps({k: alert[k] for k in ('type', 'severity', 'title', 'message', 'action', 'data')}, ensure_ascii=False)}\n"
@@ -138,10 +138,18 @@ def alert_text(alert: dict) -> dict | None:
     try:
         out = ai_engine.llm_json([{"role": "system", "content": BASE_RULES}, {"role": "user", "content": prompt}], max_tokens=250)
         msg, act = str(out.get("mensaje", "")).strip(), str(out.get("accion", "")).strip()
-        return {"message": msg, "action": act} if msg and act else None
     except Exception as e:
         print(f"[LLM alerta] {e}")
         return None
+    if not msg or not act:
+        return None
+    # Candado de cifras: si el texto trae un número que no está en la alerta, se queda la plantilla.
+    if not numbers_ok(f"{msg} {act}", {k: alert[k] for k in ("title", "message", "action", "data")}):
+        print("[LLM alerta] texto descartado: cifras que no están en la alerta")
+        return None
+    if (alert.get("data") or {}).get("demo") and clinical_assessment.DEMO_NOTICE not in msg:
+        msg = clinical_assessment.DEMO_NOTICE + " " + msg
+    return {"message": msg, "action": act}
 
 
 # ---------------------------------------------------------------------------

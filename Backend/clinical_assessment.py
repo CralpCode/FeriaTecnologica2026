@@ -69,6 +69,17 @@ def recent_vitals(session_id: str) -> dict:
     return out
 
 
+DEMO_NOTICE = "Caso de demostración ICBHI, no es de esta persona."
+
+
+def is_demo(rec: dict) -> bool:
+    return bool((rec.get("details") or {}).get("demo"))
+
+
+def _evidence(rec: dict, text: str) -> list[str]:
+    return [DEMO_NOTICE, text] if is_demo(rec) else [text]
+
+
 def recent_recordings(session_id: str) -> list[dict]:
     cutoff = datetime.now() - timedelta(minutes=30)
     records = []
@@ -83,7 +94,8 @@ def recent_recordings(session_id: str) -> list[dict]:
                 continue
         except (ValueError, KeyError):
             continue
-        if rec.get("source") != "real" or (rec.get("details") or {}).get("demo"):
+        # Cuentan las grabaciones reales y los casos demo ICBHI (marcados); lo simulado no.
+        if rec.get("source") != "real" and not is_demo(rec):
             continue
         if rec.get("status") == "done" and rec.get("result") in ("normal", "anormal"):
             records.append(rec)
@@ -159,7 +171,7 @@ def assess(context: dict, vitals: dict, recordings: list[dict]) -> dict:
         missing.append("Grabación pulmonar real reciente con calidad suficiente y modelo disponible.")
     for r in heart:
         if r.get("result") == "anormal":
-            finding("abnormal_heart_sound", "Sonido cardíaco anormal según modelo experimental", [f"Grabación {r.get('id', '')}, foco {r.get('location')}; puede corresponder a soplo u otra anormalidad acústica."])
+            finding("abnormal_heart_sound", "Sonido cardíaco anormal según modelo experimental", _evidence(r, f"Grabación {r.get('id', '')}, foco {r.get('location')}; puede corresponder a soplo u otra anormalidad acústica."))
     if any(r.get("result") == "anormal" for r in heart):
         possibility("Soplo a evaluar: puede ser inocente o asociarse a alteración estructural o valvular",
                     ["Clasificador cardíaco con hallazgo acústico anormal; no identifica la causa."],
@@ -174,7 +186,7 @@ def assess(context: dict, vitals: dict, recordings: list[dict]) -> dict:
         wheeze |= (sounds.get("sibilancias") or {}).get("presente") is True
         crackles |= (sounds.get("crepitantes") or {}).get("presente") is True
         if r.get("result") == "anormal":
-            finding("abnormal_lung_sound", "Sonido pulmonar anormal según modelo experimental", [f"Grabación {r.get('id', '')}, zona {r.get('location')}. No identifica por sí sola una enfermedad."])
+            finding("abnormal_lung_sound", "Sonido pulmonar anormal según modelo experimental", _evidence(r, f"Grabación {r.get('id', '')}, zona {r.get('location')}. No identifica por sí sola una enfermedad."))
     # Named diseases require context; a binary acoustic label never becomes a disease label.
     if adult and wheeze:
         possibility("Asma u otras causas de sibilancias",
@@ -206,7 +218,8 @@ def assess(context: dict, vitals: dict, recordings: list[dict]) -> dict:
             "missing_data": missing, "limitations": limitations, "next_steps": list(dict.fromkeys(steps)),
             "urgent": urgent, "sources": SOURCES, "disease_probabilities": None,
             "rules_version": RULES_VERSION, "vitals_used": vitals, "context": ctx,
-            "recording_ids": [r.get("id") for r in recordings]}
+            "recording_ids": [r.get("id") for r in recordings],
+            "demo": any(is_demo(r) for r in recordings)}
 
 
 def evaluate_session(session_id: str) -> dict:

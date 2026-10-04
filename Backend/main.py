@@ -458,7 +458,9 @@ def direct_llm_generate(payload: LLMDirectInput):
 
 async def _publish_alert(alert: dict):
     await manager.broadcast({"type": "ALERT", "session_id": alert["session_id"], "data": alert})
-    # Keep the deterministic clinical message; unconstrained LLM prose is not clinical evidence.
+    # El mensaje de reglas sale de inmediato; Qwen lo reescribe en lenguaje claro después,
+    # solo si no agrega cifras (llm_tasks.alert_text). Si falla, queda la plantilla.
+    asyncio.create_task(_rewrite_alert(alert))
 
 
 async def _rewrite_alert(alert: dict):
