@@ -1,408 +1,145 @@
 import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Modal,
-  TouchableOpacity,
-  ScrollView,
-  ActivityIndicator,
-  Alert,
-  Platform,
-} from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { Colors } from '../theme/colors';
+import { Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useModalLayout } from '../hooks/useLayout';
 import { useDeviceConnection } from '../context/VitalsContext';
 import { deviceBridge } from '../services/DeviceBridgeService';
 import { DEFAULT_LOCAL_LAN } from '../config/api';
+import { patientLabel } from '../services/consulta';
+import { color, font, radius, space, touch, weight } from '../theme/tokens';
+import { Banner, Button, Card, StatusPill } from './ui';
 
 interface DeviceConnectionModalProps {
   visible: boolean;
   onClose: () => void;
-  onOpenClinicalDemo?: () => void;
 }
 
-export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ visible, onClose, onOpenClinicalDemo }) => {
+const STATUS_TEXT: Record<string, { title: string; text: string }> = {
+  wokwi_wifi: { title: 'ESP32 por WiFi', text: 'Los datos del dispositivo llegan al servidor y se guardan en el paciente abierto.' },
+  direct_ble: { title: 'Bluetooth directo', text: 'Recibiendo el sensor directamente por Bluetooth.' },
+  demo_icbhi: { title: 'Modo demostración', text: 'Audio real de ICBHI 2017, de otra persona. Este modo no tiene pulso ni SpO2.' },
+  none: { title: 'Sin conectar', text: 'Elige cómo recibir los datos del dispositivo.' },
+};
+
+/** Conexión del dispositivo: estado, WiFi (recomendado) y Bluetooth; lo técnico en "Avanzado". */
+export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ visible, onClose }) => {
   const modal = useModalLayout();
   const {
-    connectedType,
-    device,
-    connectDirectBluetooth,
-    connectViaServer,
-    disconnectAllDevices,
-    isBackendOnline,
-    backendUrl,
-    updateBackendUrl,
+    connectedType, device, connectDirectBluetooth, connectViaServer, disconnectAllDevices,
+    isBackendOnline, backendUrl, updateBackendUrl, currentSessionId,
   } = useDeviceConnection();
+  const [busy, setBusy] = useState<'wifi' | 'ble' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [advanced, setAdvanced] = useState(false);
+  const connected = connectedType !== 'none';
+  const status = STATUS_TEXT[connectedType] || STATUS_TEXT.none;
+  const bleAvailable = Platform.OS !== 'web' || deviceBridge.isWebBluetoothSupported();
+  const isLocal = backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1');
 
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const handleBluetoothConnect = async () => {
-    setErrorMessage(null);
-    setIsConnecting(true);
-
+  const run = async (kind: 'wifi' | 'ble') => {
+    setError(null); setBusy(kind);
     try {
-      const res = await connectDirectBluetooth();
-      if (!res.success) {
-        setErrorMessage(res.message);
-      } else {
-        onClose();
-      }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Error al conectar por Bluetooth.');
+      const res = kind === 'wifi' ? await connectViaServer() : await connectDirectBluetooth();
+      if (res.success) onClose();
+      else setError(res.message);
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo conectar.');
     } finally {
-      setIsConnecting(false);
+      setBusy(null);
     }
   };
 
-  const handleWifiConnect = async () => {
-    setErrorMessage(null);
-    setIsConnecting(true);
-    const res = await connectViaServer();
-    setIsConnecting(false);
-    if (res.success) onClose();
-    else setErrorMessage(res.message);
-  };
-
-  const isWebBleSupported = deviceBridge.isWebBluetoothSupported();
-
   return (
     <Modal visible={visible} animationType={modal.animationType} transparent onRequestClose={onClose}>
-      <View style={[styles.modalOverlay, modal.overlay]}>
-        <View style={[styles.modalContent, modal.sheet]}>
-          {/* Cabecera */}
-          <View style={styles.header}>
-            <View style={styles.headerTitleRow}>
-              <View
-                style={[
-                  styles.bluetoothIconCircle,
-                  connectedType !== 'none' && styles.iconConnected,
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name={connectedType !== 'none' ? 'check-circle' : 'bluetooth'}
-                  size={22}
-                  color={connectedType !== 'none' ? '#16A34A' : Colors.primary}
-                />
-              </View>
-              <View>
-                <Text style={styles.headerTitle}>Conexión del dispositivo</Text>
-                <Text style={styles.headerSubtitle}>
-                  {connectedType !== 'none'
-                    ? `● Enlazado a: ${device?.name || 'SpiroScan-Band'}`
-                    : '○ Sin conexión activa'}
-                </Text>
-              </View>
-            </View>
-
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <Ionicons name="close" size={20} color={Colors.textSecondary} />
+      <View style={[styles.overlay, modal.overlay]}>
+        <View style={[styles.sheet, modal.sheet]}>
+          <View style={styles.head}>
+            <Text style={styles.title}>Dispositivo</Text>
+            <TouchableOpacity onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Cerrar">
+              <Ionicons name="close" size={22} color={color.textSecondary} />
             </TouchableOpacity>
           </View>
 
-          {/* Banner de Estado */}
-          <View
-            style={[
-              styles.statusBanner,
-              connectedType !== 'none' ? styles.statusBannerOnline : styles.statusBannerOffline,
-            ]}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View
-                style={[
-                  styles.statusDotLarge,
-                  { backgroundColor: connectedType !== 'none' ? '#16A34A' : '#DC2626' },
-                ]}
-              />
-              <View style={{ marginLeft: 10, flex: 1 }}>
-                <Text
-                  style={[
-                    styles.statusBannerTitle,
-                    { color: connectedType !== 'none' ? '#15803D' : '#991B1B' },
-                  ]}
-                >
-                  {connectedType === 'direct_ble'
-                    ? 'ENLACE DIRECTO BLUETOOTH BLE ACTIVO'
-                    : connectedType === 'demo_icbhi'
-                    ? 'BANCO DE PRUEBAS CLÍNICAS (ICBHI 2017)'
-                    : connectedType !== 'none'
-                    ? 'ENLAZADO A SPIROSCAN'
-                    : 'DISPOSITIVO EN ESPERA (CERO ABSOLUTO)'}
-                </Text>
-                <Text
-                  style={[
-                    styles.statusBannerDesc,
-                    { color: connectedType !== 'none' ? '#166534' : '#7F1D1D' },
-                  ]}
-                >
-                  {connectedType === 'demo_icbhi'
-                    ? 'Modo demostración: audio real de ICBHI 2017 con pulso y SpO2 de ejemplo.'
-                    : connectedType !== 'none'
-                    ? 'Recibiendo telemetría física en tiempo real del sensor MAX30102.'
-                    : 'Sincroniza directamente con tu pulsera SpiroScan por Bluetooth.'}
-                </Text>
-              </View>
-            </View>
-
-            {connectedType !== 'none' && (
-              <TouchableOpacity
-                style={styles.disconnectBtn}
-                onPress={disconnectAllDevices}
-              >
-                <Text style={styles.disconnectBtnText}>Desconectar</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {errorMessage && (
-            <View style={styles.errorBox}>
-              <Ionicons name="alert-circle" size={16} color="#B91C1C" />
-              <Text style={styles.errorText}>{errorMessage}</Text>
-            </View>
-          )}
-
-          <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
-            <Text style={styles.sectionHeading}>ESP32 POR WIFI (RECOMENDADO)</Text>
-
-            <View style={[styles.deviceCard, connectedType === 'wokwi_wifi' && styles.deviceCardActive]}>
-              <View style={styles.deviceCardHeader}>
-                <View style={[styles.deviceIconWrapper, { backgroundColor: connectedType === 'wokwi_wifi' ? '#DCFCE7' : '#EFF6FF' }]}>
-                  <MaterialCommunityIcons name="wifi" size={22} color={connectedType === 'wokwi_wifi' ? '#16A34A' : Colors.primary} />
-                </View>
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.deviceCardTitle}>SpiroScan por WiFi</Text>
-                  <Text style={styles.deviceCardSub}>El ESP32 envía pulso, SpO2 y audio a la Mac</Text>
-                  <Text style={styles.deviceCardBadgeText}>Funciona en cualquier celular con el navegador</Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Card tone={connected ? 'success' : undefined}>
+              <View style={styles.row}>
+                <Ionicons name={connected ? 'radio' : 'radio-outline'} size={24} color={connected ? color.success : color.textMuted} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.cardTitle}>{status.title}{connected && device?.name ? ` · ${device.name}` : ''}</Text>
+                  <Text style={styles.text}>{status.text}</Text>
+                  <Text style={styles.meta}>Paciente abierto: {patientLabel(currentSessionId)}</Text>
                 </View>
               </View>
-              <TouchableOpacity
-                style={[styles.actionBtnFull, styles.actionBtnConnect, isConnecting && { opacity: 0.7 }]}
-                disabled={isConnecting || connectedType === 'wokwi_wifi'}
-                onPress={handleWifiConnect}
-              >
-                <View style={styles.actionBtnContent}>
-                  <MaterialCommunityIcons name="wifi-check" size={18} color="#FFFFFF" />
-                  <Text style={[styles.actionBtnTextFull, styles.actionTextConnect]}>
-                    {connectedType === 'wokwi_wifi' ? 'Recibiendo datos del servidor' : 'Recibir datos en esta sesión'}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={[styles.sectionHeading, { marginTop: 18 }]}>DISPOSITIVO FÍSICO (BLE)</Text>
-
-            {/* Opción SpiroScan BLE Físico */}
-            <View
-              style={[
-                styles.deviceCard,
-                connectedType !== 'none' && styles.deviceCardActive,
-              ]}
-            >
-              <View style={styles.deviceCardHeader}>
-                <View
-                  style={[
-                    styles.deviceIconWrapper,
-                    { backgroundColor: connectedType !== 'none' ? '#DCFCE7' : '#EFF6FF' },
-                  ]}
-                >
-                  <MaterialCommunityIcons
-                    name="bluetooth"
-                    size={22}
-                    color={connectedType !== 'none' ? '#16A34A' : Colors.primary}
-                  />
-                </View>
-
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.deviceCardTitle}>SpiroScan-Band (ESP32 BLE)</Text>
-                  <Text style={styles.deviceCardSub}>
-                    MAX30102 + INMP441 + GATT Dual
-                  </Text>
-                  <Text style={styles.deviceCardBadgeText}>
-                    Enlace Inalámbrico 100% Autónomo
-                  </Text>
-                </View>
-
-                <View style={[styles.devicePill, connectedType !== 'none' ? styles.devicePillConnected : styles.devicePillDisconnected]}>
-                  <Text style={[styles.devicePillText, { color: connectedType !== 'none' ? '#15803D' : '#64748B' }]}>
-                    {connectedType !== 'none' ? 'ENLAZADO' : 'STANDBY'}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Botón de Acción a Ancho Completo (Sin Desbordamientos en Móvil) */}
-              <TouchableOpacity
-                style={[
-                  styles.actionBtnFull,
-                  connectedType !== 'none' ? styles.actionBtnDisconnect : styles.actionBtnConnect,
-                  isConnecting && { opacity: 0.7 },
-                ]}
-                disabled={isConnecting}
-                onPress={() => {
-                  if (connectedType !== 'none') {
-                    disconnectAllDevices();
-                  } else {
-                    handleBluetoothConnect();
-                  }
-                }}
-              >
-                {isConnecting ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <View style={styles.actionBtnContent}>
-                    <MaterialCommunityIcons
-                      name={connectedType !== 'none' ? 'bluetooth-off' : 'bluetooth-connect'}
-                      size={18}
-                      color={connectedType !== 'none' ? '#DC2626' : '#FFFFFF'}
-                    />
-                    <Text
-                      style={[
-                        styles.actionBtnTextFull,
-                        connectedType !== 'none' ? styles.actionTextDisconnect : styles.actionTextConnect,
-                      ]}
-                    >
-                      {connectedType !== 'none' ? 'Desconectar Dispositivo' : 'Sincronizar Dispositivo'}
-                    </Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-            </View>
-
-            {/* Guía de Compatibilidad Independiente */}
-            <View style={styles.guideCard}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                <Ionicons name="phone-portrait-outline" size={16} color={Colors.primary} />
-                <Text style={styles.guideTitle}>Funcionamiento Independiente:</Text>
-              </View>
-
-              <View style={styles.guideRow}>
-                <Ionicons name="checkmark-circle" size={14} color="#16A34A" />
-                <Text style={styles.guideStep}>
-                  <Text style={{ fontWeight: '700' }}>En APK Android: </Text>
-                  Toca "Sincronizar Dispositivo" para escanear y enlazar por Bluetooth BLE nativo.
-                </Text>
-              </View>
-
-              <View style={styles.guideRow}>
-                <Ionicons name="checkmark-circle" size={14} color="#16A34A" />
-                <Text style={styles.guideStep}>
-                  <Text style={{ fontWeight: '700' }}>En Web (PC / Móvil): </Text>
-                  Abre en Chrome/Edge y toca "Sincronizar Dispositivo" para enlazar.
-                </Text>
-              </View>
-
-              <View style={styles.guideRow}>
-                <Ionicons name="shield-checkmark" size={14} color="#2563EB" />
-                <Text style={styles.guideStep}>
-                  Bluetooth web solo funciona en Chrome con https o localhost; en la feria usa la opción WiFi.
-                </Text>
-              </View>
-            </View>
-
-            {/* Sección de Servidor Backend y Nube */}
-            <Text style={[styles.sectionHeading, { marginTop: 18 }]}>SERVIDOR SPIROSCAN (MAC)</Text>
-
-            <View style={styles.cloudConfigCard}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                  <MaterialCommunityIcons
-                    name={isBackendOnline ? 'server-network' : 'server-network-off'}
-                    size={20}
-                    color={isBackendOnline ? '#16A34A' : '#64748B'}
-                  />
-                  <Text style={styles.cloudCardTitle}>
-                    {isBackendOnline ? 'Servidor: EN LÍNEA' : 'Servidor no disponible'}
-                  </Text>
-                </View>
-                <View style={[styles.cloudPill, isBackendOnline ? styles.cloudPillOnline : styles.cloudPillOffline]}>
-                  <Text style={[styles.cloudPillText, { color: isBackendOnline ? '#15803D' : '#64748B' }]}>
-                    {isBackendOnline ? 'ACTIVO' : 'OFFLINE'}
-                  </Text>
-                </View>
-              </View>
-
-              <Text style={styles.cloudCardDesc}>
-                {isBackendOnline
-                  ? 'Sincronizando la telemetría con el servidor SpiroScan (base de datos, alertas e IA).'
-                  : 'No se encuentra la Mac. Revisa que start_server.sh esté corriendo y que estés en la misma red WiFi.'}
-              </Text>
-
-              {/* Selector Rápido de Backend */}
-              <View style={styles.backendPresetContainer}>
-                <TouchableOpacity
-                  style={[
-                    styles.presetBtn,
-                    backendUrl === DEFAULT_LOCAL_LAN && styles.presetBtnActive,
-                  ]}
-                  onPress={() => updateBackendUrl(DEFAULT_LOCAL_LAN)}
-                >
-                  <MaterialCommunityIcons
-                    name="server-network"
-                    size={14}
-                    color={backendUrl === DEFAULT_LOCAL_LAN ? '#FFFFFF' : '#334155'}
-                  />
-                  <Text style={[styles.presetBtnText, backendUrl === DEFAULT_LOCAL_LAN && styles.presetBtnTextActive]}>
-                    LAN local
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.presetBtn,
-                    (backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) && styles.presetBtnActive,
-                  ]}
-                  onPress={() => updateBackendUrl('http://localhost:8000')}
-                >
-                  <MaterialCommunityIcons
-                    name="laptop"
-                    size={14}
-                    color={(backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) ? '#FFFFFF' : '#334155'}
-                  />
-                  <Text
-                    style={[
-                      styles.presetBtnText,
-                      (backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) && styles.presetBtnTextActive,
-                    ]}
-                  >
-                    Este equipo
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={styles.backendUrlLabel} numberOfLines={1}>
-                Endpoint: {backendUrl}
-              </Text>
-            </View>
-
-            <View>
-              {/* Sección Discreta de Demostración y Validación Clínica */}
-              {onOpenClinicalDemo && (
-                <View style={styles.demoSection}>
-                  <Text style={styles.sectionHeading}>BANCO DE PRUEBAS CLÍNICAS (ICBHI 2017)</Text>
-                  <View style={styles.demoCard}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                      <MaterialCommunityIcons name="flask-outline" size={18} color={Colors.aiPurple} style={{ marginRight: 6 }} />
-                      <Text style={styles.demoCardTitle}>Demostración con casos de ICBHI</Text>
-                    </View>
-                    <Text style={styles.demoCardDesc}>
-                      Prueba grabaciones de la base pública ICBHI 2017 (sano, sibilancias, crepitantes, neumonía) y compara lo que dice el modelo con la etiqueta real.
-                    </Text>
-                    <TouchableOpacity
-                      style={styles.openDemoBtn}
-                      onPress={() => {
-                        onClose();
-                        onOpenClinicalDemo();
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <MaterialCommunityIcons name="stethoscope" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
-                      <Text style={styles.openDemoBtnText}>Abrir Banco de Auscultación</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+              {connected && (
+                <Button label="Desconectar" variant="secondary" icon="close-circle-outline" onPress={disconnectAllDevices}
+                        style={{ marginTop: space.md }} />
               )}
-            </View>
+            </Card>
+
+            {error && <Banner tone="danger" text={error} />}
+
+            <Text style={styles.section}>Conectar</Text>
+            <Card>
+              <View style={styles.row}>
+                <Ionicons name="wifi" size={22} color={color.primary} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <View style={styles.titleRow}>
+                    <Text style={styles.cardTitle}>ESP32 por WiFi</Text>
+                    <StatusPill label="Recomendado" tone="primary" />
+                  </View>
+                  <Text style={styles.text}>El ESP32 envía pulso y audio al servidor. Funciona en cualquier celular o computadora con el navegador.</Text>
+                </View>
+              </View>
+              <Button label={connectedType === 'wokwi_wifi' ? 'Recibiendo datos' : 'Recibir datos en este paciente'} icon="wifi"
+                      onPress={() => run('wifi')} loading={busy === 'wifi'} disabled={connectedType === 'wokwi_wifi'}
+                      style={{ marginTop: space.md }} />
+            </Card>
+
+            <Card>
+              <View style={styles.row}>
+                <Ionicons name="bluetooth" size={22} color={color.primary} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.cardTitle}>Bluetooth directo</Text>
+                  <Text style={styles.text}>
+                    Enlaza la banda directamente. En la app Android usa Bluetooth nativo; en el navegador solo funciona
+                    en Chrome o Edge con https o en este equipo. En la feria conviene WiFi.
+                  </Text>
+                </View>
+              </View>
+              {connectedType === 'direct_ble' ? (
+                <Button label="Desconectar Bluetooth" variant="secondary" icon="bluetooth" onPress={disconnectAllDevices} style={{ marginTop: space.md }} />
+              ) : (
+                <Button label="Buscar y enlazar" variant="secondary" icon="bluetooth" onPress={() => run('ble')}
+                        loading={busy === 'ble'} disabled={!bleAvailable} style={{ marginTop: space.md }} />
+              )}
+              {!bleAvailable && <Text style={styles.meta}>Este navegador no tiene Bluetooth web.</Text>}
+            </Card>
+
+            <TouchableOpacity style={styles.advancedHead} onPress={() => setAdvanced((v) => !v)} accessibilityRole="button"
+                              accessibilityState={{ expanded: advanced }}>
+              <Text style={styles.section}>Avanzado</Text>
+              <Ionicons name={advanced ? 'chevron-up' : 'chevron-down'} size={18} color={color.textMuted} />
+            </TouchableOpacity>
+            {advanced && (
+              <>
+                <Card>
+                  <View style={styles.titleRow}>
+                    <Text style={styles.cardTitle}>Servidor SpiroScan (Mac)</Text>
+                    <StatusPill label={isBackendOnline ? 'En línea' : 'Sin conexión'} tone={isBackendOnline ? 'success' : 'danger'} />
+                  </View>
+                  <Text style={styles.text}>
+                    {isBackendOnline ? 'Base de datos, alertas e IA disponibles.'
+                      : 'No se encuentra la Mac: revisa que start_server.sh esté corriendo y que estés en la misma red.'}
+                  </Text>
+                  <View style={styles.presets}>
+                    <Preset label="LAN local" active={backendUrl === DEFAULT_LOCAL_LAN} onPress={() => updateBackendUrl(DEFAULT_LOCAL_LAN)} />
+                    <Preset label="Este equipo" active={isLocal} onPress={() => updateBackendUrl('http://localhost:8000')} />
+                  </View>
+                  <Text style={styles.meta} numberOfLines={1}>Dirección: {backendUrl}</Text>
+                </Card>
+
+              </>
+            )}
           </ScrollView>
         </View>
       </View>
@@ -410,431 +147,37 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
   );
 };
 
+const Preset: React.FC<{ label: string; active: boolean; onPress: () => void }> = ({ label, active, onPress }) => (
+  <TouchableOpacity onPress={onPress} style={[styles.chip, active && styles.chipActive]} accessibilityRole="button"
+                    accessibilityState={{ selected: active }}>
+    <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+  </TouchableOpacity>
+);
+
 const styles = StyleSheet.create({
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: 16,
-    paddingTop: 18,
-    paddingBottom: 28,
-    maxHeight: '92%',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  headerTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  bluetoothIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  iconConnected: {
-    backgroundColor: '#DCFCE7',
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-  },
-  closeButton: {
-    padding: 6,
-    borderRadius: 16,
-    backgroundColor: '#F1F5F9',
-  },
-  statusBanner: {
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 12,
-    borderWidth: 1,
-  },
-  statusBannerOnline: {
-    backgroundColor: '#F0FDF4',
-    borderColor: '#BBF7D0',
-  },
-  statusBannerOffline: {
-    backgroundColor: '#FEF2F2',
-    borderColor: '#FECACA',
-  },
-  statusDotLarge: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  statusBannerTitle: {
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  statusBannerDesc: {
-    fontSize: 11,
-    marginTop: 2,
-  },
-  disconnectBtn: {
-    marginTop: 10,
-    alignSelf: 'flex-start',
-    backgroundColor: '#FEE2E2',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  disconnectBtnText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#DC2626',
-  },
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEE2E2',
-    borderColor: '#FCA5A5',
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 10,
-    marginBottom: 12,
-  },
-  errorText: {
-    marginLeft: 8,
-    fontSize: 11,
-    color: '#991B1B',
-    flex: 1,
-    fontWeight: '600',
-  },
-  sectionHeading: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#64748B',
-    letterSpacing: 0.8,
-    marginBottom: 8,
-    marginTop: 4,
-  },
-  scrollArea: {
-    width: '100%',
-  },
-  deviceCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginBottom: 12,
-  },
-  deviceCardActive: {
-    borderColor: '#16A34A',
-    backgroundColor: '#F0FDF4',
-  },
-  deviceCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  deviceIconWrapper: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  deviceCardTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-  },
-  deviceCardSub: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    marginTop: 1,
-  },
-  deviceCardBadgeText: {
-    fontSize: 11,
-    color: '#2563EB',
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  devicePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  devicePillConnected: {
-    backgroundColor: '#DCFCE7',
-    borderColor: '#86EFAC',
-  },
-  devicePillDisconnected: {
-    backgroundColor: '#F1F5F9',
-    borderColor: '#CBD5E1',
-  },
-  devicePillText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  actionBtnFull: {
-    width: '100%',
-    paddingVertical: 11,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionBtnContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  actionBtnConnect: {
-    backgroundColor: Colors.primary,
-  },
-  actionBtnDisconnect: {
-    backgroundColor: '#FEE2E2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-  },
-  actionBtnTextFull: {
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  actionTextConnect: {
-    color: '#FFFFFF',
-  },
-  actionTextDisconnect: {
-    color: '#DC2626',
-  },
-  guideCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginTop: 4,
-  },
-  guideTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#334155',
-    marginLeft: 6,
-  },
-  guideRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginTop: 6,
-  },
-  guideStep: {
-    fontSize: 11,
-    color: '#475569',
-    marginLeft: 6,
-    flex: 1,
-    lineHeight: 16,
-  },
-  cloudConfigCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginTop: 4,
-    marginBottom: 8,
-  },
-  cloudCardTitle: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#1E293B',
-    marginLeft: 8,
-  },
-  cloudPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  cloudPillOnline: {
-    backgroundColor: '#DCFCE7',
-    borderColor: '#86EFAC',
-  },
-  cloudPillOffline: {
-    backgroundColor: '#F1F5F9',
-    borderColor: '#CBD5E1',
-  },
-  cloudPillText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  cloudCardDesc: {
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 6,
-    lineHeight: 15,
-  },
-  backendPresetContainer: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 10,
-    flexWrap: 'wrap',
-  },
-  presetBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    flex: 1,
-    minWidth: 125,
-    justifyContent: 'center',
-  },
-  presetBtnActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  presetBtnText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#334155',
-  },
-  presetBtnTextActive: {
-    color: '#FFFFFF',
-  },
-  backendUrlLabel: {
-    fontSize: 11,
-    color: '#94A3B8',
-    marginTop: 8,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-  },
-  sessionCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginTop: 4,
-    marginBottom: 12,
-  },
-  sessionCardTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  sessionCardTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#1E293B',
-  },
-  sessionCardSub: {
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  newSessionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 10,
-  },
-  newSessionBtnText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  sessionListHeading: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#64748B',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  sessionChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    marginRight: 6,
-  },
-  sessionChipActive: {
-    backgroundColor: '#EFF6FF',
-    borderColor: Colors.primary,
-  },
-  sessionChipText: {
-    fontSize: 11,
-    color: '#475569',
-    fontWeight: '600',
-  },
-  sessionChipTextActive: {
-    color: Colors.primary,
-    fontWeight: '800',
-  },
-  livePulseDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#16A34A',
-  },
-  demoSection: {
-    marginTop: 18,
-    marginBottom: 6,
-  },
-  demoCard: {
-    backgroundColor: '#FAF5FF',
-    borderColor: '#E9D5FF',
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-  },
-  demoCardTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#6B21A8',
-  },
-  demoCardDesc: {
-    fontSize: 11,
-    color: '#64748B',
-    lineHeight: 16,
-    marginBottom: 10,
-  },
-  openDemoBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.aiPurple,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    alignSelf: 'flex-start',
-  },
-  openDemoBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
+  overlay: { flex: 1, backgroundColor: 'rgba(17,24,39,0.45)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: color.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: space.lg, paddingTop: space.lg, paddingBottom: space.xl, maxHeight: '92%',
+  },
+  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: space.md },
+  title: { fontSize: font.lg, fontWeight: weight.heavy, color: color.text },
+  close: { width: touch, height: touch, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md },
+  row: { flexDirection: 'row', gap: space.md, alignItems: 'flex-start' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, flexWrap: 'wrap', marginBottom: 2 },
+  cardTitle: { fontSize: font.md, fontWeight: weight.heavy, color: color.text },
+  text: { fontSize: font.sm, color: color.textSecondary, lineHeight: 20, marginTop: 2 },
+  meta: { fontSize: font.xs, color: color.textMuted, marginTop: space.sm },
+  section: { fontSize: font.xs, fontWeight: weight.heavy, color: color.textMuted, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: space.sm },
+  advancedHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: touch, cursor: 'pointer' as any },
+  presets: { flexDirection: 'row', gap: space.sm, marginTop: space.md, flexWrap: 'wrap' },
+  chips: { flexDirection: 'row', gap: space.sm, marginTop: space.md, flexWrap: 'wrap' },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: space.md,
+    borderRadius: radius.pill, borderWidth: 1, borderColor: color.border, backgroundColor: color.surface, cursor: 'pointer' as any,
+  },
+  chipActive: { backgroundColor: color.primary, borderColor: color.primary },
+  chipText: { fontSize: font.xs, fontWeight: weight.bold, color: color.textSecondary },
+  chipTextActive: { color: '#FFFFFF' },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: color.success },
 });

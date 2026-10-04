@@ -266,12 +266,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pillLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: Colors.textMuted,
     fontWeight: '600',
   },
   pillVal: {
-    fontSize: 11,
+    fontSize: 12,
     color: Colors.textPrimary,
     fontWeight: '700',
   },
@@ -295,7 +295,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   tooltipTime: {
-    fontSize: 11,
+    fontSize: 12,
     color: Colors.textSecondary,
     marginRight: 6,
   },

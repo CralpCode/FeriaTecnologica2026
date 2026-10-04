@@ -196,6 +196,8 @@ export interface RecordingDetails {
   ruidos?: Record<string, { presente: boolean; probabilidad: number; umbral: number; sensibilidad_modelo: number }>;
   patron?: { compatible_con: string; probabilidad: number; sensibilidad_modelo: number };
   modelo_base?: { prediction: string; probability_abnormal: number; model_name: string; score_icbhi: number };
+  /** Presente si el servidor corrigió el audio con la respuesta medida de la pieza (fantoma). */
+  ecualizacion?: { perfil: string; bandas_corregidas: number; max_refuerzo_db: number; relativa_a_referencia?: boolean };
 }
 
 export type TriageLevel = 'rojo' | 'amarillo' | 'verde' | 'gris';

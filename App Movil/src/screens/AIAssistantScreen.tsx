@@ -14,16 +14,22 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useVitals } from '../context/VitalsContext';
 import { AIExplainerModal } from '../components/AIExplainerModal';
+import { measurementValidity } from '../services/measurementQuality';
 
 export const AIAssistantScreen: React.FC = () => {
   const { vitals, chatMessages, isChatLoading, sendChatMessage } = useVitals();
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const valid = measurementValidity(vitals, now);
+  const audioAvailable = vitals.source === 'real' && vitals.audioUnit === 'dBFS'
+    && Number.isFinite(vitals.audio_rms) && vitals.audio_rms < 0 && now - Date.parse(vitals.timestamp) < 10000;
   const [inputText, setInputText] = useState('');
   const [showExplainer, setShowExplainer] = useState(false);
   const scrollViewRef = useRef<any>(null);
 
   const suggestions = [
     '¿Cómo están mis pulsaciones actuales?',
-    '¿Mi oxigenación SpO2 es normal?',
+    '¿Hay datos de oxígeno (SpO2)?',
     '¿Qué resultado dio la auscultación?',
     '¿Detectas ruidos pulmonares o sibilancias en mi auscultación?',
     'Resume esta sesión en pocas palabras',
@@ -64,71 +70,26 @@ export const AIAssistantScreen: React.FC = () => {
         </TouchableOpacity>
         <AIExplainerModal visible={showExplainer} onClose={() => setShowExplainer(false)} />
 
-        {/* Banner Superior de Estado en Vivo (Grid Adaptativo 2x2 Antidesbordamiento) */}
+        {/* Lecturas en vivo: solo valores válidos (lo demás dice por qué no hay dato) */}
         <View style={styles.liveVitalsBanner}>
           <View style={styles.bannerHeaderRow}>
             <View style={styles.bannerTitleGroup}>
               <MaterialCommunityIcons name="heart-pulse" size={16} color={Colors.primary} />
-              <Text style={styles.bannerHeaderTitle}>TELEMETRÍA EN TIEMPO REAL</Text>
+              <Text style={styles.bannerHeaderTitle}>LECTURAS EN VIVO</Text>
             </View>
             <View style={styles.llamaStatusBadge}>
-              <MaterialCommunityIcons name="brain" size={13} color="#15803D" />
-              <Text style={styles.llamaStatusText}>LLaMA 3.2 Docker</Text>
+              <MaterialCommunityIcons name="brain" size={13} color={Colors.success} />
+              <Text style={styles.llamaStatusText}>Qwen3-Next · en esta Mac</Text>
             </View>
           </View>
-
           <View style={styles.vitalsGrid}>
-            {/* Ritmo Cardíaco */}
-            <View style={styles.vitalGridCard}>
-              <View style={[styles.vitalIconWrap, { backgroundColor: '#FFE4E6' }]}>
-                <Ionicons name="heart" size={14} color="#E11D48" />
-              </View>
-              <View style={styles.vitalCardContent}>
-                <Text style={styles.vitalCardLabel}>Pulsaciones</Text>
-                <Text style={styles.vitalCardValue} numberOfLines={1}>
-                  {vitals.heartRate > 0 ? `${vitals.heartRate} LPM` : 'En espera'}
-                </Text>
-              </View>
-            </View>
-
-            {/* Oxígeno SpO2 */}
-            <View style={styles.vitalGridCard}>
-              <View style={[styles.vitalIconWrap, { backgroundColor: '#E0F2FE' }]}>
-                <Ionicons name="water" size={14} color="#0EA5E9" />
-              </View>
-              <View style={styles.vitalCardContent}>
-                <Text style={styles.vitalCardLabel}>Oxígeno SpO2</Text>
-                <Text style={styles.vitalCardValue} numberOfLines={1}>
-                  {vitals.bloodOxygen > 0 ? `${vitals.bloodOxygen.toFixed(1)}%` : 'En espera'}
-                </Text>
-              </View>
-            </View>
-
-            {/* Variabilidad HRV */}
-            <View style={styles.vitalGridCard}>
-              <View style={[styles.vitalIconWrap, { backgroundColor: '#EDE9FE' }]}>
-                <Ionicons name="pulse" size={14} color="#8B5CF6" />
-              </View>
-              <View style={styles.vitalCardContent}>
-                <Text style={styles.vitalCardLabel}>HRV</Text>
-                <Text style={styles.vitalCardValue} numberOfLines={1}>
-                  {vitals.hrv > 0 ? `${vitals.hrv} ms` : 'En espera'}
-                </Text>
-              </View>
-            </View>
-
-            {/* Bio-Acústica */}
-            <View style={styles.vitalGridCard}>
-              <View style={[styles.vitalIconWrap, { backgroundColor: '#ECFDF5' }]}>
-                <MaterialCommunityIcons name="microphone" size={14} color="#10B981" />
-              </View>
-              <View style={styles.vitalCardContent}>
-                <Text style={styles.vitalCardLabel}>Bio-Acústica</Text>
-                <Text style={styles.vitalCardValue} numberOfLines={1}>
-                  {vitals.audio_rms > 0 ? `${vitals.audio_rms.toFixed(1)} dB` : 'Silencio'}
-                </Text>
-              </View>
-            </View>
+            <LiveValue icon="heart" tint={Colors.heartRate} label="Pulso"
+                       value={valid.heartRate ? `${Math.round(vitals.heartRate)} BPM` : 'Sin lectura válida'} />
+            <LiveValue icon="water" tint={Colors.oxygen} label="Oxígeno SpO2"
+                       value={valid.bloodOxygen ? `${vitals.bloodOxygen.toFixed(1)} %` : 'No disponible'} />
+            <LiveValue icon="pulse" tint={Colors.stress} label="HRV" value="No disponible" />
+            <LiveValue icon="mic" tint={Colors.audio} label="Micrófono"
+                       value={audioAvailable ? `${vitals.audio_rms.toFixed(1)} dBFS` : 'Sin lectura'} />
           </View>
         </View>
 
@@ -168,7 +129,7 @@ export const AIAssistantScreen: React.FC = () => {
           </View>
         ))}
 
-        {/* Indicador de Inferencia en Docker */}
+        {/* Indicador mientras responde el modelo de lenguaje */}
         {isChatLoading && (
           <View style={[styles.messageBubble, styles.aiBubble, { paddingVertical: 10, alignItems: 'center' }]}>
             <View style={styles.aiAvatar}>
@@ -177,7 +138,7 @@ export const AIAssistantScreen: React.FC = () => {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
               <ActivityIndicator size="small" color={Colors.primary} />
               <Text style={{ fontSize: 12, color: Colors.textSecondary, fontStyle: 'italic', flexShrink: 1 }}>
-                Generando respuesta médica completa con LLaMA 3.2 en Docker...
+                Qwen3-Next está redactando la respuesta…
               </Text>
             </View>
           </View>
@@ -231,6 +192,20 @@ export const AIAssistantScreen: React.FC = () => {
     </KeyboardAvoidingView>
   );
 };
+
+const LiveValue: React.FC<{ icon: React.ComponentProps<typeof Ionicons>['name']; tint: string; label: string; value: string }> = ({
+  icon, tint, label, value,
+}) => (
+  <View style={styles.vitalGridCard}>
+    <View style={[styles.vitalIconWrap, { backgroundColor: `${tint}14` }]}>
+      <Ionicons name={icon} size={14} color={tint} />
+    </View>
+    <View style={styles.vitalCardContent}>
+      <Text style={styles.vitalCardLabel}>{label}</Text>
+      <Text style={styles.vitalCardValue} numberOfLines={1}>{value}</Text>
+    </View>
+  </View>
+);
 
 const styles = StyleSheet.create({
   explainerBtn: {
@@ -288,7 +263,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   bannerHeaderTitle: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
     color: '#334155',
     letterSpacing: 0.6,
@@ -305,7 +280,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   llamaStatusText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
     color: '#15803D',
   },
@@ -340,7 +315,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   vitalCardLabel: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: '#64748B',
     marginBottom: 1,
@@ -397,7 +372,7 @@ const styles = StyleSheet.create({
     color: '#1E293B',
   },
   timestampText: {
-    fontSize: 11,
+    fontSize: 12,
     marginTop: 8,
   },
   userTimestamp: {

@@ -1,5 +1,8 @@
-import React from 'react';
-import { AuscultationScreen } from './AuscultationScreen';
+import React, { useState } from 'react';
+import { ConsultaScreen } from './ConsultaScreen';
 
-/** Mantiene el acceso pulmonar de main con el análisis de grabaciones del servidor. */
-export const PulmonaryAIScreen: React.FC = () => <AuscultationScreen initialMode="pulmon" />;
+/** Acceso pulmonar de main mediante la consulta guiada. */
+export const PulmonaryAIScreen: React.FC<{ onOpenAssistant: () => void }> = ({ onOpenAssistant }) => {
+  const [step, setStep] = useState(4);
+  return <ConsultaScreen step={step} onStepChange={setStep} onOpenAssistant={onOpenAssistant} />;
+};

@@ -89,5 +89,5 @@ const styles = StyleSheet.create({
   chipTextActive: { color: '#FFFFFF' },
   note: { fontSize: 12, color: Colors.textPrimary, lineHeight: 17 },
   strong: { fontWeight: '800' },
-  small: { fontSize: 11, color: Colors.textSecondary, marginTop: 6, lineHeight: 15 },
+  small: { fontSize: 12, color: Colors.textSecondary, marginTop: 6, lineHeight: 15 },
 });

@@ -86,3 +86,36 @@ y `TMP` a una carpeta temporal dentro del proyecto antes de ejecutar unittest.
 
 Compilar y pasar estas pruebas no demuestra funcionamiento completo en la placa
 ni exactitud clínica del sensor o de los modelos. Ver `Esp32/PRUEBAS_HARDWARE.md`.
+
+## Segunda actualización de las ramas externas
+
+Después de publicar la integración inicial (`6affa3e`), se consultó GitHub de nuevo.
+Solo `feature/servidor-ia-completo` avanzó, de `f3ffd0d` a `9fbd569`:
+
+- `03fa6b4`: ecualizador del servidor basado en una medición del fantoma.
+- `c7c7410`: consulta guiada como pantalla principal.
+- `9fbd569`: rediseño visual de la app.
+
+Las ramas de historial y modelo entrenado no tienen commits adicionales.
+Esta actualización no cambia ningún archivo de `Esp32`, ni conexiones físicas.
+
+Se resolvieron seis archivos con conflictos adoptando la consulta y su diseño,
+conservando los controles BLE de `main`, el contexto de conexión separado y el
+acceso pulmonar mediante la nueva consulta. Se conserva la visualización de SpO2
+sin calibrar y PRV óptica con etiquetas explícitas; ninguna se convierte en una
+medición clínica validada. El selector de sesiones sigue en el flujo de pacientes
+e historial, fuera del modal de conexión.
+
+Los formularios se reinician al cambiar de paciente; las respuestas pendientes
+de contexto, valoración, guardado e informe no se aplican a otra consulta. Las
+instrucciones para grabar corresponden a K2 mantenido durante al menos 1.2 s.
+
+El ecualizador permanece inactivo si no existe un perfil medido. No se creó
+ningún perfil ni se afirmó haber calibrado físicamente el estetoscopio.
+
+Verificación de esta actualización: 42 pruebas del backend (incluidas cinco del
+ecualizador), cuatro pruebas de la app y TypeScript sin errores. La compilación
+del firmware anterior sigue siendo la referencia porque sus archivos no cambiaron.
+Expo generó el paquete web (`Exported: dist`, 464 módulos); se cerró el proceso
+después de la exportación porque permanecía abierto. No se verificó visualmente
+la interfaz ni se realizaron pruebas nuevas con el equipo físico.

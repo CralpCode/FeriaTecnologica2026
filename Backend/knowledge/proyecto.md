@@ -54,4 +54,4 @@ Semáforo: ROJO si hay un síntoma de alarma o SpO2 calibrada menor de 90 %. AMA
 4. Pulsar **Guardar y evaluar esta sesión**. Leer hallazgos, posibilidades, datos faltantes y pasos sugeridos.
 5. Si hay síntomas graves, no esperar a la IA. La confirmación corresponde a personal de salud.
 
-La calibración acústica con fantoma descrita en el PDF sigue pendiente de medición física. No se afirma haberla realizado. Tampoco se ha flasheado el ESP32 durante esta tarea.
+La calibración acústica con fantoma descrita en el PDF sigue pendiente de medición física; no se afirma haberla realizado. El servidor ya tiene un ecualizador que corrige el audio del estetoscopio con esa medición (refuerza los graves que pierde la pieza, solo en bandas medidas de forma confiable); hoy está apagado porque aún no hay medición, y no se inventan ganancias. Tampoco se ha flasheado el ESP32 durante esta tarea.

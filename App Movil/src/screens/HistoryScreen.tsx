@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking, RefreshControl, TextInput } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { apiService } from '../services/api';
@@ -9,6 +9,8 @@ import { ListeningFilterBar } from '../components/ListeningFilterBar';
 import { RecordingResult, ReportItem, SessionOverview, TriageLevel } from '../types/vitals';
 import { Centered, Columns } from '../components/ResponsiveContainer';
 import { useLayout } from '../hooks/useLayout';
+import { isNamedPatient, patientLabel } from '../services/consulta';
+import { color as T, radius, space } from '../theme/tokens';
 
 const TRIAGE_COLOR: Record<TriageLevel, string> = {
   rojo: Colors.danger, amarillo: Colors.warning, verde: Colors.success, gris: Colors.textMuted,
@@ -37,12 +39,14 @@ const when = (iso?: string | null) => {
 };
 
 /** Historial por paciente (cada sesión es un paciente): grabaciones, informes y semáforo. */
-export const HistoryScreen: React.FC = () => {
+export const HistoryScreen: React.FC<{ onOpenConsulta?: () => void }> = ({ onOpenConsulta }) => {
   const { currentSessionId, switchSession } = useVitals();
   const [sessions, setSessions] = useState<SessionOverview[] | null>(null);
   const [error, setError] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [query, setQuery] = useState('');
+  const [level, setLevel] = useState<TriageLevel | 'todos'>('todos');
   const { twoColumns } = useLayout();
 
   const load = useCallback(async () => {
@@ -64,6 +68,10 @@ export const HistoryScreen: React.FC = () => {
   }, [twoColumns, open, sessions]);
 
   const selected = sessions?.find((x) => x.session_id === open) || null;
+  const q = query.trim().toLowerCase();
+  const visible = (sessions || []).filter((x) =>
+    (level === 'todos' || x.triaje === level)
+    && (!q || x.session_id.toLowerCase().includes(q) || patientLabel(x.session_id).toLowerCase().includes(q)));
 
   const list = (
     <View>
@@ -74,12 +82,29 @@ export const HistoryScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
       <Text style={styles.note}>Cada sesión corresponde a un paciente. Toca una para ver sus grabaciones e informes.</Text>
+      <View style={styles.searchBox}>
+        <Ionicons name="search" size={18} color={T.textMuted} />
+        <TextInput style={styles.searchInput} value={query} onChangeText={setQuery} placeholder="Buscar por código (p. ej. P017)"
+                   placeholderTextColor={T.textMuted} autoCapitalize="characters" accessibilityLabel="Buscar paciente por código" />
+      </View>
+      <View style={styles.filters}>
+        {(['todos', 'rojo', 'amarillo', 'verde', 'gris'] as const).map((lv) => (
+          <TouchableOpacity key={lv} onPress={() => setLevel(lv)} accessibilityRole="button" accessibilityState={{ selected: level === lv }}
+                            style={[styles.filterChip, level === lv && styles.filterChipActive]}>
+            {lv !== 'todos' && <View style={[styles.filterDot, { backgroundColor: TRIAGE_COLOR[lv] }]} />}
+            <Text style={[styles.filterText, level === lv && styles.filterTextActive]}>
+              {{ todos: 'Todos', rojo: 'Rojo', amarillo: 'Amarillo', verde: 'Verde', gris: 'Sin datos' }[lv]}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       {sessions === null && !error && <ActivityIndicator color={Colors.primary} style={{ marginTop: 24 }} />}
       {error && <Text style={styles.error}>No se pudo cargar el historial del servidor.</Text>}
       {sessions?.length === 0 && <Text style={styles.note}>Todavía no hay sesiones registradas.</Text>}
+      {sessions && sessions.length > 0 && visible.length === 0 && <Text style={styles.note}>Ningún paciente coincide con la búsqueda.</Text>}
 
-      {sessions?.map((s) => (
+      {visible.map((s) => (
         <View key={s.session_id} style={[styles.card, s.session_id === currentSessionId && styles.cardCurrent]}>
           <TouchableOpacity
             style={[styles.cardHeader, twoColumns && open === s.session_id && styles.cardSelected]}
@@ -90,8 +115,8 @@ export const HistoryScreen: React.FC = () => {
             <View style={[styles.triageDot, { backgroundColor: TRIAGE_COLOR[s.triaje] || Colors.textMuted }]} />
             <View style={{ flex: 1 }}>
               <Text style={styles.sessionId}>
-                {s.session_id}
-                {s.session_id === currentSessionId ? '  · sesión actual' : ''}
+                {isNamedPatient(s.session_id) ? patientLabel(s.session_id) : s.session_id}
+                {s.session_id === currentSessionId ? '  · abierto ahora' : ''}
               </Text>
               <Text style={styles.meta}>Última actividad: {when(s.last_seen)}</Text>
               <Text style={styles.meta}>
@@ -109,7 +134,7 @@ export const HistoryScreen: React.FC = () => {
             <SessionDetail
               session={s}
               isCurrent={s.session_id === currentSessionId}
-              onOpenSession={() => switchSession(s.session_id)}
+              onOpenSession={() => { switchSession(s.session_id); onOpenConsulta?.(); }}
               onChanged={load}
             />
           )}
@@ -132,13 +157,13 @@ export const HistoryScreen: React.FC = () => {
               <View style={[styles.card, styles.detailPanel]}>
                 <View style={styles.cardHeader}>
                   <View style={[styles.triageDot, { backgroundColor: TRIAGE_COLOR[selected.triaje] || Colors.textMuted }]} />
-                  <Text style={styles.sessionId}>{selected.session_id}</Text>
+                  <Text style={styles.sessionId}>{isNamedPatient(selected.session_id) ? patientLabel(selected.session_id) : selected.session_id}</Text>
                 </View>
                 <SessionDetail
                   key={selected.session_id}
                   session={selected}
                   isCurrent={selected.session_id === currentSessionId}
-                  onOpenSession={() => switchSession(selected.session_id)}
+                  onOpenSession={() => { switchSession(selected.session_id); onOpenConsulta?.(); }}
                   onChanged={load}
                 />
               </View>
@@ -231,7 +256,7 @@ const SessionDetail: React.FC<{
         {!isCurrent && (
           <TouchableOpacity style={[styles.actionBtn, { backgroundColor: Colors.primary }]} onPress={onOpenSession}>
             <Ionicons name="enter-outline" size={16} color="#FFFFFF" />
-            <Text style={styles.actionText}>Abrir sesión</Text>
+            <Text style={styles.actionText}>Abrir consulta</Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity
@@ -248,6 +273,20 @@ const SessionDetail: React.FC<{
 };
 
 const styles = StyleSheet.create({
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 44, paddingHorizontal: space.md,
+    backgroundColor: T.surface, borderWidth: 1, borderColor: T.borderStrong, borderRadius: radius.md, marginTop: space.md,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: T.text, minHeight: 40 },
+  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginVertical: space.md },
+  filterChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: space.md, borderRadius: radius.pill,
+    borderWidth: 1, borderColor: T.border, backgroundColor: T.surface, cursor: 'pointer' as any,
+  },
+  filterChipActive: { backgroundColor: T.primarySoft, borderColor: T.primary },
+  filterDot: { width: 10, height: 10, borderRadius: 5 },
+  filterText: { fontSize: 13, fontWeight: '700', color: T.textSecondary },
+  filterTextActive: { color: T.primary },
   container: { flex: 1, backgroundColor: Colors.background },
   content: { padding: 16, paddingBottom: 32 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -262,7 +301,7 @@ const styles = StyleSheet.create({
   cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12 },
   triageDot: { width: 14, height: 14, borderRadius: 7 },
   sessionId: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
-  meta: { fontSize: 11, color: Colors.textSecondary, lineHeight: 16 },
+  meta: { fontSize: 12, color: Colors.textSecondary, lineHeight: 16 },
   detail: { borderTopWidth: 1, borderTopColor: Colors.border, padding: 12 },
   detailTitle: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary, marginBottom: 6 },
   recRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 5 },

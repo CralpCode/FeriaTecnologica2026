@@ -113,8 +113,10 @@ def model_info() -> dict:
     }
 
 
-def classify_wav(path: str | Path) -> dict:
-    """Devuelve probabilidad de anormalidad, resultado y calidad de la señal."""
+def classify_wav(path: str | Path, eq=None) -> dict:
+    """Devuelve probabilidad de anormalidad, resultado y calidad de la señal.
+
+    eq: función (y, sr) -> y del ecualizador (ml/equalizer.py); se aplica tras el control de calidad."""
     y, sr = sf.read(str(path), dtype="float32", always_2d=False)
     if y.ndim > 1:
         y = y.mean(axis=1)
@@ -133,6 +135,8 @@ def classify_wav(path: str | Path) -> dict:
         return {"result": "calidad_insuficiente", "reason": "Señal casi en silencio: revisar contacto del estetoscopio",
                 "probability": None, "threshold": None, "quality": quality}
 
+    if eq is not None:
+        y = eq(y, sr)
     _load()
     import torch
     x = torch.from_numpy(F.features_from_audio(y, sr))
