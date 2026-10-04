@@ -5,6 +5,7 @@ import { Colors } from '../theme/colors';
 import { apiService } from '../services/api';
 import { useVitals } from '../context/VitalsContext';
 import { PlayButton } from '../components/PlayButton';
+import { ListeningFilterBar } from '../components/ListeningFilterBar';
 import { RecordingResult, ReportItem, SessionOverview, TriageLevel } from '../types/vitals';
 import { Centered, Columns } from '../components/ResponsiveContainer';
 import { useLayout } from '../hooks/useLayout';
@@ -185,6 +186,7 @@ const SessionDetail: React.FC<{
       <Text style={styles.detailTitle}>Grabaciones</Text>
       {recordings === null && <ActivityIndicator color={Colors.primary} />}
       {recordings?.length === 0 && <Text style={styles.meta}>Sin grabaciones.</Text>}
+      {recordings?.some((r) => r.has_audio) && <ListeningFilterBar />}
       {recordings?.map((r) => {
         const t = RESULT_TEXT[r.result] || RESULT_TEXT.error;
         return (
@@ -204,7 +206,7 @@ const SessionDetail: React.FC<{
                 {r.recording_id.startsWith('demo_') ? ' · caso de demostración' : ''}
               </Text>
             </View>
-            {r.has_audio && <PlayButton url={apiService.recordingAudioUrl(r.recording_id)} />}
+            {r.has_audio && <PlayButton url={apiService.recordingAudioUrl(r.recording_id)} mode={r.mode} />}
           </View>
         );
       })}

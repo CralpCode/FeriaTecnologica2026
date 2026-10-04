@@ -4,6 +4,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useClinical } from '../context/ClinicalContext';
 import { ClinicalAssessmentPanel } from '../components/ClinicalAssessmentPanel';
+import { ListeningFilterBar } from '../components/ListeningFilterBar';
 import { apiService } from '../services/api';
 import { PlayButton } from '../components/PlayButton';
 import { AIExplainerModal } from '../components/AIExplainerModal';
@@ -234,6 +235,9 @@ export const AuscultationScreen: React.FC = () => {
       {/* 4. Valoración orientativa (síntomas, edad, reposo): al lado de la grabación en pantallas grandes */}
       <ClinicalAssessmentPanel />
 
+      {/* Filtro para escuchar (no cambia el análisis) */}
+      {recordings.some((r) => r.has_audio) && <ListeningFilterBar mode={mode} />}
+
       {/* Historial */}
       {recordings.length > 0 && (
         <>
@@ -246,7 +250,7 @@ export const AuscultationScreen: React.FC = () => {
                 <Text style={styles.historyFocus}>{focusName(r.location)}</Text>
                 <Text style={[styles.historyResult, { color: s.color }]}>{s.label}</Text>
                 <Text style={styles.historyProb}>{pct(r.probability)}</Text>
-                {r.has_audio && <PlayButton url={apiService.recordingAudioUrl(r.recording_id)} />}
+                {r.has_audio && <PlayButton url={apiService.recordingAudioUrl(r.recording_id)} mode={r.mode} />}
               </View>
             );
           })}
@@ -294,7 +298,7 @@ const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) => {
         <MaterialCommunityIcons name={s.icon as any} size={22} color={s.color} />
         <Text style={[styles.resultTitle, { color: s.color, flex: 1 }]}>{s.label}</Text>
         {result.recording_id && !result.recording_id.startsWith('demo_') && (
-          <PlayButton url={apiService.recordingAudioUrl(result.recording_id)} />
+          <PlayButton url={apiService.recordingAudioUrl(result.recording_id)} mode={result.mode} />
         )}
       </View>
       <Text style={styles.statusText}>Foco {focusName(result.location)} · {result.duration_s?.toFixed(1)} s</Text>
