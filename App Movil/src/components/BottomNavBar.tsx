@@ -2,8 +2,9 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
+import { color as T } from '../theme/tokens';
 
-export type TabScreen = 'dashboard' | 'auscultation' | 'alerts' | 'history' | 'charts' | 'ai';
+export type TabScreen = 'consulta' | 'dashboard' | 'alerts' | 'history' | 'charts' | 'ai';
 
 export interface NavProps {
   currentTab: TabScreen;
@@ -14,14 +15,14 @@ export interface NavProps {
 
 /** Pestañas de la app: las usan la barra inferior (celular) y la lateral (tablet y computadora). */
 export const NAV_TABS: { id: TabScreen; label: string; icon: string }[] = [
+  { id: 'consulta', label: 'Consulta', icon: 'stethoscope' },
   { id: 'dashboard', label: 'Monitoreo', icon: 'heart-pulse' },
-  { id: 'auscultation', label: 'Auscultar', icon: 'stethoscope' },
-  { id: 'alerts', label: 'Alertas', icon: 'bell-outline' },
   { id: 'history', label: 'Historial', icon: 'folder-account-outline' },
+  { id: 'alerts', label: 'Alertas', icon: 'bell-outline' },
   { id: 'ai', label: 'Asistente', icon: 'robot-outline' },
 ];
 
-export const tabColor = (id: TabScreen) => (id === 'ai' ? Colors.aiPurple : Colors.heartRate);
+export const tabColor = (id: TabScreen) => (id === 'ai' ? T.ai : T.primary);
 
 export const BottomNavBar: React.FC<NavProps> = ({ currentTab, onSelectTab, hasAlert = false, alertsCount = 0 }) => (
   <View style={styles.container} accessibilityRole="tablist">

@@ -10,19 +10,18 @@ import { TriageCard } from '../components/TriageCard';
 import { measurementValidity } from '../services/measurementQuality';
 import { useClinical } from '../context/ClinicalContext';
 import { Centered, Columns } from '../components/ResponsiveContainer';
-import { ConsultaChecklist } from '../components/ConsultaChecklist';
-import { AuscultationMode } from '../types/vitals';
+import { ConsultaBanner } from '../components/consulta/ConsultaBanner';
 
 interface DashboardScreenProps {
   onNavigateToAI: () => void;
   onNavigateToCharts: () => void;
-  onOpenAuscultation?: (mode: AuscultationMode) => void;
+  onOpenConsulta?: (step: number) => void;
 }
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onNavigateToAI,
   onNavigateToCharts,
-  onOpenAuscultation,
+  onOpenConsulta,
 }) => {
   const { vitals, aiReport, connectedType } = useVitals();
   const { triage } = useClinical();
@@ -63,7 +62,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         left={
           <View>
       {/* Pasos de la consulta: guía al médico de principio a fin */}
-      {onOpenAuscultation && <ConsultaChecklist onOpenAuscultation={onOpenAuscultation} />}
+      {onOpenConsulta && <ConsultaBanner onOpen={onOpenConsulta} />}
 
       {/* 0. SEMÁFORO DE TRIAJE (SpO2 + pulso + corazón + pulmón) */}
       <TriageCard triage={triage} />

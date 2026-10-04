@@ -37,7 +37,7 @@ const when = (iso?: string | null) => {
 };
 
 /** Historial por paciente (cada sesión es un paciente): grabaciones, informes y semáforo. */
-export const HistoryScreen: React.FC = () => {
+export const HistoryScreen: React.FC<{ onOpenConsulta?: () => void }> = ({ onOpenConsulta }) => {
   const { currentSessionId, switchSession } = useVitals();
   const [sessions, setSessions] = useState<SessionOverview[] | null>(null);
   const [error, setError] = useState(false);
@@ -109,7 +109,7 @@ export const HistoryScreen: React.FC = () => {
             <SessionDetail
               session={s}
               isCurrent={s.session_id === currentSessionId}
-              onOpenSession={() => switchSession(s.session_id)}
+              onOpenSession={() => { switchSession(s.session_id); onOpenConsulta?.(); }}
               onChanged={load}
             />
           )}
@@ -138,7 +138,7 @@ export const HistoryScreen: React.FC = () => {
                   key={selected.session_id}
                   session={selected}
                   isCurrent={selected.session_id === currentSessionId}
-                  onOpenSession={() => switchSession(selected.session_id)}
+                  onOpenSession={() => { switchSession(selected.session_id); onOpenConsulta?.(); }}
                   onChanged={load}
                 />
               </View>

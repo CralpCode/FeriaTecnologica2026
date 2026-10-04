@@ -41,3 +41,31 @@ export function nextFocus(mode: AuscultationMode, states: Record<string, FocusSt
 export function doneCount(mode: AuscultationMode, states: Record<string, FocusState>, only?: AuscultationFocus[]) {
   return (only || FOCUS_ORDER[mode]).filter((f) => states[f] === 'normal' || states[f] === 'anormal').length;
 }
+
+/** Nombre corto y largo de cada foco o zona (corazón: focos clásicos; pulmón: zonas de ICBHI). */
+export const FOCUS_INFO: Record<AuscultationFocus, { short: string; long: string }> = {
+  AV: { short: 'Aórtico', long: 'Foco aórtico' },
+  PV: { short: 'Pulmonar', long: 'Foco pulmonar' },
+  TV: { short: 'Tricuspídeo', long: 'Foco tricuspídeo' },
+  MV: { short: 'Mitral', long: 'Foco mitral' },
+  TC: { short: 'Tráquea', long: 'Tráquea' },
+  AL: { short: 'Ant. izq.', long: 'Tórax anterior izquierdo' },
+  AR: { short: 'Ant. der.', long: 'Tórax anterior derecho' },
+  PL: { short: 'Espalda izq.', long: 'Espalda izquierda' },
+  PR: { short: 'Espalda der.', long: 'Espalda derecha' },
+  LL: { short: 'Costado izq.', long: 'Costado izquierdo' },
+  LR: { short: 'Costado der.', long: 'Costado derecho' },
+};
+
+export const focusName = (id?: string | null) =>
+  (id && FOCUS_INFO[id as AuscultationFocus]?.long) || 'Sin foco';
+
+/**
+ * Las sesiones que la app crea sola al abrirse (pc_xxxxx, movil_xxxxx, apk_xxxxx) no tienen un paciente
+ * identificado; las de "Nuevo paciente" llevan el código que escribió el médico.
+ */
+export const isNamedPatient = (sessionId: string) => !/^(pc|movil|apk|sess)_[a-z0-9]{5}$/.test(sessionId);
+
+/** Código legible del paciente: "p017_ab12c" -> "P017". */
+export const patientLabel = (sessionId: string) =>
+  isNamedPatient(sessionId) ? sessionId.replace(/_[a-z0-9]{5}$/, '').toUpperCase() : 'Sin identificar';

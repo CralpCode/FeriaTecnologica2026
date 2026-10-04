@@ -13,14 +13,18 @@ import { useLayout } from './src/hooks/useLayout';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { ChartsScreen } from './src/screens/ChartsScreen';
 import { AIAssistantScreen } from './src/screens/AIAssistantScreen';
-import { AuscultationScreen } from './src/screens/AuscultationScreen';
+import { ConsultaScreen } from './src/screens/ConsultaScreen';
 import { AlertsScreen } from './src/screens/AlertsScreen';
 import { HistoryScreen } from './src/screens/HistoryScreen';
-import { AuscultationMode } from './src/types/vitals';
 
 const MainAppContent: React.FC = () => {
-  const [currentTab, setCurrentTab] = useState<TabScreen>('dashboard');
-  const [auscultationMode, setAuscultationMode] = useState<AuscultationMode>('corazon');
+  const [currentTab, setCurrentTab] = useState<TabScreen>('consulta');
+  // Paso de la consulta guiada (se conserva al cambiar de pestaña)
+  const [consultaStep, setConsultaStep] = useState(0);
+  const openConsulta = (step: number) => {
+    setConsultaStep(step);
+    setCurrentTab('consulta');
+  };
   const { hasCriticalAlert, activeAlertsCount } = useClinical();
   const insets = useSafeAreaInsets();
   const { useSideNav, isDesktop } = useLayout();
@@ -38,7 +42,7 @@ const MainAppContent: React.FC = () => {
       <StatusBar style="dark" />
 
       {/* Cabecera común */}
-      <Header onNewPatient={() => setCurrentTab('dashboard')} />
+      <Header onNewPatient={() => openConsulta(1)} />
 
       <ConnectionBanner />
 
@@ -52,15 +56,14 @@ const MainAppContent: React.FC = () => {
           <DashboardScreen
             onNavigateToAI={() => setCurrentTab('ai')}
             onNavigateToCharts={() => setCurrentTab('charts')}
-            onOpenAuscultation={(mode) => {
-              setAuscultationMode(mode);
-              setCurrentTab('auscultation');
-            }}
+            onOpenConsulta={openConsulta}
           />
         )}
-        {currentTab === 'auscultation' && <AuscultationScreen initialMode={auscultationMode} />}
+        {currentTab === 'consulta' && (
+          <ConsultaScreen step={consultaStep} onStepChange={setConsultaStep} onOpenAssistant={() => setCurrentTab('ai')} />
+        )}
         {currentTab === 'alerts' && <AlertsScreen />}
-        {currentTab === 'history' && <HistoryScreen />}
+        {currentTab === 'history' && <HistoryScreen onOpenConsulta={() => openConsulta(0)} />}
         {currentTab === 'charts' && <ChartsScreen />}
         {currentTab === 'ai' && <AIAssistantScreen />}
       </View>
