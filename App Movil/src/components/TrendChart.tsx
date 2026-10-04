@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pillLabel: {
-    fontSize: 9,
+    fontSize: 11,
     color: Colors.textMuted,
     fontWeight: '600',
   },

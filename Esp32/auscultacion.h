@@ -417,3 +417,71 @@ bool ausc_update_leds(int num_leds) {
   strip.show();
   return true;
 }
+
+// ------------------------------------------------------------------------------
+// Diagnóstico para pruebas en la placa real: comando "DIAG" por el monitor serie.
+// Muestra memoria, WiFi, servidor, sensor óptico y nivel del micrófono (1 s de audio).
+// ------------------------------------------------------------------------------
+void ausc_diag(bool sensor_found, bool finger, int bpm, float spo2) {
+  Serial.println(F("\r\n================ DIAGNOSTICO SPIROSCAN ================"));
+  Serial.printf("Memoria libre: %u bytes | minima historica: %u | bloque mayor: %u\r\n",
+                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  Serial.println(ESP.getMaxAllocHeap() >= AUSC_CHUNK_SAMPLES * sizeof(int16_t) + 45000
+                 ? F("  -> Memoria suficiente para grabar con https")
+                 : F("  -> OJO: poca memoria; con https la grabacion puede fallar"));
+
+  if (ausc_wifi_ready()) {
+    Serial.printf("WiFi: conectado a \"%s\" | senal %d dBm | IP %s\r\n", WIFI_SSID, WiFi.RSSI(),
+                  WiFi.localIP().toString().c_str());
+    if (WiFi.RSSI() < -75) Serial.println(F("  -> Senal debil: acerca el ESP32 al router"));
+  } else {
+    Serial.printf("WiFi: SIN CONEXION a \"%s\" (revisa nombre/clave y que sea de 2.4 GHz)\r\n", WIFI_SSID);
+  }
+
+  if (ausc_server_known()) {
+    WiFiClientSecure tls;
+    WiFiClient plain;
+    HTTPClient http;
+    unsigned long t0 = millis();
+    ausc_http_begin(http, tls, plain, ausc_server() + "/api/status");
+    int code = http.GET();
+    http.end();
+    Serial.printf("Servidor: %s -> HTTP %d en %lu ms\r\n", ausc_server().c_str(), code, millis() - t0);
+  } else {
+    Serial.println(F("Servidor: no encontrado todavia (mDNS) y SERVER_URL vacio"));
+  }
+
+  Serial.printf("Sensor optico MAX30102: %s | dedo: %s | pulso %d BPM | SpO2 %.1f %%\r\n",
+                sensor_found ? "detectado" : "NO detectado (revisa SDA/SCL)", finger ? "si" : "no", bpm, spo2);
+
+  // 1 segundo de audio del INMP441 con el mismo escalado que la grabacion
+  int32_t raw[256];
+  size_t bytes_read = 0;
+  uint32_t n = 0, clipped = 0;
+  double sum = 0, sum_sq = 0;
+  int32_t peak = 0;
+  unsigned long t0 = millis();
+  while (millis() - t0 < 1000) {
+    if (i2s_read(I2S_NUM_0, (char*)raw, sizeof(raw), &bytes_read, pdMS_TO_TICKS(50)) != ESP_OK) continue;
+    for (size_t i = 0; i < bytes_read / sizeof(int32_t); i++) {
+      int32_t s = raw[i] >> AUSC_GAIN_SHIFT;
+      sum += s;
+      sum_sq += (double)s * s;
+      if (abs(s) > peak) peak = abs(s);
+      if (abs(s) >= 32767) clipped++;
+      n++;
+    }
+  }
+  if (n == 0) {
+    Serial.println(F("Microfono INMP441: SIN DATOS (revisa SCK=14, WS=15, SD=32 y L/R a GND)"));
+  } else {
+    double mean = sum / n;
+    double rms = sqrt(sum_sq / n - mean * mean);
+    Serial.printf("Microfono INMP441: %u muestras/s | RMS %.0f | pico %d | saturadas %.2f %%\r\n",
+                  (unsigned)n, rms, (int)peak, 100.0 * clipped / n);
+    if (rms < 5) Serial.println(F("  -> Casi silencio: microfono desconectado o sin contacto"));
+    else if (clipped > n / 100) Serial.println(F("  -> Satura: sube AUSC_GAIN_SHIFT (menos ganancia)"));
+    else Serial.println(F("  -> Nivel correcto"));
+  }
+  Serial.println(F("=======================================================\r\n"));
+}

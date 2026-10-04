@@ -23,6 +23,16 @@ La reevaluación retrospectiva de 1,226 audios reproduce sensibilidad 89.70 %, e
 
 El descriptor de características del soplo permanece desactivado: la auditoría reconstruida halló 31 de 36 pacientes de prueba compartidos con entrenamiento/validación del extractor base. No deben citarse sus métricas antiguas como validación independiente.
 
+### Pulmones
+Con la base pública ICBHI 2017 (126 pacientes, 920 grabaciones) se entrenaron dos modelos de pulmón y se
+evaluaron con pacientes no vistos. Solo se muestra lo confiable:
+- Sibilancias: SÍ se muestran. En grabaciones completas detecta ≈ 59 % de las que tienen sibilancias y
+  reconoce ≈ 81 % de las normales (AUC ≈ 0.72).
+- Crepitantes: NO se muestran (AUC ≈ 0.53, casi como adivinar).
+- Patrón por enfermedad (EPOC, neumonía, etc.): NO se muestra; hay muy pocos pacientes por enfermedad
+  (acierto balanceado ≈ 47 %). Reconoce bien EPOC y sanos, pero falla en las demás.
+Es una sugerencia para referir, nunca un diagnóstico.
+
 Hay un modelo pulmonar base de regresión logística. Su puntaje ICBHI reportado por el autor no se volvió a verificar con el dataset completo. No hay pesos CNN pulmonares entrenados disponibles. Faltan los audios ICBHI y su partición oficial en la copia de trabajo; tener fichas clínicas no equivale a tener esos audios.
 
 ## Valoración orientativa

@@ -47,7 +47,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 },
   lights: { gap: 4 },
   light: { width: 12, height: 12, borderRadius: 6 },
-  kicker: { fontSize: 10, fontWeight: '800', color: Colors.textSecondary, letterSpacing: 0.5 },
+  kicker: { fontSize: 11, fontWeight: '800', color: Colors.textSecondary, letterSpacing: 0.5 },
   title: { fontSize: 15, fontWeight: '800' },
   reason: { fontSize: 13, color: Colors.textPrimary, lineHeight: 19 },
   note: { fontSize: 11, color: Colors.textSecondary, marginTop: 6 },

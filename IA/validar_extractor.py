@@ -20,7 +20,7 @@ from pathlib import Path
 import librosa
 import numpy as np
 
-from src.lung_data import DATA_DIR, FILE_RE, _cycles
+from src.lung_data import DATA_DIR, FILE_RE, _cycles, rglob
 
 ROOT = Path(__file__).resolve().parent
 SAMPLES = ROOT.parent / "Backend" / "demo_audios" / "demoSamples.json"
@@ -68,7 +68,7 @@ def rel_errors(ours: dict, ref: dict) -> np.ndarray:
 
 
 def find_cycle(rec_name: str, duration: float):
-    for wav in DATA_DIR.glob(f"**/{rec_name}.wav"):
+    for wav in rglob(DATA_DIR, f"{rec_name}.wav"):
         if FILE_RE.match(wav.name):
             for a, b, _, _ in _cycles(wav.with_suffix(".txt")):
                 if abs((b - a) - duration) < 0.01:

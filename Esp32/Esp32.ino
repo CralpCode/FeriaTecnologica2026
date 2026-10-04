@@ -419,6 +419,8 @@ void handle_incoming_commands(String cmd) {
 
   if (cmd == "REC" || cmd == "GRABAR") {
     ausc_start();
+  } else if (cmd == "DIAG") {
+    ausc_diag(sensor_hw_found, finger_detected, beat_avg, spo2_val);
   } else if (cmd == "WAKE" || cmd == "W" || cmd == "ACTIVE") {
     activate_transmission();
   } else if (cmd == "SLEEP" || cmd == "S") {

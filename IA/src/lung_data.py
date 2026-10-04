@@ -14,6 +14,15 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+
+def rglob(root: Path, pattern: str):
+    """Como Path.glob('**/patron'), pero entrando también en carpetas que son enlaces simbólicos."""
+    import fnmatch
+    import os
+    for dirpath, _, files in os.walk(root, followlinks=True):
+        for name in fnmatch.filter(files, pattern):
+            yield Path(dirpath) / name
+
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 FILE_RE = re.compile(r"^(\d{3})_([0-9a-zA-Z]+)_(Tc|Al|Ar|Pl|Pr|Ll|Lr)_(sc|mc)_([A-Za-z0-9]+)\.wav$")
 
@@ -48,7 +57,7 @@ class LungRecording:
 def _diagnoses(data_dir: Path) -> dict[str, tuple[str, str]]:
     """paciente -> (diagnóstico, partición)"""
     out: dict[str, tuple[str, str]] = {}
-    for f in data_dir.glob("**/datos_paciente_*.csv"):
+    for f in rglob(data_dir, "datos_paciente_*.csv"):
         with open(f, newline="", encoding="utf-8") as fh:
             d = {r[0]: r[1] for r in csv.reader(fh) if len(r) >= 2}
         pid = d.get("ID Paciente", "").strip()
@@ -56,7 +65,7 @@ def _diagnoses(data_dir: Path) -> dict[str, tuple[str, str]]:
         # La ficha es una partición sugerida del equipo, no evidencia de la oficial.
         out[pid] = (d.get("Diagnostico", "").strip(), "")
     for name in ("patient_diagnosis.csv", "ICBHI_Challenge_diagnosis.txt"):
-        for f in data_dir.glob(f"**/{name}"):
+        for f in rglob(data_dir, f"{name}"):
             with open(f, encoding="utf-8") as fh:
                 for line in fh:
                     parts = re.split(r"[,\t]", line.strip())
@@ -68,7 +77,7 @@ def _diagnoses(data_dir: Path) -> dict[str, tuple[str, str]]:
 def _official_split(data_dir: Path) -> dict[str, str]:
     """grabación -> train/test si existe el archivo oficial de partición."""
     out = {}
-    for f in data_dir.glob("**/ICBHI_challenge_train_test.txt"):
+    for f in rglob(data_dir, "ICBHI_challenge_train_test.txt"):
         for line in open(f, encoding="utf-8"):
             parts = line.split()
             if len(parts) == 2:
@@ -90,7 +99,7 @@ def load_icbhi(data_dir: Path = DATA_DIR) -> list[LungRecording]:
     diag = _diagnoses(data_dir)
     official = _official_split(data_dir)
     seen, recs = set(), []
-    for wav in sorted(data_dir.glob("**/*.wav")):
+    for wav in sorted(rglob(data_dir, "*.wav")):
         m = FILE_RE.match(wav.name)
         if not m or wav.name in seen:
             continue  # ignora audios que no son de ICBHI (p. ej. PhysioNet) y duplicados

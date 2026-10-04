@@ -5,6 +5,9 @@ import { Colors } from '../theme/colors';
 import { useClinical } from '../context/ClinicalContext';
 import { ClinicalAssessmentPanel } from '../components/ClinicalAssessmentPanel';
 import { apiService } from '../services/api';
+import { PlayButton } from '../components/PlayButton';
+import { AIExplainerModal } from '../components/AIExplainerModal';
+import { Centered, Columns } from '../components/ResponsiveContainer';
 import { AuscultationFocus, AuscultationMode, FocusGuide, HeartModelInfo, RecordingResult } from '../types/vitals';
 
 const FOCI: Record<AuscultationMode, { id: AuscultationFocus; label: string }[]> = {
@@ -39,12 +42,14 @@ const RESULT_STYLE: Record<RecordingResult['result'], { label: string; color: st
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? '—' : `${Math.round(v * 100)} %`);
 
 export const AuscultationScreen: React.FC = () => {
-  const { phase, armedLocation, lastResult, recordings, armRecording } = useClinical();
+  const { phase, armedLocation, lastResult, recordings, armRecording, recordingStartedAt } = useClinical();
+  const [showGuide, setShowGuide] = useState(false);
   const [mode, setMode] = useState<AuscultationMode>('corazon');
   const [focus, setFocus] = useState<AuscultationFocus>('MV');
   const [guide, setGuide] = useState<FocusGuide | null>(null);
   const [model, setModel] = useState<HeartModelInfo | null>(null);
   const [lungReady, setLungReady] = useState<boolean | null>(null);
+  const [showExplainer, setShowExplainer] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState<string | null>(null);
@@ -59,7 +64,12 @@ export const AuscultationScreen: React.FC = () => {
     apiService.getHeartModelInfo().then(setModel).catch(() => setModel(null));
     apiService
       .getModelsInfo()
-      .then((m) => setLungReady(Object.values(m.pulmon || {}).some((x) => x.loaded)))
+      .then((m) => {
+        const p = m.pulmon || {};
+        // Hay análisis de pulmón si existe una CNN de pulmón o el modelo base con su extractor validado
+        setLungReady(!!(p.lung_sounds_cnn?.loaded || p.lung_disease_cnn?.loaded ||
+          (p.modelo_base?.loaded && p.modelo_base?.extractor_listo)));
+      })
       .catch(() => setLungReady(null));
   }, []);
 
@@ -86,6 +96,8 @@ export const AuscultationScreen: React.FC = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <AIExplainerModal visible={showExplainer} onClose={() => setShowExplainer(false)} />
+      <Centered>
       <View style={styles.disclaimer}>
         <Ionicons name="information-circle" size={16} color="#92400E" />
         <Text style={styles.disclaimerText}>
@@ -149,27 +161,14 @@ export const AuscultationScreen: React.FC = () => {
         })}
       </View>
 
-      {guide && (
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <MaterialCommunityIcons name="stethoscope" size={18} color={Colors.primary} />
-            <Text style={styles.cardTitle}>{guide.nombre}</Text>
-          </View>
-          <Text style={styles.guidePosition}>{guide.posicion}</Text>
-          {guide.pasos.map((p, i) => (
-            <Text key={i} style={styles.guideStep}>• {p}</Text>
-          ))}
-        </View>
-      )}
-
+      <Columns
+        left={
+          <View>
       {/* 2. Grabación */}
       <Text style={styles.sectionTitle}>2. Graba 15 segundos</Text>
       <View style={styles.card}>
         {phase === 'recording' ? (
-          <View style={styles.statusRow}>
-            <ActivityIndicator color={Colors.primary} />
-            <Text style={styles.statusText}>Grabando foco {focusName(armedLocation || undefined)}… no muevas el estetoscopio.</Text>
-          </View>
+          <RecordingProgress startedAt={recordingStartedAt} focus={focusName(armedLocation || undefined)} />
         ) : phase === 'armed' ? (
           <View style={styles.statusRow}>
             <MaterialCommunityIcons name="gesture-tap-hold" size={22} color={Colors.primary} />
@@ -189,8 +188,24 @@ export const AuscultationScreen: React.FC = () => {
         {error && <Text style={styles.errorText}>{error}</Text>}
       </View>
 
-      {/* 3. Resultado */}
-      {lastResult && <ResultCard result={lastResult} />}
+      {guide && (
+        <View style={styles.card}>
+          <TouchableOpacity
+            style={styles.cardHeader}
+            onPress={() => setShowGuide((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showGuide }}
+          >
+            <MaterialCommunityIcons name="stethoscope" size={18} color={Colors.primary} />
+            <Text style={[styles.cardTitle, { flex: 1 }]}>Cómo colocarlo · {guide.nombre}</Text>
+            <Ionicons name={showGuide ? 'chevron-up' : 'chevron-down'} size={18} color={Colors.textSecondary} />
+          </TouchableOpacity>
+          <Text style={styles.guidePosition}>{guide.posicion}</Text>
+          {showGuide && guide.pasos.map((p, i) => (
+            <Text key={i} style={styles.guideStep}>• {p}</Text>
+          ))}
+        </View>
+      )}
 
       {/* Preguntas al asistente de uso */}
       <Text style={styles.sectionTitle}>¿Dudas al colocar el estetoscopio?</Text>
@@ -211,6 +226,13 @@ export const AuscultationScreen: React.FC = () => {
         {answer && <Text style={styles.answerText}>{answer}</Text>}
       </View>
 
+          </View>
+        }
+        right={
+          <View>
+      {/* 3. Resultado */}
+      {lastResult && <ResultCard result={lastResult} />}
+
       {/* Historial */}
       {recordings.length > 0 && (
         <>
@@ -223,6 +245,7 @@ export const AuscultationScreen: React.FC = () => {
                 <Text style={styles.historyFocus}>{focusName(r.location)}</Text>
                 <Text style={[styles.historyResult, { color: s.color }]}>{s.label}</Text>
                 <Text style={styles.historyProb}>{pct(r.probability)}</Text>
+                {r.has_audio && <PlayButton url={apiService.recordingAudioUrl(r.recording_id)} />}
               </View>
             );
           })}
@@ -242,13 +265,20 @@ export const AuscultationScreen: React.FC = () => {
             <Metric label="AUC" value={model.metricas_prueba.auc.toFixed(2)} />
           </View>
           <Text style={styles.modelNote}>
-            CNN entrenada con {model.dataset} · {model.metricas_prueba.n} grabaciones de prueba no vistas en entrenamiento.
+            CNN entrenada con {DATASET_NAMES[model.dataset || ''] || model.dataset} · {model.metricas_prueba.n} grabaciones de prueba no vistas en entrenamiento.
           </Text>
           {model.limitaciones?.map((l, i) => (
             <Text key={i} style={styles.modelNote}>• {l}</Text>
           ))}
+          <TouchableOpacity onPress={() => setShowExplainer(true)} style={{ marginTop: 8 }}>
+            <Text style={{ color: Colors.aiPurple, fontWeight: '800', fontSize: 13 }}>¿Cómo funciona la IA? →</Text>
+          </TouchableOpacity>
         </View>
       )}
+          </View>
+        }
+      />
+      </Centered>
     </ScrollView>
   );
 };
@@ -261,7 +291,10 @@ const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) => {
     <View style={[styles.card, { borderColor: s.color, backgroundColor: s.soft }]}>
       <View style={styles.cardHeader}>
         <MaterialCommunityIcons name={s.icon as any} size={22} color={s.color} />
-        <Text style={[styles.resultTitle, { color: s.color }]}>{s.label}</Text>
+        <Text style={[styles.resultTitle, { color: s.color, flex: 1 }]}>{s.label}</Text>
+        {result.recording_id && !result.recording_id.startsWith('demo_') && (
+          <PlayButton url={apiService.recordingAudioUrl(result.recording_id)} />
+        )}
       </View>
       <Text style={styles.statusText}>Foco {focusName(result.location)} · {result.duration_s?.toFixed(1)} s</Text>
       {result.probability !== null ? (
@@ -285,6 +318,41 @@ const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) => {
             : 'Sugerencia: referir a evaluación médica y ecocardiograma.'}
         </Text>
       )}
+    </View>
+  );
+};
+
+const DATASET_NAMES: Record<string, string> = {
+  both: 'CirCor 2022 + PhysioNet 2016',
+  circor: 'CirCor 2022',
+  physionet: 'PhysioNet 2016',
+};
+
+const RECORDING_SECONDS = 15;
+
+/** Barra de avance de la grabación (15 s del ESP32) y luego "analizando". */
+const RecordingProgress: React.FC<{ startedAt: number | null; focus: string }> = ({ startedAt, focus }) => {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, []);
+  const elapsed = startedAt ? (now - startedAt) / 1000 : 0;
+  const analyzing = elapsed >= RECORDING_SECONDS;
+  const frac = Math.min(1, elapsed / RECORDING_SECONDS);
+  return (
+    <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: RECORDING_SECONDS, now: Math.floor(elapsed) }}>
+      <View style={styles.statusRow}>
+        {analyzing ? <ActivityIndicator color={Colors.aiPurple} /> : <MaterialCommunityIcons name="record-rec" size={22} color={Colors.danger} />}
+        <Text style={styles.statusText}>
+          {analyzing
+            ? 'Enviando y analizando la grabación…'
+            : `Grabando foco ${focus}: ${Math.max(0, Math.ceil(RECORDING_SECONDS - elapsed))} s restantes. No muevas el estetoscopio.`}
+        </Text>
+      </View>
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${frac * 100}%`, backgroundColor: analyzing ? Colors.aiPurple : Colors.primary }]} />
+      </View>
     </View>
   );
 };
@@ -386,6 +454,8 @@ const styles = StyleSheet.create({
   },
   modeBtnActive: { backgroundColor: Colors.aiPurple, borderColor: Colors.aiPurple },
   modeText: { fontSize: 14, fontWeight: '800', color: Colors.textSecondary },
+  progressTrack: { height: 10, borderRadius: 5, backgroundColor: Colors.backgroundSecondary, marginTop: 10, overflow: 'hidden' },
+  progressFill: { height: 10, borderRadius: 5 },
   detailsBox: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 10, marginTop: 8, gap: 2 },
   detailsTitle: { fontSize: 12, fontWeight: '800', color: Colors.textPrimary, marginTop: 2 },
   detailsLine: { fontSize: 12, color: Colors.textPrimary, lineHeight: 18 },

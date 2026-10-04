@@ -272,6 +272,8 @@ def _recording_dict(row) -> dict:
     d = dict(row)
     d["quality"] = json.loads(d["quality"]) if d.get("quality") else None
     d["details"] = json.loads(d["details"]) if d.get("details") else {}
+    d["recording_id"] = d["id"]  # mismo nombre que en los resultados en vivo
+    d["has_audio"] = bool(d.get("wav_path")) and os.path.exists(d["wav_path"])
     d.pop("wav_path", None)
     return d
 
@@ -428,3 +430,49 @@ def save_clinical_context(session_id: str, content: dict) -> dict:
                      (session_id, json.dumps(content, allow_nan=False), datetime.now().isoformat()))
     conn.close()
     return content
+
+
+def list_reports(session_id: str = None, limit: int = 50) -> list[dict]:
+    conn = get_db_connection()
+    q = "SELECT id, session_id, created_at, llm_generated, pdf_path FROM reports"
+    rows = (conn.execute(q + " WHERE session_id = ? ORDER BY id DESC LIMIT ?", (session_id, limit)) if session_id
+            else conn.execute(q + " ORDER BY id DESC LIMIT ?", (limit,))).fetchall()
+    conn.close()
+    return [{"report_id": r["id"], "session_id": r["session_id"], "created_at": r["created_at"],
+             "llm_generated": bool(r["llm_generated"]), "pdf_url": f"/api/reports/{r['id']}/pdf",
+             "has_pdf": bool(r["pdf_path"]) and os.path.exists(r["pdf_path"])} for r in rows]
+
+
+def get_sessions_overview(limit: int = 100) -> list[dict]:
+    """Una fila por sesión (paciente): lecturas, grabaciones, alertas e informes, ordenadas por última actividad."""
+    conn = get_db_connection()
+    out: dict[str, dict] = {}
+
+    def row(sid):
+        return out.setdefault(sid, {"session_id": sid, "first_seen": None, "last_seen": None, "readings": 0,
+                                    "recordings": 0, "abnormal_recordings": 0, "alerts": 0, "active_alerts": 0,
+                                    "reports": 0})
+
+    def touch(d, first, last):
+        if first and (d["first_seen"] is None or first < d["first_seen"]):
+            d["first_seen"] = first
+        if last and (d["last_seen"] is None or last > d["last_seen"]):
+            d["last_seen"] = last
+
+    for r in conn.execute("SELECT device_id s, COUNT(*) n, MIN(timestamp) a, MAX(timestamp) b FROM vitals_log "
+                          "WHERE heartRate > 0 GROUP BY device_id"):
+        d = row(r["s"]); d["readings"] = r["n"]; touch(d, r["a"], r["b"])
+    for r in conn.execute("SELECT session_id s, COUNT(*) n, SUM(result = 'anormal') ab, MIN(created_at) a, "
+                          "MAX(created_at) b FROM recordings GROUP BY session_id"):
+        d = row(r["s"]); d["recordings"] = r["n"]; d["abnormal_recordings"] = r["ab"] or 0; touch(d, r["a"], r["b"])
+    for r in conn.execute("SELECT session_id s, COUNT(*) n, SUM(acknowledged = 0) act, MAX(created_at) b "
+                          "FROM alerts GROUP BY session_id"):
+        d = row(r["s"]); d["alerts"] = r["n"]; d["active_alerts"] = r["act"] or 0; touch(d, None, r["b"])
+    for r in conn.execute("SELECT session_id s, COUNT(*) n, MAX(created_at) b FROM reports GROUP BY session_id"):
+        d = row(r["s"]); d["reports"] = r["n"]; touch(d, None, r["b"])
+    conn.close()
+    # Se omiten las sesiones vacías (se crea una cada vez que alguien abre la app sin medir nada)
+    rows = [d for d in out.values()
+            if d["recordings"] or d["reports"] or d["alerts"] or d["readings"] >= 5]
+    rows.sort(key=lambda d: d["last_seen"] or "", reverse=True)
+    return rows[:limit]

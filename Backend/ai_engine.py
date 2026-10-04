@@ -7,7 +7,9 @@ from datetime import datetime
 
 # Cualquier servidor compatible con la API de OpenAI: Ollama nativo (por defecto) o Splash.
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1").rstrip("/")
-LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:32b")
+# Qwen3-Next 80B (MoE, ~3B activos por palabra): más capaz y más rápido que qwen3:32b en esta Mac.
+# Se crea con Backend/llm/Modelfile.spiroscan (start_server.sh lo hace solo).
+LLM_MODEL = os.getenv("LLM_MODEL", "spiroscan-qwen3next")
 LLM_TIMEOUT_S = float(os.getenv("LLM_TIMEOUT_S", "90"))
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)

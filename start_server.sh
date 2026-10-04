@@ -12,7 +12,7 @@ cd "$ROOT/Backend"
 
 PORT="${PORT:-8000}"
 VENV="${VENV:-$(pwd)/.venv}"
-export LLM_MODEL="${LLM_MODEL:-qwen3:32b}"
+export LLM_MODEL="${LLM_MODEL:-spiroscan-qwen3next}"
 export PORT
 BUILD=0; TUNNEL=0
 for arg in "$@"; do
@@ -39,6 +39,16 @@ if ! curl -s localhost:11434/api/version >/dev/null; then
   echo "[*] Iniciando Ollama ..."
   (open -a Ollama 2>/dev/null || (ollama serve >/tmp/ollama.log 2>&1 &))
   for _ in $(seq 1 20); do curl -s localhost:11434/api/version >/dev/null && break; sleep 1; done
+fi
+# Modelo de SpiroScan: Qwen3-Next 80B con configuración propia; si no está, se crea; si falta la base, qwen3:32b.
+if [ "$LLM_MODEL" = "spiroscan-qwen3next" ] && ! ollama show spiroscan-qwen3next >/dev/null 2>&1; then
+  if ollama show qwen3-next-pro >/dev/null 2>&1; then
+    echo "[*] Creando el modelo spiroscan-qwen3next ..."
+    ollama create spiroscan-qwen3next -f llm/Modelfile.spiroscan >/dev/null
+  else
+    echo "[!] No está qwen3-next-pro: se usa qwen3:32b"
+    export LLM_MODEL="qwen3:32b"
+  fi
 fi
 echo "[OK] Ollama activo · modelo $LLM_MODEL"
 # Precarga el modelo en memoria para que la primera respuesta no tarde.

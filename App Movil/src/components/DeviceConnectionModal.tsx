@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
+import { useModalLayout } from '../hooks/useLayout';
 import { useVitals } from '../context/VitalsContext';
 import { deviceBridge } from '../services/DeviceBridgeService';
 import { DEFAULT_LOCAL_LAN } from '../config/api';
@@ -23,6 +24,7 @@ interface DeviceConnectionModalProps {
 }
 
 export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ visible, onClose, onOpenClinicalDemo }) => {
+  const modal = useModalLayout();
   const {
     connectedType,
     device,
@@ -71,9 +73,9 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
   const isWebBleSupported = deviceBridge.isWebBluetoothSupported();
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
+    <Modal visible={visible} animationType={modal.animationType} transparent onRequestClose={onClose}>
+      <View style={[styles.modalOverlay, modal.overlay]}>
+        <View style={[styles.modalContent, modal.sheet]}>
           {/* Cabecera */}
           <View style={styles.header}>
             <View style={styles.headerTitleRow}>
@@ -620,7 +622,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   deviceCardBadgeText: {
-    fontSize: 10,
+    fontSize: 11,
     color: '#2563EB',
     fontWeight: '700',
     marginTop: 2,
@@ -640,7 +642,7 @@ const styles = StyleSheet.create({
     borderColor: '#CBD5E1',
   },
   devicePillText: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '800',
   },
   actionBtnFull: {
@@ -730,7 +732,7 @@ const styles = StyleSheet.create({
     borderColor: '#CBD5E1',
   },
   cloudPillText: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '800',
   },
   cloudCardDesc: {
@@ -772,7 +774,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   backendUrlLabel: {
-    fontSize: 10,
+    fontSize: 11,
     color: '#94A3B8',
     marginTop: 8,
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
@@ -799,7 +801,7 @@ const styles = StyleSheet.create({
     color: '#1E293B',
   },
   sessionCardSub: {
-    fontSize: 10,
+    fontSize: 11,
     color: '#64748B',
     marginTop: 2,
   },
@@ -818,7 +820,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   sessionListHeading: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '700',
     color: '#64748B',
     textTransform: 'uppercase',

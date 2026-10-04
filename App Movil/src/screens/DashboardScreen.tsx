@@ -9,6 +9,7 @@ import { AIInsightCard } from '../components/AIInsightCard';
 import { TriageCard } from '../components/TriageCard';
 import { measurementValidity } from '../services/measurementQuality';
 import { useClinical } from '../context/ClinicalContext';
+import { Centered, Columns } from '../components/ResponsiveContainer';
 
 interface DashboardScreenProps {
   onNavigateToAI: () => void;
@@ -43,6 +44,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <Centered>
       {connectedType === 'demo_icbhi' && (
         <View style={styles.demoBanner}>
           <Ionicons name="flask-outline" size={16} color="#6B21A8" />
@@ -52,6 +54,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         </View>
       )}
 
+      <Columns
+        leftWeight={1.15}
+        left={
+          <View>
       {/* 0. SEMÁFORO DE TRIAJE (SpO2 + pulso + corazón + pulmón) */}
       <TriageCard triage={triage} />
 
@@ -67,6 +73,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       <TouchableOpacity activeOpacity={0.9} onPress={onNavigateToAI}>
         <AIInsightCard report={aiReport} onAskAI={onNavigateToAI} />
       </TouchableOpacity>
+          </View>
+        }
+        right={
+          <View>
 
       {/* 3. PARÁMETROS EN VIVO */}
       <View style={styles.sectionHeader}>
@@ -144,6 +154,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         />
 
       </View>
+          </View>
+        }
+      />
+      </Centered>
     </ScrollView>
   );
 };

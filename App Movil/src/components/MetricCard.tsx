@@ -278,7 +278,7 @@ const styles = StyleSheet.create({
     marginRight: 5,
   },
   statusBadgeText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.3,
   },

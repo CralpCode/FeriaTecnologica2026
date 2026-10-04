@@ -100,12 +100,16 @@ def classify_wav(path: str | Path) -> dict:
         found = {}
         for j, name in enumerate(meta["salidas"]):
             m = meta["metricas_prueba"][name]
-            if not m.get("mostrar") or not np.isfinite(score[j]):
+            # Calibración para grabaciones completas (IA/calibrar_pulmon.py) si existe; si no, la de ciclos
+            full = m.get("grabacion_completa") or {}
+            show = full.get("mostrar", m.get("mostrar"))
+            if not show or not np.isfinite(score[j]):
                 continue
+            thr = m.get("umbral_grabacion", m["umbral"])
             usable_outputs += 1
-            present = bool(score[j] >= m["umbral"])
-            found[name] = {"presente": present, "probabilidad": round(float(score[j]), 3),
-                           "umbral": round(m["umbral"], 3), "sensibilidad_modelo": round(m["sensibilidad"], 2)}
+            present = bool(score[j] >= thr)
+            found[name] = {"presente": present, "probabilidad": round(float(score[j]), 3), "umbral": round(thr, 3),
+                           "sensibilidad_modelo": round(full.get("sensibilidad", m["sensibilidad"]), 2)}
             abnormal |= present
             top_prob = max(top_prob, float(score[j]))
         details["ruidos"] = found
