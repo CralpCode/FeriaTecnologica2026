@@ -1,0 +1,97 @@
+{
+  "tarea": "crepitantes y sibilancias (ICBHI 2017)",
+  "salidas": [
+    "crepitantes",
+    "sibilancias"
+  ],
+  "metricas_prueba": {
+    "crepitantes": {
+      "sensibilidad": 0.2748868778280543,
+      "especificidad": 0.7657114127702364,
+      "auc": 0.5985397059392268,
+      "umbral": 0.7577158808708191,
+      "n_positivos": 884,
+      "mostrar": false,
+      "criterio_mostrar": "AUC y sensibilidad exclusivamente en validación",
+      "validacion": {
+        "auc": 0.5674143790849673,
+        "sensibilidad": 0.3215686274509804
+      },
+      "umbral_grabacion": 0.3989618420600891,
+      "grabacion_completa": {
+        "sensibilidad": 0.9601990049751243,
+        "especificidad": 0.09844559585492228,
+        "auc": 0.5832753331786663,
+        "grabaciones": 394,
+        "positivas": 201,
+        "mostrar": false
+      }
+    },
+    "sibilancias": {
+      "sensibilidad": 0.7260726072607261,
+      "especificidad": 0.6162329069254522,
+      "auc": 0.6922387651204467,
+      "umbral": 0.2745954692363739,
+      "n_positivos": 606,
+      "mostrar": true,
+      "criterio_mostrar": "AUC y sensibilidad exclusivamente en validación",
+      "validacion": {
+        "auc": 0.9117985321492512,
+        "sensibilidad": 0.8497409326424871
+      },
+      "umbral_grabacion": 0.3462640047073364,
+      "grabacion_completa": {
+        "sensibilidad": 0.7103448275862069,
+        "especificidad": 0.7429718875502008,
+        "auc": 0.7453538291095417,
+        "grabaciones": 394,
+        "positivas": 145,
+        "mostrar": true
+      }
+    },
+    "icbhi": {
+      "sensibilidad": 0.3512461059190031,
+      "especificidad": 0.3524229074889868,
+      "puntaje": 0.35183450670399496,
+      "mostrar": true
+    }
+  },
+  "agregacion": "promedio de las 2 ventanas más altas de la grabación",
+  "validado_grabacion_sin_segmentacion": false,
+  "advertencia_agregacion": "Métricas por ciclo anotado; no validan ventanas sin segmentación ni la agregación del servidor",
+  "particiones": {
+    "train": 3395,
+    "val": 630,
+    "test": 2873
+  },
+  "entrenado": "2026-10-04T15:15:35",
+  "seed": 42,
+  "probability_kind": "uncalibrated_model_score",
+  "particion": {
+    "fuente": "oficial ICBHI 2017",
+    "pacientes_en_ambos_lados_movidos_a_prueba": [
+      "156",
+      "218"
+    ]
+  },
+  "validado_dispositivo": false,
+  "features": {
+    "TARGET_SR": 4000,
+    "BAND_HZ": [
+      100.0,
+      1800.0
+    ],
+    "WINDOW_S": 4.0,
+    "HOP_S": 2.0,
+    "N_FFT": 512,
+    "HOP_LENGTH": 128,
+    "N_MELS": 64,
+    "FMIN": 100.0,
+    "FMAX": 2000.0
+  },
+  "limitaciones": [
+    "Sugerencia de tamizaje, no diagnóstico.",
+    "ICBHI tiene pocos pacientes en varias clases; resultados orientativos.",
+    "Validado con grabaciones de estetoscopios clínicos, no con el dispositivo propio."
+  ]
+}

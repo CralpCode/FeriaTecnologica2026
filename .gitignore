@@ -87,3 +87,8 @@ IA/data/cache/
 IA/data/**/*.wav
 IA/data/**/*.zip
 IA/data/icbhi/
+
+# Modelo AST de pulmón (343 MB): supera el límite de GitHub; se regenera con IA/train_lung_ast.py
+IA/models/lung_sounds_ast.pt
+Backend/models/lung_sounds_ast.pt
+IA/models/lung_sounds_cnn_oficial.pt

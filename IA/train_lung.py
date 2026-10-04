@@ -27,7 +27,7 @@ from sklearn.model_selection import GroupShuffleSplit
 from torch import nn
 
 from src import lung_features as LF
-from src.lung_data import DATA_DIR, DISEASE_GROUPS, load_icbhi
+from src.lung_data import DATA_DIR, DISEASE_GROUPS, MOVED_TO_TEST, load_icbhi
 from src.model import HeartCNN
 from train_heart import spec_augment
 
@@ -243,23 +243,25 @@ def main():
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--patience", type=int, default=8)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--out", default=None, help="nombre del modelo (por defecto lung_sounds_cnn / lung_disease_cnn)")
     args = ap.parse_args()
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
-    recs = load_icbhi(Path(args.data_dir))
+    recs = load_icbhi(Path(args.data_dir), overlap_to_test=True)
     if not recs:
         raise SystemExit("No se encontraron audios de ICBHI (nombres tipo 101_1b1_Al_sc_Meditron.wav) en "
                          f"{args.data_dir}. Descárgalos y colócalos en cualquier subcarpeta de data/.")
     print(f"{len(recs)} grabaciones ICBHI · {len({r.patient for r in recs})} pacientes")
 
     model, example, meta = (task_sounds if args.task == "ruidos" else task_disease)(recs, args, device)
-    out = "lung_sounds_cnn" if args.task == "ruidos" else "lung_disease_cnn"
+    out = args.out or ("lung_sounds_cnn" if args.task == "ruidos" else "lung_disease_cnn")
     meta.update({
         "entrenado": datetime.now().isoformat(timespec="seconds"),
         "seed": args.seed,
         "probability_kind": "uncalibrated_model_score",
+        "particion": {"fuente": "oficial ICBHI 2017", "pacientes_en_ambos_lados_movidos_a_prueba": list(MOVED_TO_TEST)},
         "validado_dispositivo": False,
         "features": {k: getattr(LF, k) for k in
                      ["TARGET_SR", "BAND_HZ", "WINDOW_S", "HOP_S", "N_FFT", "HOP_LENGTH", "N_MELS", "FMIN", "FMAX"]},
