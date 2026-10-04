@@ -1,0 +1,51 @@
+{
+  "corazon": {
+    "umbral": 0.155523653434252,
+    "pasan_reales": 0.979853193815399,
+    "n_reales": 6403,
+    "mediana_reales": 0.4306486633892206,
+    "marcados": {
+      "ruido": 0.925,
+      "pulmon_icbhi": 0.34456521739130436
+    },
+    "activo": true
+  },
+  "pulmon": {
+    "umbral": 0.11738871133742983,
+    "pasan_reales": 0.9793478260869565,
+    "n_reales": 920,
+    "mediana_reales": 0.3584167546680095,
+    "marcados": {
+      "ruido": 0.115
+    },
+    "activo": false
+  },
+  "parametros": {
+    "corazon": {
+      "banda_hz": [
+        25.0,
+        400.0
+      ],
+      "env_sr": 50,
+      "rango_s": [
+        0.27,
+        2.0
+      ],
+      "que": "latidos"
+    },
+    "pulmon": {
+      "banda_hz": [
+        100.0,
+        1000.0
+      ],
+      "env_sr": 10,
+      "rango_s": [
+        1.5,
+        7.0
+      ],
+      "que": "respiración"
+    }
+  },
+  "generado": "2026-10-04T15:01:06",
+  "nota": "Aviso de colocación: no cambia el resultado del clasificador. Calibrado con estetoscopios clínicos."
+}

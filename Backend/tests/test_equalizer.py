@@ -85,7 +85,7 @@ class EqualizerTests(unittest.TestCase):
         return audio_service.finish(rid)
 
     def fake_classifier(self, calls):
-        def classify(path, eq=None):
+        def classify(path, eq=None, check_placement=False):
             calls.append(eq)
             return {"result": "normal", "probability": 0.1, "threshold": 0.8, "quality": {}, "details": {}}
         return classify

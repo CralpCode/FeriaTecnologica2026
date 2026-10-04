@@ -17,6 +17,7 @@ except ImportError:
     pass
 
 import database
+import backup
 import ai_engine
 import discovery
 import alerts
@@ -66,6 +67,29 @@ async def _announce_on_network():
 @app.on_event("shutdown")
 async def _stop_announcing():
     await discovery.stop()
+
+
+async def _backup_loop():
+    """Respaldo automático: el primero un minuto después de arrancar y luego cada SPIROSCAN_BACKUP_MIN minutos."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            await asyncio.to_thread(backup.run_backup)
+        except Exception as e:  # el servidor sigue funcionando aunque falle el respaldo; se avisa en la app
+            backup.record_error(e)
+            print(f"[RESPALDO] Falló: {e}")
+        await asyncio.sleep(max(1.0, backup.interval_min()) * 60)
+
+
+@app.on_event("startup")
+async def _start_backups():
+    if backup.interval_min() > 0:
+        app.state.backup_task = asyncio.create_task(_backup_loop())
+
+
+@app.get("/api/backup/status")
+def backup_status():
+    return backup.status()
 
 # El ESP32 no sabe qué sesión está abierta en la app: la app "vincula" su sesión y el backend
 # asigna a esa sesión la telemetría y el audio que lleguen del dispositivo sin session_id.
