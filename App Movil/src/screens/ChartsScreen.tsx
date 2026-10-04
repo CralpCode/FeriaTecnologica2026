@@ -296,6 +296,9 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 36,
+    width: '100%',
+    maxWidth: 1000,
+    alignSelf: 'center',
   },
   rangeSelectorCard: {
     backgroundColor: '#FFFFFF',

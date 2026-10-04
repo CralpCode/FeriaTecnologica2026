@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
+import { useModalLayout } from '../hooks/useLayout';
 import { apiService } from '../services/api';
 import { HeartModelInfo, LungModelsInfo } from '../types/vitals';
 
@@ -17,6 +18,7 @@ const TRAIT_NAMES: Record<string, string> = {
 
 /** "¿Cómo funciona la IA?": explicación en lenguaje simple con los porcentajes reales del servidor. */
 export const AIExplainerModal: React.FC<{ visible: boolean; onClose: () => void }> = ({ visible, onClose }) => {
+  const modal = useModalLayout();
   const [heart, setHeart] = useState<HeartModelInfo | null>(null);
   const [lung, setLung] = useState<LungModelsInfo | null>(null);
   const [error, setError] = useState(false);
@@ -39,9 +41,9 @@ export const AIExplainerModal: React.FC<{ visible: boolean; onClose: () => void 
   const base = lung?.modelo_base;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View style={styles.sheet}>
+    <Modal visible={visible} animationType={modal.animationType} transparent onRequestClose={onClose}>
+      <View style={[styles.overlay, modal.overlay]}>
+        <View style={[styles.sheet, modal.sheet]}>
           <View style={styles.header}>
             <MaterialCommunityIcons name="brain" size={22} color={Colors.aiPurple} />
             <Text style={styles.title}>¿Cómo funciona la IA?</Text>
@@ -104,9 +106,33 @@ export const AIExplainerModal: React.FC<{ visible: boolean; onClose: () => void 
             <Section icon="lungs" color={Colors.oxygen} title="3. El oído de los pulmones">
               <Text style={styles.p}>
                 {lungCnn
-                  ? 'Redes neuronales entrenadas con la base ICBHI 2017 detectan crepitantes y sibilancias, y sugieren un patrón respiratorio.'
+                  ? 'Redes neuronales entrenadas con la base ICBHI 2017 (126 pacientes). Igual que en el corazón, solo se muestra lo que acierta de forma confiable:'
                   : 'Las redes neuronales de pulmón están listas, pero aún se están entrenando con la base ICBHI 2017.'}
               </Text>
+              {lungCnn &&
+                ['crepitantes', 'sibilancias'].map((k) => {
+                  const raw = lung?.lung_sounds_cnn?.metricas_prueba?.[k];
+                  if (!raw) return null;
+                  const mm = raw.grabacion_completa || raw;  // métricas por grabación completa si existen
+                  return (
+                    <View key={k} style={styles.traitRow}>
+                      <Ionicons
+                        name={mm.mostrar ? 'checkmark-circle' : 'eye-off-outline'}
+                        size={15}
+                        color={mm.mostrar ? Colors.success : Colors.textMuted}
+                      />
+                      <Text style={[styles.traitText, !mm.mostrar && { color: Colors.textMuted }]}>
+                        {k.charAt(0).toUpperCase() + k.slice(1)}: detecta {pct(mm.sensibilidad)}, reconoce normales {pct(mm.especificidad)}
+                        {mm.mostrar ? '' : ' · no se muestra (poco confiable)'}
+                      </Text>
+                    </View>
+                  );
+                })}
+              {lungCnn && lung?.lung_disease_cnn?.loaded && !lung.lung_disease_cnn.mostrar && (
+                <Text style={styles.small}>
+                  El patrón por enfermedad (EPOC, neumonía…) no se muestra: con tan pocos pacientes por enfermedad no es confiable.
+                </Text>
+              )}
               {base?.loaded && (
                 <Text style={styles.p}>
                   También hay un <Text style={styles.b}>modelo base</Text> (regresión logística) hecho por el equipo, que

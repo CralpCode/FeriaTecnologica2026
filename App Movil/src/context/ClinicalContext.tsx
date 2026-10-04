@@ -14,6 +14,7 @@ interface ClinicalContextProps {
   phase: RecordingPhase;
   armedLocation: AuscultationFocus | null;
   triage: TriageResult | null;
+  recordingStartedAt: number | null;
   isLiveConnected: boolean;
   armRecording: (location: AuscultationFocus, mode: AuscultationMode) => Promise<void>;
   acknowledgeAlert: (id: number) => Promise<void>;
@@ -32,6 +33,7 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [phase, setPhase] = useState<RecordingPhase>('idle');
   const [armedLocation, setArmedLocation] = useState<AuscultationFocus | null>(null);
   const [triage, setTriage] = useState<TriageResult | null>(null);
+  const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
   const [isLiveConnected, setIsLiveConnected] = useState(false);
   const sessionRef = useRef(currentSessionId);
   sessionRef.current = currentSessionId;
@@ -94,6 +96,7 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
             break;
           case 'RECORDING_STARTED':
             setPhase('recording');
+            setRecordingStartedAt(Date.now());
             break;
           case 'TRIAGE_UPDATE':
             setTriage(msg.data);
@@ -150,6 +153,7 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
         phase,
         armedLocation,
         triage,
+        recordingStartedAt,
         isLiveConnected,
         armRecording,
         acknowledgeAlert,

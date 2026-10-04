@@ -14,6 +14,15 @@ from dataclasses import dataclass
 from pathlib import Path
 import csv
 
+
+def rglob(root: Path, pattern: str):
+    """Como Path.glob('**/patron'), pero entrando también en carpetas que son enlaces simbólicos."""
+    import fnmatch
+    import os
+    for dirpath, _, files in os.walk(root, followlinks=True):
+        for name in fnmatch.filter(files, pattern):
+            yield Path(dirpath) / name
+
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 

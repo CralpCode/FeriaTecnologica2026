@@ -7,6 +7,9 @@ import { VitalsProvider } from './src/context/VitalsContext';
 import { ClinicalProvider, useClinical } from './src/context/ClinicalContext';
 import { Header } from './src/components/Header';
 import { BottomNavBar, TabScreen } from './src/components/BottomNavBar';
+import { SideNavBar } from './src/components/SideNavBar';
+import { ConnectionBanner } from './src/components/ConnectionBanner';
+import { useLayout } from './src/hooks/useLayout';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { ChartsScreen } from './src/screens/ChartsScreen';
 import { AIAssistantScreen } from './src/screens/AIAssistantScreen';
@@ -18,6 +21,13 @@ const MainAppContent: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<TabScreen>('dashboard');
   const { hasCriticalAlert, activeAlertsCount } = useClinical();
   const insets = useSafeAreaInsets();
+  const { useSideNav, isDesktop } = useLayout();
+  const nav = {
+    currentTab,
+    onSelectTab: setCurrentTab,
+    hasAlert: hasCriticalAlert,
+    alertsCount: activeAlertsCount,
+  };
 
   const paddingTop = Platform.OS === 'android' ? (RNStatusBar.currentHeight || 0) : (insets?.top || 0);
 
@@ -27,6 +37,12 @@ const MainAppContent: React.FC = () => {
 
       {/* Cabecera común */}
       <Header />
+
+      <ConnectionBanner />
+
+      <View style={styles.body}>
+        {/* Navegación lateral en computadora y tablet horizontal */}
+        {useSideNav && <SideNavBar {...nav} compact={!isDesktop} />}
 
       {/* Contenido según pestaña seleccionada */}
       <View style={styles.screenContainer}>
@@ -42,14 +58,10 @@ const MainAppContent: React.FC = () => {
         {currentTab === 'charts' && <ChartsScreen />}
         {currentTab === 'ai' && <AIAssistantScreen />}
       </View>
+      </View>
 
-      {/* Barra de navegación inferior */}
-      <BottomNavBar
-        currentTab={currentTab}
-        onSelectTab={setCurrentTab}
-        hasAlert={hasCriticalAlert}
-        alertsCount={activeAlertsCount}
-      />
+      {/* Barra de navegación inferior (celular y tablet vertical) */}
+      {!useSideNav && <BottomNavBar {...nav} />}
     </View>
   );
 };
@@ -71,7 +83,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  body: {
+    flex: 1,
+    flexDirection: 'row',
+  },
   screenContainer: {
     flex: 1,
+    minWidth: 0,
   },
 });

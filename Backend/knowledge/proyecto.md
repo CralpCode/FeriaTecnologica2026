@@ -34,10 +34,14 @@ pacientes no vistos: la intensidad (leve o moderada/mayor, ≈ 76 % de acierto b
 (meseta, decreciente o romboidal, ≈ 61 %). Describe el sonido; NO dice la causa del soplo.
 
 ## Pulmones
-Con la base pública ICBHI 2017 se entrenan dos modelos de pulmón: uno detecta crepitantes y sibilancias,
-y otro sugiere un patrón compatible con sano, EPOC, neumonía, bronquiectasia, bronquiolitis o infección
-respiratoria. Es una sugerencia para referir, nunca un diagnóstico, y solo se muestran las clases que el
-modelo reconoce de forma confiable. Si estos modelos aún no están entrenados, la app lo indica.
+Con la base pública ICBHI 2017 (126 pacientes, 920 grabaciones) se entrenaron dos modelos de pulmón y se
+evaluaron con pacientes no vistos. Solo se muestra lo confiable:
+- Sibilancias: SÍ se muestran. En grabaciones completas detecta ≈ 59 % de las que tienen sibilancias y
+  reconoce ≈ 81 % de las normales (AUC ≈ 0.72).
+- Crepitantes: NO se muestran (AUC ≈ 0.53, casi como adivinar).
+- Patrón por enfermedad (EPOC, neumonía, etc.): NO se muestra; hay muy pocos pacientes por enfermedad
+  (acierto balanceado ≈ 47 %). Reconoce bien EPOC y sanos, pero falla en las demás.
+Es una sugerencia para referir, nunca un diagnóstico.
 
 ## Triaje combinado (semáforo)
 Une la SpO2, el pulso, el resultado del corazón y el del pulmón con reglas fijas definidas por el equipo:

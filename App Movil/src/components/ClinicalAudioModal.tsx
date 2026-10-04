@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
+import { useModalLayout } from '../hooks/useLayout';
 import { apiService } from '../services/api';
 import { useVitals } from '../context/VitalsContext';
 import localDemoSamples from '../config/demoSamples.json';
@@ -129,6 +130,7 @@ const DEMO_CASES: DemoSampleInfo[] = [
 ];
 
 export const ClinicalAudioModal: React.FC<ClinicalAudioModalProps> = ({ visible, onClose }) => {
+  const modal = useModalLayout();
   const { currentSessionId, injectClinicalDemo } = useVitals();
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [injectingId, setInjectingId] = useState<string | null>(null);
@@ -215,9 +217,9 @@ export const ClinicalAudioModal: React.FC<ClinicalAudioModalProps> = ({ visible,
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
+    <Modal visible={visible} animationType={modal.animationType} transparent onRequestClose={onClose}>
+      <View style={[styles.modalOverlay, modal.overlay]}>
+        <View style={[styles.modalContent, modal.sheet]}>
           {/* Cabecera del Banco de Pruebas */}
           <View style={styles.header}>
             <View style={styles.headerTitleRow}>
@@ -446,7 +448,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   headerTag: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '800',
     color: Colors.aiPurple,
     letterSpacing: 0.5,
@@ -458,7 +460,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   icbhiBadgeText: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '800',
     color: Colors.aiPurple,
   },
@@ -592,7 +594,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   badgePillText: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '800',
   },
   descriptionText: {

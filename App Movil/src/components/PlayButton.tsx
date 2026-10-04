@@ -13,6 +13,8 @@ export const PlayButton: React.FC<{ url: string; size?: number }> = ({ url, size
   return (
     <TouchableOpacity
       style={[styles.btn, playing && styles.btnActive]}
+      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+      accessibilityRole="button"
       onPress={() => audioPlayer.toggle(url)}
       accessibilityLabel={playing ? 'Detener audio' : 'Escuchar grabación'}
     >
@@ -23,9 +25,9 @@ export const PlayButton: React.FC<{ url: string; size?: number }> = ({ url, size
 
 const styles = StyleSheet.create({
   btn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Colors.primarySoft,

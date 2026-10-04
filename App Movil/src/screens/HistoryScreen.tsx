@@ -6,6 +6,8 @@ import { apiService } from '../services/api';
 import { useVitals } from '../context/VitalsContext';
 import { PlayButton } from '../components/PlayButton';
 import { RecordingResult, ReportItem, SessionOverview, TriageLevel } from '../types/vitals';
+import { Centered, Columns } from '../components/ResponsiveContainer';
+import { useLayout } from '../hooks/useLayout';
 
 const TRIAGE_COLOR: Record<TriageLevel, string> = {
   rojo: Colors.danger, amarillo: Colors.warning, verde: Colors.success, gris: Colors.textMuted,
@@ -40,6 +42,7 @@ export const HistoryScreen: React.FC = () => {
   const [error, setError] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const { twoColumns } = useLayout();
 
   const load = useCallback(async () => {
     try {
@@ -54,12 +57,15 @@ export const HistoryScreen: React.FC = () => {
     load();
   }, [load]);
 
-  return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}
-    >
+  // En pantalla ancha siempre hay un paciente seleccionado para el panel de detalle
+  useEffect(() => {
+    if (twoColumns && !open && sessions && sessions.length) setOpen(sessions[0].session_id);
+  }, [twoColumns, open, sessions]);
+
+  const selected = sessions?.find((x) => x.session_id === open) || null;
+
+  const list = (
+    <View>
       <View style={styles.headerRow}>
         <Text style={styles.title}>Historial de pacientes</Text>
         <TouchableOpacity onPress={load} style={styles.iconBtn}>
@@ -74,7 +80,12 @@ export const HistoryScreen: React.FC = () => {
 
       {sessions?.map((s) => (
         <View key={s.session_id} style={[styles.card, s.session_id === currentSessionId && styles.cardCurrent]}>
-          <TouchableOpacity style={styles.cardHeader} onPress={() => setOpen(open === s.session_id ? null : s.session_id)}>
+          <TouchableOpacity
+            style={[styles.cardHeader, twoColumns && open === s.session_id && styles.cardSelected]}
+            onPress={() => setOpen(twoColumns ? s.session_id : open === s.session_id ? null : s.session_id)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: open === s.session_id }}
+          >
             <View style={[styles.triageDot, { backgroundColor: TRIAGE_COLOR[s.triaje] || Colors.textMuted }]} />
             <View style={{ flex: 1 }}>
               <Text style={styles.sessionId}>
@@ -87,9 +98,13 @@ export const HistoryScreen: React.FC = () => {
                 {s.reports} informes
               </Text>
             </View>
-            <Ionicons name={open === s.session_id ? 'chevron-up' : 'chevron-down'} size={18} color={Colors.textSecondary} />
+            <Ionicons
+              name={twoColumns ? 'chevron-forward' : open === s.session_id ? 'chevron-up' : 'chevron-down'}
+              size={18}
+              color={Colors.textSecondary}
+            />
           </TouchableOpacity>
-          {open === s.session_id && (
+          {!twoColumns && open === s.session_id && (
             <SessionDetail
               session={s}
               isCurrent={s.session_id === currentSessionId}
@@ -99,6 +114,37 @@ export const HistoryScreen: React.FC = () => {
           )}
         </View>
       ))}
+    </View>
+  );
+
+  return (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}
+    >
+      <Centered>
+        <Columns
+          left={list}
+          right={
+            twoColumns && selected ? (
+              <View style={[styles.card, styles.detailPanel]}>
+                <View style={styles.cardHeader}>
+                  <View style={[styles.triageDot, { backgroundColor: TRIAGE_COLOR[selected.triaje] || Colors.textMuted }]} />
+                  <Text style={styles.sessionId}>{selected.session_id}</Text>
+                </View>
+                <SessionDetail
+                  key={selected.session_id}
+                  session={selected}
+                  isCurrent={selected.session_id === currentSessionId}
+                  onOpenSession={() => switchSession(selected.session_id)}
+                  onChanged={load}
+                />
+              </View>
+            ) : null
+          }
+        />
+      </Centered>
     </ScrollView>
   );
 };
@@ -209,6 +255,8 @@ const styles = StyleSheet.create({
   error: { fontSize: 13, color: Colors.danger, marginTop: 12 },
   card: { backgroundColor: Colors.card, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, marginBottom: 10 },
   cardCurrent: { borderColor: Colors.primary, borderWidth: 1.5 },
+  cardSelected: { backgroundColor: Colors.primarySoft, borderRadius: 14 },
+  detailPanel: { marginTop: 44 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12 },
   triageDot: { width: 14, height: 14, borderRadius: 7 },
   sessionId: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },

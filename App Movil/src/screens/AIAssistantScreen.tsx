@@ -204,11 +204,19 @@ export const AIAssistantScreen: React.FC = () => {
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
-          placeholder="Pregúntale a tu Asistente Médico..."
+          placeholder="Pregúntale al asistente sobre tus datos o sobre SpiroScan…"
           placeholderTextColor={Colors.textMuted}
           value={inputText}
           onChangeText={setInputText}
           onSubmitEditing={handleSend}
+          onKeyPress={(e: any) => {
+            // En computadora: Enter envía y Shift+Enter hace salto de línea
+            if (e.nativeEvent.key === 'Enter' && !e.nativeEvent.shiftKey) {
+              e.preventDefault?.();
+              handleSend();
+            }
+          }}
+          accessibilityLabel="Mensaje para el asistente"
           returnKeyType="send"
           multiline={true}
         />
@@ -247,6 +255,9 @@ const styles = StyleSheet.create({
   messagesContent: {
     padding: 14,
     paddingBottom: 24,
+    width: '100%',
+    maxWidth: 900,
+    alignSelf: 'center',
   },
   liveVitalsBanner: {
     backgroundColor: '#FFFFFF',
@@ -294,7 +305,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   llamaStatusText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '800',
     color: '#15803D',
   },
@@ -329,7 +340,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   vitalCardLabel: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
     color: '#64748B',
     marginBottom: 1,
@@ -386,7 +397,7 @@ const styles = StyleSheet.create({
     color: '#1E293B',
   },
   timestampText: {
-    fontSize: 10,
+    fontSize: 11,
     marginTop: 8,
   },
   userTimestamp: {

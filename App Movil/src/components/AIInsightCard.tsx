@@ -63,8 +63,8 @@ export const AIInsightCard: React.FC<AIInsightCardProps> = ({ report, onAskAI })
               <MaterialCommunityIcons name="robot" size={20} color={Colors.primary} />
             </View>
             <View>
-              <Text style={styles.headerTitle}>Asistente Médico IA</Text>
-              <Text style={styles.timestampText}>Monitoreo Automático</Text>
+              <Text style={styles.headerTitle}>Evaluación de signos vitales</Text>
+              <Text style={styles.timestampText}>Por reglas fijas · no es un diagnóstico</Text>
             </View>
           </View>
         </View>
@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   liveText: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '800',
     color: Colors.aiPurple,
   },
@@ -413,7 +413,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   acousticBadgeText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '800',
   },
   acousticDetailText: {

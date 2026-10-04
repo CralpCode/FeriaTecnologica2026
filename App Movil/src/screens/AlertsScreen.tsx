@@ -5,6 +5,8 @@ import { Colors } from '../theme/colors';
 import { useClinical } from '../context/ClinicalContext';
 import { apiService } from '../services/api';
 import { AlertSeverity, SessionReport } from '../types/vitals';
+import { Centered, Columns } from '../components/ResponsiveContainer';
+import { useLayout } from '../hooks/useLayout';
 
 const SEVERITY: Record<AlertSeverity, { label: string; color: string; soft: string; icon: string }> = {
   critical: { label: 'Crítica', color: Colors.danger, soft: Colors.dangerSoft, icon: 'alert-octagon' },
@@ -23,6 +25,7 @@ const time = (iso: string) => {
 export const AlertsScreen: React.FC = () => {
   const { alerts, activeAlertsCount, acknowledgeAlert, isLiveConnected } = useClinical();
   const [report, setReport] = useState<SessionReport | null>(null);
+  const { twoColumns } = useLayout();
   const [generating, setGenerating] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
 
@@ -40,6 +43,11 @@ export const AlertsScreen: React.FC = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <Centered>
+      <Columns
+        leftWeight={1.2}
+        left={
+          <View>
       <View style={styles.headerRow}>
         <Text style={styles.sectionTitle}>Alertas de la sesión ({activeAlertsCount} activas)</Text>
         <View style={[styles.liveDot, { backgroundColor: isLiveConnected ? Colors.success : Colors.textMuted }]} />
@@ -87,8 +95,12 @@ export const AlertsScreen: React.FC = () => {
         );
       })}
 
+          </View>
+        }
+        right={
+          <View>
       {/* Informe de sesión */}
-      <Text style={[styles.sectionTitle, { marginTop: 18 }]}>Informe de la sesión</Text>
+      <Text style={[styles.sectionTitle, !twoColumns && { marginTop: 18 }]}>Informe de la sesión</Text>
       <View style={styles.reportCard}>
         <Text style={styles.note}>
           Resume signos vitales, grabaciones y alertas. Si hubo hallazgos, incluye una nota de referencia para personal de salud.
@@ -120,6 +132,10 @@ export const AlertsScreen: React.FC = () => {
           </View>
         )}
       </View>
+          </View>
+        }
+      />
+      </Centered>
     </ScrollView>
   );
 };
