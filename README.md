@@ -1,5 +1,8 @@
 # 🩺 SpiroScan AI / VitalSync — Monitor Cardiorrespiratorio IoT con IA
 
+> **Estado verificado (3 de octubre de 2026):** valoración orientativa con síntomas y datos válidos. La SpO2 del firmware permanece no disponible hasta implementar y validar su calibración; se eliminaron valores fabricados. El descriptor de soplos está desactivado por contaminación en la evaluación. No hay CNN pulmonar entrenada disponible. Consulte [el informe de cambios y límites](docs/INFORME_MEJORAS_2026-10-03.md) antes de usar métricas o descripciones históricas de este README.
+
+
 > **Proyecto:** Sistema Embebido para Captura y Análisis de Señales Cardiorrespiratorias  
 > **Asignatura / Evento:** *f tecno* — Feria Tecnológica 2026 (8vo Semestre)  
 > **Arquitectura:** Dispositivo Embebido (ESP32) + Backend Clínico (FastAPI + ML) + LLM Médico (Ollama LLaMA 3.2) + App Móvil / Web (React Native Expo).

@@ -215,6 +215,8 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           temperature: incomingVitals.temperature,
           stressLevel: incomingVitals.stressLevel,
           hrv: incomingVitals.hrv,
+          signalQuality: incomingVitals.signalQuality,
+          sampleAgeMs: incomingVitals.sampleAgeMs,
           source: incomingVitals.source,
           heartRateValid: incomingVitals.heartRateValid,
           bloodOxygenValid: incomingVitals.bloodOxygenValid,

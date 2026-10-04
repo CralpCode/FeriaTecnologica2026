@@ -23,6 +23,10 @@ export const TrendChart: React.FC<TrendChartProps> = ({ data, metricKey, title, 
   const chartWidth = Math.max(280, width - 40);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
+  data = (data || []).filter((point) => point.source === 'real' && point.signalQuality === 'good'
+    && typeof point.sampleAgeMs === 'number' && point.sampleAgeMs >= 0 && point.sampleAgeMs <= 15000
+    && ((metricKey === 'heartRate' && point.heartRateValid === true && point.heartRate > 0)
+      || (metricKey === 'bloodOxygen' && point.bloodOxygenValid === true && point.spo2Calibrated === true && point.bloodOxygen > 0)));
   if (!data || data.length === 0) {
     return (
       <View style={[styles.card, styles.emptyContainer]}>

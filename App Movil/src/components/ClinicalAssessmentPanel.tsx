@@ -122,7 +122,7 @@ export const ClinicalAssessmentPanel: React.FC = () => {
       {assessment && (
         <View style={styles.result}>
           <Text accessibilityRole={assessment.urgent ? 'alert' : undefined} style={assessment.urgent ? styles.urgent : styles.subtitle}>{assessment.summary}</Text>
-          {assessment.findings.map((finding) => <View key={finding.code} style={styles.item}>
+          {assessment.findings.map((finding, index) => <View key={`${finding.code}-${index}`} style={styles.item}>
             <Text style={styles.label}>{finding.label}</Text>
             {finding.evidence.map((line, i) => <Text key={i} style={styles.note}>• {line}</Text>)}
           </View>)}

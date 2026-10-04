@@ -1,5 +1,6 @@
 """PDF del informe de sesión (vitales + auscultación + alertas + texto redactado por el LLM)."""
 from datetime import datetime
+import hashlib
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -16,7 +17,8 @@ DISCLAIMER = ("Prototipo universitario de TAMIZAJE. No diagnostica, no se ha val
 
 
 def build_session_pdf(report_id: int, session_id: str, content: dict, llm_generated: bool) -> Path:
-    path = REPORT_DIR / f"informe_{session_id}_{report_id}.pdf"
+    safe_session = hashlib.sha256(session_id.encode()).hexdigest()[:16]
+    path = REPORT_DIR / f"informe_{safe_session}_{report_id}.pdf"
     ss = getSampleStyleSheet()
     body = ParagraphStyle("b", parent=ss["Normal"], fontSize=9.5, leading=13)
     small = ParagraphStyle("s", parent=body, fontSize=8, textColor=colors.HexColor("#64748B"))
@@ -58,7 +60,7 @@ def build_session_pdf(report_id: int, session_id: str, content: dict, llm_genera
                   Paragraph(escape(content["nota_referencia"]), body)]
 
     story.append(Paragraph("Signos vitales medidos (MAX30102)", h2))
-    if s.get("n"):
+    if s.get("n") or s.get("n_spo2"):
         vt = [["", "Promedio", "Mínimo", "Máximo"],
               ["Frecuencia cardíaca (BPM)", s["hr_prom"], s["hr_min"], s["hr_max"]],
               ["SpO2 (%)", s["spo2_prom"], s["spo2_min"], s["spo2_max"]]]
@@ -70,7 +72,7 @@ def build_session_pdf(report_id: int, session_id: str, content: dict, llm_genera
     story.append(Paragraph("Auscultación (redes neuronales)", h2))
     grab = datos.get("grabaciones", [])
     if grab:
-        rows = [["Hora", "Tipo", "Foco / zona", "Resultado", "Prob.", "Detalle"]]
+        rows = [["Hora", "Tipo", "Foco / zona", "Resultado", "Puntaje", "Detalle"]]
         for g in grab:
             rows.append([str(g.get("hora", ""))[11:19], g.get("tipo", ""), g.get("foco", ""), g.get("resultado", ""),
                          g.get("probabilidad_anormal") or "—", _detail_text(g.get("detalles") or {})])
@@ -85,13 +87,24 @@ def build_session_pdf(report_id: int, session_id: str, content: dict, llm_genera
             [str(a.get("hora", ""))[11:19], a.get("severidad", ""), a.get("titulo", "")] for a in alerts]
         story.append(_table(rows, [70, 90, 360]))
 
-    story += [
-        Spacer(1, 10),
-        HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CBD5E1")),
-        Paragraph(("Texto redactado por un modelo de lenguaje local a partir de los datos anteriores."
-                   if llm_generated else "Texto generado con plantilla (modelo de lenguaje no disponible)."), small),
-    ]
-    SimpleDocTemplate(str(path), pagesize=letter, leftMargin=40, rightMargin=40, topMargin=36, bottomMargin=36).build(story)
+    a = datos.get("valoracion", {})
+    for title, key in (("Datos pendientes", "missing_data"), ("Limitaciones", "limitations")):
+        if a.get(key):
+            story.append(Paragraph(title, h2))
+            story += [Paragraph(escape(line), body) for line in a[key]]
+    if a.get("sources"):
+        story.append(Paragraph("Fuentes de la orientación", h2))
+        story += [Paragraph(escape(source["title"] + ": " + source["url"]), small) for source in a["sources"]]
+    def footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(colors.HexColor("#64748B"))
+        canvas.drawString(40, 20, "Orientación experimental. Los puntajes acústicos no son certeza clínica.")
+        canvas.drawRightString(572, 20, str(doc.page))
+        canvas.restoreState()
+
+    SimpleDocTemplate(str(path), pagesize=letter, leftMargin=40, rightMargin=40,
+                      topMargin=36, bottomMargin=36).build(story, onFirstPage=footer, onLaterPages=footer)
     return path
 
 
@@ -104,7 +117,7 @@ def _detail_text(det: dict) -> str:
 
 
 def _table(rows, widths):
-    t = Table([[Paragraph(escape(str(c)), ParagraphStyle("c", fontSize=8.5, leading=11)) for c in r] for r in rows],
+    t = Table([[Paragraph(escape(str(c) if c is not None else "Sin dato"), ParagraphStyle("c", fontSize=8.5, leading=11)) for c in r] for r in rows],
               colWidths=widths)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),

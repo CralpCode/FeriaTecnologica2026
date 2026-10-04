@@ -194,12 +194,10 @@ def get_latest_reading(session_id: str = None):
 
 def get_history_points(time_range: str = "24h", limit: int = 100, session_id: str = None):
     conn = get_db_connection()
-    max_rows = 50 if time_range == "24h" else (150 if time_range == "7d" else 300)
-    
-    if session_id:
-        rows = conn.execute("SELECT * FROM vitals_log WHERE device_id = ? ORDER BY id DESC LIMIT ?", (session_id, max_rows)).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM vitals_log ORDER BY id DESC LIMIT ?", (max_rows,)).fetchall()
+    max_rows = max(1, min(limit, 10000))
+    since = (datetime.now() - timedelta(days={"24h": 1, "7d": 7, "30d": 30}.get(time_range, 1))).isoformat()
+    rows = conn.execute("SELECT * FROM vitals_log WHERE device_id = ? AND timestamp >= ? ORDER BY id DESC LIMIT ?",
+                        (session_id or "default", since, max_rows)).fetchall()
     conn.close()
 
     if not rows:

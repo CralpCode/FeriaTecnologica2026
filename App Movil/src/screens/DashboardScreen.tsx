@@ -1,4 +1,4 @@
-﻿import React from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
@@ -7,6 +7,7 @@ import { MetricCard } from '../components/MetricCard';
 import { HospitalEcgMonitor } from '../components/HospitalEcgMonitor';
 import { AIInsightCard } from '../components/AIInsightCard';
 import { TriageCard } from '../components/TriageCard';
+import { measurementValidity } from '../services/measurementQuality';
 import { useClinical } from '../context/ClinicalContext';
 
 interface DashboardScreenProps {
@@ -21,41 +22,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const { vitals, aiReport, connectedType } = useVitals();
   const { triage } = useClinical();
 
-  const isLive = vitals.heartRate > 0;
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  const valid = measurementValidity(vitals, now);
+  const isLive = valid.heartRate;
+  const audioAvailable = vitals.source === 'real' && vitals.audioUnit === 'dBFS'
+    && Number.isFinite(vitals.audio_rms) && vitals.audio_rms < 0 && now - Date.parse(vitals.timestamp) < 10000;
 
-  const getHeartStatus = () => {
-    if (!isLive) return { text: 'En Espera', status: 'normal' };
-    if (vitals.heartRate > 120) return { text: 'Muy alto', status: 'critical' };
-    if (vitals.heartRate < 45) return { text: 'Muy bajo', status: 'critical' };
-    if (vitals.heartRate > 100 || vitals.heartRate < 55) return { text: 'Fuera de rango', status: 'caution' };
-    return { text: 'En rango', status: 'normal' };
-  };
-
-  const getOxygenStatus = () => {
-    if (!isLive) return { text: 'En Espera', status: 'normal' };
-    if (vitals.bloodOxygen <= 0) return { text: 'Sin lectura', status: 'normal' };
-    if (vitals.bloodOxygen < 90) return { text: 'Muy baja (<90%)', status: 'critical' };
-    if (vitals.bloodOxygen < 94) return { text: 'Reducida', status: 'caution' };
-    return { text: 'En rango', status: 'normal' };
-  };
-
-  const getHrvStatus = () => {
-    if (!isLive || !vitals.hrv) return { text: 'En Espera', status: 'normal' };
-    return { text: 'Medido', status: 'normal' };
-  };
-
-  const getStressStatus = () => {
-    if (!isLive) return { text: 'En Espera', status: 'normal' };
-    return { text: 'Experimental', status: 'normal' };
-  };
-
-  const getAudioStatus = () => {
-    const rms = vitals.audio_rms || 0;
-    if (!isLive) return { text: 'En Espera', status: 'normal' };
-    if (rms > 45) return { text: 'Ruidoso', status: 'caution' };
-    if (rms > 25) return { text: 'Voz / Audio', status: 'normal' };
-    return { text: 'Silencioso', status: 'normal' };
-  };
+  const getHeartStatus = () => ({ text: valid.heartRate ? 'Pulso medido; interpretar con edad y reposo' : 'Sin lectura válida', status: 'insufficient_data' });
+  const getOxygenStatus = () => ({ text: valid.bloodOxygen ? 'Estimación calibrada' : 'No disponible sin calibración', status: 'insufficient_data' });
+  const getHrvStatus = () => ({ text: 'No disponible', status: 'insufficient_data' });
+  const getStressStatus = () => ({ text: 'No disponible', status: 'insufficient_data' });
+  const getAudioStatus = () => ({ text: audioAvailable ? 'Nivel digital; no presión sonora' : 'Sin lectura de audio', status: 'insufficient_data' });
 
   const heartStatus = getHeartStatus();
   const oxygenStatus = getOxygenStatus();
@@ -81,7 +59,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       <HospitalEcgMonitor
         heartRate={vitals.heartRate}
         bloodOxygen={vitals.bloodOxygen}
-        audioDecibels={vitals.audio_rms || 0}
+        audioDecibels={0}
         isAlert={heartStatus.status === 'critical'}
       />
 
@@ -116,7 +94,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         {/* Oxígeno en Sangre */}
         <MetricCard
           title="Oxígeno en Sangre"
-          value={isLive && vitals.bloodOxygen > 0 ? vitals.bloodOxygen.toFixed(1) : '--'}
+          value={valid.bloodOxygen ? vitals.bloodOxygen.toFixed(1) : '--'}
           unit="% SpO2"
           status={oxygenStatus.status as any}
           statusText={oxygenStatus.text}
@@ -129,7 +107,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         {/* Variabilidad de la frecuencia cardíaca */}
         <MetricCard
           title="Variabilidad (HRV)"
-          value={isLive && vitals.hrv ? vitals.hrv : '--'}
+          value="--"
           unit="ms"
           status={hrvStatus.status as any}
           statusText={hrvStatus.text}
@@ -142,8 +120,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         {/* Micrófono Bio-Acústico */}
         <MetricCard
           title="Micrófono Bio-Acústico"
-          value={isLive && vitals.audio_rms ? vitals.audio_rms.toFixed(1) : '--'}
-          unit="dB"
+          value={audioAvailable ? vitals.audio_rms.toFixed(1) : '--'}
+          unit="dBFS"
           status={audioStatus.status as any}
           statusText={audioStatus.text}
           icon="microphone"
@@ -155,7 +133,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         {/* Estrés Autonómico */}
         <MetricCard
           title="Índice de Estrés"
-          value={isLive ? vitals.stressLevel : '--'}
+          value="--"
           unit="/100"
           status={stressStatus.status as any}
           statusText={stressStatus.text}

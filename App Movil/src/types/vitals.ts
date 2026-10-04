@@ -5,7 +5,8 @@ export interface MeasurementQuality {
   heartRateValid?: boolean;
   bloodOxygenValid?: boolean;
   spo2Calibrated?: boolean;
-  signalQuality?: number | null;
+  signalQuality?: string | null;
+  audioUnit?: string;
   sampleAgeMs?: number | null;
 }
 
@@ -96,7 +97,7 @@ export interface RawDevicePacket extends MeasurementQuality {
   heart_rate_valid?: boolean;
   spo2_valid?: boolean;
   spo2_calibrated?: boolean;
-  signal_quality?: number | null;
+  signal_quality?: string | null;
   sample_age_ms?: number | null;
 }
 

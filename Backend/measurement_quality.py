@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 MAX_AGE_S = 15
 QUALITY_FIELDS = ("source", "heartRateValid", "bloodOxygenValid", "spo2Calibrated",
-                  "signalQuality", "sampleAgeMs", "finger")
+                  "signalQuality", "sampleAgeMs", "finger", "audioUnit")
 
 
 def metadata(data: dict) -> dict:
@@ -24,7 +24,7 @@ def number(value):
 def usable_value(data: dict, channel: str, *, check_timestamp=True):
     if data.get("source") != "real" or data.get("demo"):
         return None
-    if data.get("signalQuality") != "good" or data.get("finger") is False:
+    if data.get("signalQuality") != "good" or data.get("finger") is not True:
         return None
     age = number(data.get("sampleAgeMs"))
     if age is None or not 0 <= age <= MAX_AGE_S * 1000:
@@ -33,7 +33,7 @@ def usable_value(data: dict, channel: str, *, check_timestamp=True):
         try:
             timestamp = datetime.fromisoformat(data["timestamp"])
             now = datetime.now(timestamp.tzinfo or None)
-            if not 0 <= (now - timestamp).total_seconds() <= MAX_AGE_S:
+            if not 0 <= (now - timestamp).total_seconds() <= MAX_AGE_S - age / 1000:
                 return None
         except (KeyError, TypeError, ValueError):
             return None

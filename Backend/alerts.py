@@ -5,6 +5,7 @@ después (ver llm_tasks.alert_text). Si el LLM no responde, queda el texto de pl
 import time
 
 import database
+from measurement_quality import usable_value
 
 SUSTAIN_S = {"spo2_critica": 10, "spo2_baja": 30, "fc_alta": 10, "fc_baja": 10, "sin_dedo": 15}
 COOLDOWN_S = 120  # no repetir el mismo tipo de alerta en la misma sesión antes de esto
@@ -25,8 +26,8 @@ TEMPLATES = {
     "sin_dedo": ("info", "Sensor sin lectura",
                  "El dispositivo está conectado pero no detecta pulso desde hace {sustain} s.",
                  "Colocar el dedo sobre el sensor óptico sin presionar demasiado."),
-    "soplo": ("critical", "Posible soplo cardíaco",
-              "La grabación del foco {location} tuvo probabilidad de anormalidad {prob:.0%} (umbral {thr:.0%}).",
+    "soplo": ("caution", "Sonido cardíaco anormal",
+              "La grabación del foco {location} tuvo puntuación del modelo {prob:.0%} (no es certeza clínica) (umbral {thr:.0%}).",
               "Esto es un tamizaje, no un diagnóstico: referir a evaluación médica y ecocardiograma."),
     "hallazgo_pulmonar": ("caution", "Posible hallazgo pulmonar",
                           "La grabación de la zona {location} mostró: {finding}.",
@@ -39,6 +40,7 @@ TEMPLATES = {
 # Estado en memoria por sesión: desde cuándo se cumple cada condición y cuándo se alertó por última vez.
 _since: dict[tuple[str, str], float] = {}
 _last_alert: dict[tuple[str, str], float] = {}
+_last_packet: dict[str, float] = {}
 
 
 def _fire(session_id: str, type_: str, **fmt) -> dict | None:
@@ -61,17 +63,24 @@ def _sustained(session_id: str, type_: str, active: bool) -> bool:
 
 
 def evaluate_vitals(session_id: str, vitals: dict) -> list[dict]:
-    hr = vitals.get("heartRate", 0) or 0
-    spo2 = vitals.get("bloodOxygen", 0.0) or 0.0
-    valid = hr > 0 and spo2 > 0
+    now = time.time()
+    if now - _last_packet.get(session_id, now) > 3:
+        for key in list(_since):
+            if key[0] == session_id:
+                _since.pop(key, None)
+    _last_packet[session_id] = now
+    hr = usable_value(vitals, "heartRate")
+    spo2 = usable_value(vitals, "bloodOxygen")
+    context = database.get_clinical_context(session_id)
+    age = context.get("age_years")
+    adult_rest = age is not None and age >= 18 and context.get("at_rest") is True
     fired = []
-
     checks = [
-        ("spo2_critica", valid and spo2 < 90),
-        ("spo2_baja", valid and 90 <= spo2 < 94),
-        ("fc_alta", valid and hr > 120),
-        ("fc_baja", valid and 0 < hr < 45),
-        ("sin_dedo", not valid),
+        ("spo2_critica", spo2 is not None and spo2 < 90),
+        ("spo2_baja", spo2 is not None and 90 <= spo2 < 94),
+        ("fc_alta", adult_rest and hr is not None and hr > 120),
+        ("fc_baja", adult_rest and hr is not None and hr < 45),
+        ("sin_dedo", vitals.get("source") == "real" and hr is None),
     ]
     for type_, cond in checks:
         if _sustained(session_id, type_, cond):
@@ -82,6 +91,8 @@ def evaluate_vitals(session_id: str, vitals: dict) -> list[dict]:
 
 
 def evaluate_recording(result: dict) -> list[dict]:
+    if result.get("source") != "real" or (result.get("details") or {}).get("demo"):
+        return []
     sid = result["session_id"]
     loc = result.get("location") or "sin especificar"
     if result["result"] == "anormal" and result.get("mode") == "pulmon":

@@ -1,69 +1,42 @@
-# SpiroScan · Base de conocimiento del proyecto
+# SpiroScan: conocimiento verificado del prototipo
 
-Este archivo es la ÚNICA fuente que usa el asistente para explicar el proyecto a visitantes y jurado.
-Para "enseñarle" algo nuevo al asistente, el equipo edita este archivo (no hace falta reentrenar nada).
+Actualizado el 3 de octubre de 2026. Evidencia técnica: `IA/docs/audit_results.json` y `docs/INFORME_MEJORAS_2026-10-03.md`.
 
-## Qué es
-SpiroScan es un prototipo universitario de tamizaje cardiorrespiratorio de bajo costo (presupuesto ≤ Q500).
-Combina un estetoscopio digital con inteligencia artificial y un sensor óptico de pulso.
-Su objetivo es identificar a quién conviene referir a un ecocardiograma. NO diagnostica.
+## Alcance real
 
-## Componentes
-- ESP32: microcontrolador que lee los sensores y envía los datos por WiFi al servidor.
-- INMP441: micrófono digital MEMS (I2S) acoplado a la pieza del estetoscopio. Graba 15 s a 16 kHz.
-- MAX30102: sensor óptico que mide pulso (BPM) y saturación de oxígeno (SpO2) en el dedo.
-- 8 LEDs WS2812: muestran el estado (azul grabando, verde normal, rojo posible soplo, naranja mala calidad).
-- Servidor: una Mac del equipo con la base de datos, la red neuronal y el asistente de lenguaje, todo local y sin internet.
+Prototipo de tamizaje cardiorrespiratorio con ESP32, MAX30102 e INMP441. El PDF de construcción propone auscultar cuatro focos cardíacos y detectar sonidos compatibles con soplo para orientar referencia. No identifica por sí solo una enfermedad valvular ni cardiopatía reumática.
 
-## Qué mide y qué no
-- Mide: pulso, SpO2, variabilidad entre latidos (HRV) y el sonido del corazón y de los pulmones.
-- No mide: presión arterial, temperatura corporal ni electrocardiograma.
+## Datos disponibles
 
-## La red neuronal (CNN)
-- Convierte el audio en un espectrograma log-mel (una "imagen" del sonido) y una red convolucional estima la
-  probabilidad de un sonido cardíaco anormal (por ejemplo un soplo).
-- Entrenada con dos bases públicas: CirCor DigiScope 2022 y PhysioNet/CinC 2016.
-- Evaluada con grabaciones de pacientes que la red nunca vio en entrenamiento: sensibilidad ≈ 90 %,
-  especificidad ≈ 92 %, AUC ≈ 0.97. El umbral se eligió para no dejar pasar casos (tamizaje).
-- Limitación: validada con estetoscopios clínicos de las bases de datos, aún no con pacientes reales.
+- El firmware obtiene señales roja e infrarroja del MAX30102 y estima pulso, con controles de contacto, calidad, estabilización y caducidad.
+- La SpO2 queda **no disponible**: el cálculo anterior incluía valores inventados y recortes. Se requiere implementar y validar un algoritmo calibrado para el sistema óptico completo. No se debe activar un indicador de calibración para saltar este requisito.
+- HRV, estrés, presión arterial, temperatura corporal y ECG no se presentan como mediciones válidas.
+- El INMP441 graba sonido. El nivel digital en dBFS no es presión sonora en dB SPL.
+- La edad, síntomas, reposo, altitud y antecedentes provienen de respuestas explícitas del usuario. Un dato no contestado permanece desconocido.
+- Las demostraciones no representan signos vitales del paciente ni se incorporan a la valoración clínica.
 
-## Características del soplo
-Cuando la red detecta un posible soplo, un segundo modelo (entrenado con las anotaciones de CirCor) describe
-cómo suena. Solo se muestran las características que el modelo acierta claramente mejor que el azar en
-pacientes no vistos: la intensidad (leve o moderada/mayor, ≈ 76 % de acierto balanceado) y la forma
-(meseta, decreciente o romboidal, ≈ 61 %). Describe el sonido; NO dice la causa del soplo.
+## IA acústica
 
-## Pulmones
-Con la base pública ICBHI 2017 se entrenan dos modelos de pulmón: uno detecta crepitantes y sibilancias,
-y otro sugiere un patrón compatible con sano, EPOC, neumonía, bronquiectasia, bronquiolitis o infección
-respiratoria. Es una sugerencia para referir, nunca un diagnóstico, y solo se muestran las clases que el
-modelo reconoce de forma confiable. Si estos modelos aún no están entrenados, la app lo indica.
+Existe una CNN cardíaca con pesos previos entrenados con CirCor y PhysioNet 2016. Clasifica anormalidad acústica; las etiquetas de ambos conjuntos no son equivalentes a diagnóstico de enfermedad.
 
-## Triaje combinado (semáforo)
-Une la SpO2, el pulso, el resultado del corazón y el del pulmón con reglas fijas definidas por el equipo:
-rojo (prioridad alta, p. ej. SpO2 < 90 % o hallazgo pulmonar con SpO2 < 94 %), amarillo (referir a
-evaluación, p. ej. posible soplo o SpO2 entre 90 y 93 %), verde (sin hallazgos) y gris (faltan datos).
-No es una IA entrenada: ninguna base pública trae audio y SpO2 del mismo paciente.
+La reevaluación retrospectiva de 1,226 audios reproduce sensibilidad 89.70 %, especificidad 91.64 % y AUC 0.97076: 209 verdaderos positivos, 24 falsos negativos, 910 verdaderos negativos y 83 falsos positivos. La partición se reconstruyó desde el código/semilla; no hay manifiesto original que certifique todo el historial. No es validación externa, ni prueba con pacientes usando este hardware. El rendimiento varía considerablemente entre fuentes.
 
-## Aporte original: corrección acústica
-Un estetoscopio barato "suena distinto" a uno clínico de $300. Con un fantoma (una caja con tejido simulado y un
-parlante) se reproduce el audio clínico, se graba con nuestro dispositivo y se calcula la función de transferencia
-(barrido sinusoidal de 20 Hz a 2 kHz, método de Farina). Con esa medición se adaptan los datos de entrenamiento
-para que la red funcione con nuestro instrumento. El fantoma no imita la propagación en tejido vivo; sirve para
-medir de forma controlada y repetible la respuesta del instrumento.
+El descriptor de características del soplo permanece desactivado: la auditoría reconstruida halló 31 de 36 pacientes de prueba compartidos con entrenamiento/validación del extractor base. No deben citarse sus métricas antiguas como validación independiente.
 
-## Cómo se usa
-1. En la app se elige el foco (aórtico, pulmonar, tricuspídeo o mitral) y se toca "Preparar grabación".
-2. Se apoya el estetoscopio en el pecho y se mantiene presionado el botón 1 segundo.
-3. En unos segundos aparece el resultado en la app y en los LEDs.
-4. Al final se puede generar un informe PDF con nota de referencia para personal de salud.
+Hay un modelo pulmonar base de regresión logística. Su puntaje ICBHI reportado por el autor no se volvió a verificar con el dataset completo. No hay pesos CNN pulmonares entrenados disponibles. Faltan los audios ICBHI y su partición oficial en la copia de trabajo; tener fichas clínicas no equivale a tener esos audios.
 
-## El asistente de lenguaje
-Un modelo de lenguaje local (Qwen, corriendo en la Mac) redacta los textos: alertas, informes, respuestas y guía.
-No decide nada: las alertas vienen de reglas fijas y el resultado del audio viene de la red neuronal.
+## Valoración orientativa
 
-## Lo que el proyecto NO afirma
-- No diagnostica: detecta posibles hallazgos y sugiere referencia médica.
-- No detecta cardiopatía reumática directamente (las bases etiquetan soplos, no diagnósticos por ecocardiograma).
-- No se probó en pacientes: toda la validación es con bases públicas y el fantoma.
-- No sustituye al ecocardiograma ni a la evaluación clínica.
+Se combinan resultados acústicos, mediciones válidas y síntomas mediante reglas explícitas con fuentes FDA, NHLBI y NICE. Pueden sugerirse causas para investigar, con explicación y pruebas confirmatorias. No existe aquí una red multimodal validada ni porcentajes de enfermedad o de salud. Los síntomas de alarma tienen prioridad incluso si los sensores parecen normales.
+
+La API, el semáforo, los informes y el resumen clínico del asistente comparten este motor. Los textos clínicos son deterministas para evitar que un modelo generativo agregue datos. El LLM local conserva su función de guía de uso, separado de las decisiones clínicas.
+
+## Uso
+
+1. Crear una sesión distinta para cada persona.
+2. Abrir **Auscultar**, completar lo conocido y conservar **No sé** en lo desconocido.
+3. Registrar audio real en los focos correspondientes y adquirir pulso estable.
+4. Pulsar **Guardar y evaluar esta sesión**. Leer hallazgos, posibilidades, datos faltantes y pasos sugeridos.
+5. Si hay síntomas graves, no esperar a la IA. La confirmación corresponde a personal de salud.
+
+La calibración acústica con fantoma descrita en el PDF sigue pendiente de medición física. No se afirma haberla realizado. Tampoco se ha flasheado el ESP32 durante esta tarea.

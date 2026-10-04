@@ -7,7 +7,7 @@ export function measurementValidity(vitals: VitalSigns, now = Date.now()) {
   const age = vitals.sampleAgeMs;
   const fresh = Number.isFinite(received) && elapsed >= -1000 && elapsed <= 10000
     && typeof age === 'number' && Number.isFinite(age) && age >= 0 && age + Math.max(0, elapsed) <= 10000;
-  const eligible = fresh && vitals.source === 'real' && vitals.finger === true
+  const eligible = fresh && vitals.source === 'real' && vitals.finger === true && vitals.signalQuality === 'good'
     && vitals.device_connected !== false;
   return {
     heartRate: eligible && vitals.heartRateValid === true && Number.isFinite(vitals.heartRate) && vitals.heartRate > 0,

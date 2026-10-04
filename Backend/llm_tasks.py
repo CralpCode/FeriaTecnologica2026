@@ -9,6 +9,8 @@ from pathlib import Path
 import ai_engine
 import database
 import triage
+import clinical_assessment
+from measurement_quality import usable_value
 
 BASE_RULES = (
     "Eres el asistente de comunicación de SpiroScan, un prototipo universitario de TAMIZAJE "
@@ -70,7 +72,7 @@ GUIDE_COMMON = [
 
 
 def _session_context(session_id: str) -> dict:
-    recs = database.list_recordings(session_id, limit=10)
+    recs = clinical_assessment.recent_recordings(session_id)
     return {
         "vitales_ultimas_lecturas": database.get_latest_reading(session_id=session_id),
         "resumen_vitales_sesion": database.get_vitals_summary(session_id),
@@ -89,13 +91,16 @@ def _session_context(session_id: str) -> dict:
              "titulo": a["title"], "hora": a["created_at"]}
             for a in database.list_alerts(session_id, limit=10)
         ],
+        "valoracion": clinical_assessment.evaluate_session(session_id),
         "triaje": {k: v for k, v in triage.evaluate(session_id).items() if k in ("nivel", "titulo", "motivos")},
     }
 
 
 def _clean_vitals(v: dict) -> dict:
-    keep = ("heartRate", "bloodOxygen", "hrv", "timestamp", "device_connected")
-    return {k: v.get(k) for k in keep if k in v}
+    return {"heartRate": usable_value(v, "heartRate"),
+            "bloodOxygen": usable_value(v, "bloodOxygen"),
+            "timestamp": v.get("timestamp"), "source": v.get("source")}
+
 
 
 # ---------------------------------------------------------------------------
@@ -126,29 +131,16 @@ def session_report(session_id: str) -> tuple[dict, bool]:
     """Devuelve (contenido, generado_por_llm)."""
     ctx = _session_context(session_id)
     ctx["vitales_ultimas_lecturas"] = _clean_vitals(ctx["vitales_ultimas_lecturas"])
-    prompt = (
-        "Redacta el informe de esta sesión de tamizaje a partir de estos datos:\n"
-        f"{json.dumps(ctx, ensure_ascii=False, default=str)}\n"
-        "Responde JSON con estas claves:\n"
-        '{"resumen": "3-4 oraciones", "hallazgos": ["lista corta, uno por dato relevante"], '
-        '"recomendacion": "1-2 oraciones", '
-        '"nota_referencia": "si hubo alerta o grabación anormal: nota breve dirigida a personal de salud con los datos objetivos; si no, cadena vacía"}'
-    )
-    try:
-        out = ai_engine.llm_json([{"role": "system", "content": BASE_RULES}, {"role": "user", "content": prompt}], max_tokens=900)
-        content = {
-            "resumen": str(out.get("resumen", "")),
-            "hallazgos": [str(h) for h in out.get("hallazgos", [])],
-            "recomendacion": str(out.get("recomendacion", "")),
-            "nota_referencia": str(out.get("nota_referencia", "")),
-        }
-        llm = True
-    except Exception as e:
-        print(f"[LLM informe] {e}")
-        content = _fallback_report(ctx)
-        llm = False
-    content["datos"] = ctx
-    return content, llm
+    assessment = ctx["valoracion"]
+    content = {
+        "resumen": assessment["summary"],
+        "hallazgos": [f["label"] + ": " + " ".join(f["evidence"]) for f in assessment["findings"]],
+        "recomendacion": " ".join(assessment["next_steps"]),
+        "nota_referencia": "Posibilidades a confirmar, no diagnósticos: " + "; ".join(p["condition"] for p in assessment["possibilities"]) if assessment["possibilities"] else "",
+        "datos": ctx,
+    }
+    # Reproducible clinical output; a generative model may add unsupported claims.
+    return content, False
 
 
 def _fallback_report(ctx: dict) -> dict:
@@ -179,29 +171,17 @@ _history: dict[str, list[dict]] = {}
 
 
 def chat(session_id: str, message: str) -> str:
-    ctx = _session_context(session_id)
-    ctx["vitales_ultimas_lecturas"] = _clean_vitals(ctx["vitales_ultimas_lecturas"])
-    system = (
-        BASE_RULES
-        + "Respondes dos tipos de preguntas, siempre breve (máximo 2 párrafos cortos):\n"
-        + "a) Sobre los datos de ESTA sesión: usa solo DATOS DE LA SESIÓN.\n"
-        + "b) Sobre qué es SpiroScan y cómo funciona (visitantes de la feria, jurado): usa solo la BASE DE CONOCIMIENTO.\n"
-        + "Si la respuesta no está en ninguna de las dos fuentes, dilo y no inventes.\n"
-        + "Si preguntan algo que el dispositivo no mide o que requiere diagnóstico, explícalo con amabilidad.\n"
-        + f"BASE DE CONOCIMIENTO DEL PROYECTO:\n{project_knowledge()}\n"
-        + f"DATOS DE LA SESIÓN (fuente única de verdad):\n{json.dumps(ctx, ensure_ascii=False, default=str)}"
-    )
-    hist = _history.setdefault(session_id, [])
-    messages = [{"role": "system", "content": system}, *hist[-6:], {"role": "user", "content": message}]
-    try:
-        reply = ai_engine.llm_chat(messages, max_tokens=450, temperature=0.4)
-    except Exception as e:
-        print(f"[LLM chat] {e}")
-        return ("El asistente no está disponible en este momento. Los datos de la sesión siguen "
-                "visibles en el panel principal.")
-    hist += [{"role": "user", "content": message}, {"role": "assistant", "content": reply}]
-    _history[session_id] = hist[-10:]
-    return reply
+    assessment = clinical_assessment.evaluate_session(session_id)
+    lines = [assessment["summary"]]
+    lines += [f["label"] + ": " + " ".join(f["evidence"]) for f in assessment["findings"]]
+    for possibility in assessment["possibilities"]:
+        lines.append("Posibilidad a confirmar: " + possibility["condition"] + ". " + " ".join(possibility["why"]) + " Confirmación: " + " ".join(possibility["confirmation"]))
+    lines += assessment["next_steps"]
+    if assessment["missing_data"]:
+        lines.append("Datos pendientes: " + " ".join(assessment["missing_data"]))
+    lines.append("Esta respuesta resume la sesión con reglas y resultados acústicos. No interpreta síntomas escritos en el chat: regístralos en la valoración de Auscultación. La guía de uso está en esa misma pantalla.")
+    return "\n\n".join(lines)
+
 
 
 # ---------------------------------------------------------------------------

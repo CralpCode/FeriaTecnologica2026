@@ -1,5 +1,8 @@
 # 🚀 Backend API - SpiroScan (Feria Tecnológica)
 
+> **Actualización 2026-10-03:** el resumen clínico, informes y semáforo usan reglas trazables y resultados acústicos de la sesión. El LLM se conserva para guía de uso. SpO2, HRV y estrés no están disponibles como mediciones validadas en el firmware actualizado. [Informe completo](../docs/INFORME_MEJORAS_2026-10-03.md).
+
+
 Servidor en **Python + FastAPI + SQLite (WAL)** que corre en la Mac del equipo y concentra todo:
 telemetría del ESP32, base de datos, **CNN de audio cardíaco** y **LLM local (Ollama)**.
 
@@ -62,3 +65,12 @@ junto con su `heart_cnn.json` (umbral y métricas). `ml/features.py` debe ser id
 - **Mide:** pulso y SpO2 (MAX30102), variabilidad entre latidos (HRV) y audio cardíaco (INMP441).
 - **No mide:** presión arterial ni temperatura corporal. Esos campos quedan en 0 por compatibilidad.
 - El "índice de estrés" es experimental y no está validado.
+
+## Contexto y valoración orientativa
+
+- `GET/PUT /api/clinical/context/{session_id}`: edad, reposo, altitud, síntomas y antecedentes; `null` conserva desconocidos.
+- `GET /api/clinical/assessment/{session_id}`: hallazgos, posibilidades a confirmar, fuentes y limitaciones; sin probabilidades de enfermedad.
+- Telemetría: `source`, `heartRateValid`, `bloodOxygenValid`, `spo2Calibrated`, `signalQuality`, `sampleAgeMs`, `finger`. Datos sin procedencia/validez no se usan clínicamente.
+- Audio: `source` en `/api/audio/start` y `/api/audio/upload` (`real`, `simulated`, `unknown`). Por defecto `unknown`.
+- Exportaciones: especificar `session_id`; sin mezcla de sesiones ni puntuaciones de salud. PDF/HTML resumen la sesión; CSV/XLSX/PNG respetan el periodo solicitado.
+- Pruebas aisladas: `SPIROSCAN_DB_PATH` con base temporal y `SPIROSCAN_MDNS=0` para no anunciar el servidor de pruebas.
