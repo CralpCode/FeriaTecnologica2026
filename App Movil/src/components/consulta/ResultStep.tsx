@@ -24,6 +24,7 @@ export const ResultStep: React.FC<{ onOpenAssistant: () => void; onNewPatient: (
   const [loadError, setLoadError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const triageKey = `${triage?.nivel}|${triage?.motivos?.join('|')}|${recordings.length}`;
 
@@ -37,7 +38,9 @@ export const ResultStep: React.FC<{ onOpenAssistant: () => void; onNewPatient: (
     setGenerating(true); setReportError(null);
     try {
       const r = await apiService.createReportFor(currentSessionId);
-      Linking.openURL(apiService.reportPdfUrl(r));
+      const url = apiService.reportPdfUrl(r);
+      setPdfUrl(url);
+      Linking.openURL(url);
     } catch (e: any) {
       setReportError(`No se pudo generar el informe: ${e?.message || e}`);
     } finally {
@@ -56,6 +59,11 @@ export const ResultStep: React.FC<{ onOpenAssistant: () => void; onNewPatient: (
         <Button label="Terminar y nuevo paciente" icon="person-add-outline" variant="secondary" onPress={() => setShowNew(true)} style={styles.action} />
       </View>
       {reportError && <Banner tone="danger" text={reportError} />}
+      {pdfUrl && (
+        <Banner tone="success" title="Informe listo" text="Si no se abrió solo (el navegador puede bloquearlo), ábrelo aquí."
+                action={<Button label="Abrir informe PDF" icon="open-outline" variant="ghost" onPress={() => Linking.openURL(pdfUrl)}
+                                style={{ alignSelf: 'flex-start', paddingHorizontal: 0 }} />} />
+      )}
 
       {loadError && <Banner tone="danger" text={loadError} />}
       {!assessment && !loadError && <ActivityIndicator color={color.primary} style={{ marginVertical: space.lg }} />}

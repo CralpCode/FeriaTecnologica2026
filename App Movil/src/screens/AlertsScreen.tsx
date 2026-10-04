@@ -4,7 +4,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useClinical } from '../context/ClinicalContext';
 import { apiService } from '../services/api';
-import { AlertSeverity, SessionReport } from '../types/vitals';
+import { AlertSeverity, ClinicalAlert, SessionReport } from '../types/vitals';
 import { Centered, Columns } from '../components/ResponsiveContainer';
 import { useLayout } from '../hooks/useLayout';
 
@@ -28,6 +28,7 @@ export const AlertsScreen: React.FC = () => {
   const { twoColumns } = useLayout();
   const [generating, setGenerating] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [showSeen, setShowSeen] = useState(false);
 
   const handleReport = async () => {
     setGenerating(true);
@@ -39,6 +40,38 @@ export const AlertsScreen: React.FC = () => {
     } finally {
       setGenerating(false);
     }
+  };
+
+  const renderAlert = (a: ClinicalAlert) => {
+    const s = SEVERITY[a.severity] || SEVERITY.info;
+    return (
+      <View
+        key={a.id}
+        style={[styles.alertCard, { borderLeftColor: s.color, opacity: a.acknowledged ? 0.55 : 1 }]}
+      >
+        <View style={styles.alertHeader}>
+          <MaterialCommunityIcons name={s.icon as any} size={18} color={s.color} />
+          <Text style={[styles.alertTitle, { color: s.color }]}>{a.title}</Text>
+          <Text style={styles.alertTime}>{time(a.created_at)}</Text>
+        </View>
+        <Text style={styles.alertMessage}>{a.message}</Text>
+        {!!a.action && <Text style={styles.alertAction}>→ {a.action}</Text>}
+        <View style={styles.alertFooter}>
+          <Text style={styles.alertMeta}>
+            {s.label}
+            {a.llm_generated ? ' · texto redactado por IA local' : ''}
+          </Text>
+          {!a.acknowledged ? (
+            <TouchableOpacity style={styles.ackBtn} onPress={() => acknowledgeAlert(a.id).catch(() => {})}>
+              <Ionicons name="checkmark" size={14} color={Colors.primary} />
+              <Text style={styles.ackText}>Marcar vista</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.alertMeta}>Vista</Text>
+          )}
+        </View>
+      </View>
+    );
   };
 
   return (
@@ -63,37 +96,26 @@ export const AlertsScreen: React.FC = () => {
         </View>
       )}
 
-      {alerts.map((a) => {
-        const s = SEVERITY[a.severity] || SEVERITY.info;
+      {(['critical', 'caution', 'info'] as AlertSeverity[]).map((sev) => {
+        const group = alerts.filter((a) => a.severity === sev && !a.acknowledged);
+        if (!group.length) return null;
         return (
-          <View
-            key={a.id}
-            style={[styles.alertCard, { borderLeftColor: s.color, opacity: a.acknowledged ? 0.55 : 1 }]}
-          >
-            <View style={styles.alertHeader}>
-              <MaterialCommunityIcons name={s.icon as any} size={18} color={s.color} />
-              <Text style={[styles.alertTitle, { color: s.color }]}>{a.title}</Text>
-              <Text style={styles.alertTime}>{time(a.created_at)}</Text>
-            </View>
-            <Text style={styles.alertMessage}>{a.message}</Text>
-            {!!a.action && <Text style={styles.alertAction}>→ {a.action}</Text>}
-            <View style={styles.alertFooter}>
-              <Text style={styles.alertMeta}>
-                {s.label}
-                {a.llm_generated ? ' · texto redactado por IA local' : ''}
-              </Text>
-              {!a.acknowledged ? (
-                <TouchableOpacity style={styles.ackBtn} onPress={() => acknowledgeAlert(a.id).catch(() => {})}>
-                  <Ionicons name="checkmark" size={14} color={Colors.primary} />
-                  <Text style={styles.ackText}>Marcar vista</Text>
-                </TouchableOpacity>
-              ) : (
-                <Text style={styles.alertMeta}>Vista</Text>
-              )}
-            </View>
+          <View key={sev}>
+            <Text style={[styles.groupTitle, { color: SEVERITY[sev].color }]}>
+              {{ critical: 'Críticas', caution: 'Precaución', info: 'Avisos' }[sev]} ({group.length})
+            </Text>
+            {group.map(renderAlert)}
           </View>
         );
       })}
+      {alerts.some((a) => a.acknowledged) && (
+        <TouchableOpacity style={styles.seenHead} onPress={() => setShowSeen((v) => !v)} accessibilityRole="button"
+                          accessibilityState={{ expanded: showSeen }}>
+          <Text style={styles.groupTitle}>Vistas ({alerts.filter((a) => a.acknowledged).length})</Text>
+          <Ionicons name={showSeen ? 'chevron-up' : 'chevron-down'} size={18} color={Colors.textMuted} />
+        </TouchableOpacity>
+      )}
+      {showSeen && alerts.filter((a) => a.acknowledged).map(renderAlert)}
 
           </View>
         }
@@ -141,6 +163,8 @@ export const AlertsScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  groupTitle: { fontSize: 13, fontWeight: '800', color: Colors.textSecondary, marginTop: 12, marginBottom: 8, letterSpacing: 0.3 },
+  seenHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
   container: { flex: 1, backgroundColor: Colors.background },
   content: { padding: 16, paddingBottom: 32 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -159,11 +183,11 @@ const styles = StyleSheet.create({
   },
   alertHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
   alertTitle: { flex: 1, fontSize: 14, fontWeight: '800' },
-  alertTime: { fontSize: 11, color: Colors.textMuted },
+  alertTime: { fontSize: 12, color: Colors.textMuted },
   alertMessage: { fontSize: 13, color: Colors.textPrimary, lineHeight: 19 },
   alertAction: { fontSize: 13, color: Colors.textSecondary, lineHeight: 19, marginTop: 4, fontWeight: '600' },
   alertFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
-  alertMeta: { fontSize: 11, color: Colors.textMuted },
+  alertMeta: { fontSize: 12, color: Colors.textMuted },
   ackBtn: {
     flexDirection: 'row',
     alignItems: 'center',

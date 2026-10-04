@@ -11,7 +11,7 @@ const LEVEL_STYLE: Record<TriageLevel, { color: string; soft: string; label: str
   gris: { color: Colors.textSecondary, soft: Colors.backgroundSecondary, label: 'SIN DATOS', icon: 'help-circle-outline' },
 };
 
-/** Semáforo de triaje: SpO2 + pulso + corazón + pulmón combinados por reglas fijas del equipo. */
+/** Semáforo de triaje: síntomas, pulso, SpO2 calibrada y sonidos de corazón y pulmón, por reglas fijas del equipo. */
 export const TriageCard: React.FC<{ triage: TriageResult | null }> = ({ triage }) => {
   const t: TriageResult = triage || { session_id: '', nivel: 'gris', titulo: 'Faltan datos para evaluar', motivos: [], aviso: '' };
   const s = LEVEL_STYLE[t.nivel];
@@ -27,7 +27,7 @@ export const TriageCard: React.FC<{ triage: TriageResult | null }> = ({ triage }
           ))}
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.kicker}>TRIAJE COMBINADO · {s.label}</Text>
+          <Text style={styles.kicker}>SEMÁFORO · {s.label}</Text>
           <Text style={[styles.title, { color: s.color }]}>{t.titulo}</Text>
         </View>
         <MaterialCommunityIcons name={s.icon as any} size={24} color={s.color} />
@@ -42,7 +42,7 @@ export const TriageCard: React.FC<{ triage: TriageResult | null }> = ({ triage }
         <Text key={i} style={styles.reason}>• {m}</Text>
       ))}
       <Text style={styles.note}>
-        Combina SpO2, pulso, corazón y pulmón con reglas fijas del equipo. No es un diagnóstico.
+        Combina síntomas, pulso, SpO2 (solo si está calibrada) y sonidos de corazón y pulmón con reglas fijas del equipo. No es un diagnóstico.
       </Text>
     </View>
   );
@@ -53,11 +53,11 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 },
   lights: { gap: 4 },
   light: { width: 12, height: 12, borderRadius: 6 },
-  kicker: { fontSize: 11, fontWeight: '800', color: Colors.textSecondary, letterSpacing: 0.5 },
+  kicker: { fontSize: 12, fontWeight: '800', color: Colors.textSecondary, letterSpacing: 0.5 },
   title: { fontSize: 15, fontWeight: '800' },
   reason: { fontSize: 13, color: Colors.textPrimary, lineHeight: 19 },
-  note: { fontSize: 11, color: Colors.textSecondary, marginTop: 6 },
+  note: { fontSize: 12, color: Colors.textSecondary, marginTop: 6 },
   demo: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: '#F3E8FF',
           borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 6 },
-  demoText: { fontSize: 11, fontWeight: '800', color: '#6B21A8' },
+  demoText: { fontSize: 12, fontWeight: '800', color: '#6B21A8' },
 });

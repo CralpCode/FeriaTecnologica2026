@@ -387,7 +387,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     setVitals({ ...ABSOLUTE_ZERO_VITALS, timestamp: nowIso, source: 'simulated' });
     setDevice({
       name: `Demo ICBHI (paciente #${sampleData.patient_id})`,
-      model: 'Datos de ejemplo',
+      model: 'Audio de ICBHI 2017 (otra persona)',
       connected: true,
       battery: 0,
       lastSync: nowIso,

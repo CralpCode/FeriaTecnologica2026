@@ -1,16 +1,16 @@
-﻿import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../theme/colors';
+import React, { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useVitals } from '../context/VitalsContext';
-import { MetricCard } from '../components/MetricCard';
-import { HospitalEcgMonitor } from '../components/HospitalEcgMonitor';
-import { AIInsightCard } from '../components/AIInsightCard';
-import { TriageCard } from '../components/TriageCard';
-import { measurementValidity } from '../services/measurementQuality';
 import { useClinical } from '../context/ClinicalContext';
+import { measurementValidity } from '../services/measurementQuality';
+import { Colors } from '../theme/colors';
+import { color, font, radius, space, weight } from '../theme/tokens';
+import { HospitalEcgMonitor } from '../components/HospitalEcgMonitor';
+import { TriageCard } from '../components/TriageCard';
 import { Centered, Columns } from '../components/ResponsiveContainer';
 import { ConsultaBanner } from '../components/consulta/ConsultaBanner';
+import { Banner, Button, SectionHeader } from '../components/ui';
 
 interface DashboardScreenProps {
   onNavigateToAI: () => void;
@@ -18,208 +18,103 @@ interface DashboardScreenProps {
   onOpenConsulta?: (step: number) => void;
 }
 
-export const DashboardScreen: React.FC<DashboardScreenProps> = ({
-  onNavigateToAI,
-  onNavigateToCharts,
-  onOpenConsulta,
-}) => {
-  const { vitals, aiReport, connectedType } = useVitals();
+/** Monitoreo: semáforo, pulso en vivo y todas las lecturas del dispositivo con su estado real. */
+export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToAI, onNavigateToCharts, onOpenConsulta }) => {
+  const { vitals, connectedType } = useVitals();
   const { triage } = useClinical();
-
   const [now, setNow] = useState(Date.now());
-  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+
   const valid = measurementValidity(vitals, now);
-  const isLive = valid.heartRate;
   const audioAvailable = vitals.source === 'real' && vitals.audioUnit === 'dBFS'
     && Number.isFinite(vitals.audio_rms) && vitals.audio_rms < 0 && now - Date.parse(vitals.timestamp) < 10000;
 
-  const getHeartStatus = () => ({ text: valid.heartRate ? 'Pulso medido; interpretar con edad y reposo' : 'Sin lectura válida', status: 'insufficient_data' });
-  const getOxygenStatus = () => ({ text: valid.bloodOxygen ? 'Estimación calibrada' : 'No disponible sin calibración', status: 'insufficient_data' });
-  const getHrvStatus = () => ({ text: 'No disponible', status: 'insufficient_data' });
-  const getStressStatus = () => ({ text: 'No disponible', status: 'insufficient_data' });
-  const getAudioStatus = () => ({ text: audioAvailable ? 'Nivel digital; no presión sonora' : 'Sin lectura de audio', status: 'insufficient_data' });
-
-  const heartStatus = getHeartStatus();
-  const oxygenStatus = getOxygenStatus();
-  const hrvStatus = getHrvStatus();
-  const stressStatus = getStressStatus();
-  const audioStatus = getAudioStatus();
-
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Centered>
-      {connectedType === 'demo_icbhi' && (
-        <View style={styles.demoBanner}>
-          <Ionicons name="flask-outline" size={16} color="#6B21A8" />
-          <Text style={styles.demoBannerText}>
-            Modo demostración: audio real de ICBHI 2017; el pulso y la SpO2 son datos de ejemplo.
-          </Text>
-        </View>
-      )}
+        {onOpenConsulta && <ConsultaBanner onOpen={onOpenConsulta} />}
+        {connectedType === 'demo_icbhi' && (
+          <Banner tone="ai" icon="flask-outline" title="Modo demostración"
+                  text="Audio real de ICBHI 2017, de otra persona. Este modo no tiene pulso ni SpO2." />
+        )}
 
-      <Columns
-        leftWeight={1.15}
-        left={
-          <View>
-      {/* Pasos de la consulta: guía al médico de principio a fin */}
-      {onOpenConsulta && <ConsultaBanner onOpen={onOpenConsulta} />}
-
-      {/* 0. SEMÁFORO DE TRIAJE (SpO2 + pulso + corazón + pulmón) */}
-      <TriageCard triage={triage} />
-
-      {/* 1. MONITOR DE PULSO (animación al ritmo medido) */}
-      <HospitalEcgMonitor
-        heartRate={valid.heartRate ? vitals.heartRate : 0}
-        bloodOxygen={vitals.bloodOxygen}
-        audioDecibels={0}
-        isAlert={heartStatus.status === 'critical'}
-      />
-
-      {/* 2. TARJETA DE ANÁLISIS MÉDICO IA */}
-      <TouchableOpacity activeOpacity={0.9} onPress={onNavigateToAI}>
-        <AIInsightCard report={aiReport} onAskAI={onNavigateToAI} />
-      </TouchableOpacity>
-          </View>
-        }
-        right={
-          <View>
-
-      {/* 3. PARÁMETROS EN VIVO */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Métricas de Sensores Físicos</Text>
-        <TouchableOpacity onPress={onNavigateToCharts} style={styles.seeMoreBtn}>
-          <Text style={styles.seeMoreText}>Ver Gráficas</Text>
-          <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.grid}>
-        {/* Ritmo Cardíaco */}
-        <MetricCard
-          title="Ritmo Cardíaco"
-          value={isLive ? vitals.heartRate : '--'}
-          unit="BPM"
-          status={heartStatus.status as any}
-          statusText={heartStatus.text}
-          icon="heart-pulse"
-          color={Colors.heartRate}
-          softColor="#FFE4E6"
-          subtitle="Sensor MAX30102"
+        <Columns
+          leftWeight={1.15}
+          left={
+            <View>
+              <TriageCard triage={triage} />
+              <HospitalEcgMonitor heartRate={valid.heartRate ? vitals.heartRate : 0} bloodOxygen={vitals.bloodOxygen}
+                                  audioDecibels={0} isAlert={false} />
+              <Button label="Preguntar al asistente sobre esta sesión" icon="chatbubbles-outline" variant="secondary"
+                      onPress={onNavigateToAI} full style={{ marginBottom: space.lg }} />
+            </View>
+          }
+          right={
+            <View>
+              <SectionHeader title="Lecturas en vivo" subtitle="Solo se muestran valores válidos; el resto indica por qué no hay dato."
+                             right={<Button label="Gráficas" icon="stats-chart-outline" variant="ghost" onPress={onNavigateToCharts} />} />
+              <View style={styles.grid}>
+                <VitalTile icon="heart-pulse" tint={Colors.heartRate} label="Pulso" unit="BPM"
+                           value={valid.heartRate ? String(Math.round(vitals.heartRate)) : null}
+                           hint={valid.heartRate ? 'Lectura válida; interpretar con edad y reposo' : 'Sin lectura válida'} source="MAX30102" />
+                <VitalTile icon="water-percent" tint={Colors.oxygen} label="Oxígeno (SpO2)" unit="%"
+                           value={valid.bloodOxygen ? vitals.bloodOxygen.toFixed(1) : null}
+                           hint={valid.bloodOxygen ? 'Estimación calibrada' : 'No disponible: sin calibración'} source="MAX30102" />
+                <VitalTile icon="heart-flash" tint={Colors.pressure} label="Variabilidad (HRV)" unit="ms" value={null}
+                           hint="No disponible: no validada" source="MAX30102" />
+                <VitalTile icon="brain" tint={Colors.stress} label="Índice de estrés" unit="/100" value={null}
+                           hint="No disponible: experimental" source="Estimación" />
+                <VitalTile icon="microphone" tint={Colors.audio} label="Micrófono" unit="dBFS"
+                           value={audioAvailable ? vitals.audio_rms.toFixed(1) : null}
+                           hint={audioAvailable ? 'Nivel digital, no presión sonora' : 'Sin lectura de audio'} source="INMP441" />
+              </View>
+            </View>
+          }
         />
-
-        {/* Oxígeno en Sangre */}
-        <MetricCard
-          title="Oxígeno en Sangre"
-          value={valid.bloodOxygen ? vitals.bloodOxygen.toFixed(1) : '--'}
-          unit="% SpO2"
-          status={oxygenStatus.status as any}
-          statusText={oxygenStatus.text}
-          icon="water-percent"
-          color={Colors.oxygen}
-          softColor="#E0F2FE"
-          subtitle="Oximetría de pulso"
-        />
-
-        {/* Variabilidad de la frecuencia cardíaca */}
-        <MetricCard
-          title="Variabilidad (HRV)"
-          value="--"
-          unit="ms"
-          status={hrvStatus.status as any}
-          statusText={hrvStatus.text}
-          icon="heart-flash"
-          color={Colors.pressure}
-          softColor="#EDE9FE"
-          subtitle="Intervalo entre latidos"
-        />
-
-        {/* Micrófono Bio-Acústico */}
-        <MetricCard
-          title="Micrófono Bio-Acústico"
-          value={audioAvailable ? vitals.audio_rms.toFixed(1) : '--'}
-          unit="dBFS"
-          status={audioStatus.status as any}
-          statusText={audioStatus.text}
-          icon="microphone"
-          color="#6366F1"
-          softColor="#EEF2FF"
-          subtitle="Audio I2S INMP441"
-        />
-
-        {/* Estrés Autonómico */}
-        <MetricCard
-          title="Índice de Estrés"
-          value="--"
-          unit="/100"
-          status={stressStatus.status as any}
-          statusText={stressStatus.text}
-          icon="brain"
-          color={Colors.stress}
-          softColor="#FEF3C7"
-          subtitle="Estimación no validada"
-        />
-
-      </View>
-          </View>
-        }
-      />
       </Centered>
     </ScrollView>
   );
 };
 
+const VitalTile: React.FC<{
+  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+  tint: string;
+  label: string;
+  value: string | null;
+  unit: string;
+  hint: string;
+  source: string;
+}> = ({ icon, tint, label, value, unit, hint, source }) => (
+  <View style={styles.tile} accessibilityLabel={`${label}: ${value ? `${value} ${unit}` : 'sin dato'}. ${hint}`}>
+    <View style={styles.tileHead}>
+      <View style={[styles.tileIcon, { backgroundColor: `${tint}14` }]}>
+        <MaterialCommunityIcons name={icon} size={18} color={tint} />
+      </View>
+      <Text style={styles.tileLabel} numberOfLines={1}>{label}</Text>
+    </View>
+    <View style={styles.valueRow}>
+      <Text style={[styles.value, !value && { color: color.textMuted }]}>{value ?? '--'}</Text>
+      <Text style={styles.unit}>{unit}</Text>
+    </View>
+    <Text style={[styles.hint, !value && { color: color.textMuted }]} numberOfLines={2}>{hint}</Text>
+    <Text style={styles.source}>{source}</Text>
+  </View>
+);
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
+  container: { flex: 1, backgroundColor: color.bg },
+  content: { padding: space.lg, paddingBottom: space.xxl },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
+  tile: {
+    flexGrow: 1, flexBasis: 160, minHeight: 132, padding: space.lg, backgroundColor: color.surface,
+    borderWidth: 1, borderColor: color.border, borderRadius: radius.lg,
   },
-  content: {
-    padding: 16,
-    paddingBottom: 32,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 14,
-    marginBottom: 12,
-    paddingHorizontal: 4,
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-  },
-  seeMoreBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  seeMoreText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-  demoBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#FAF5FF',
-    borderColor: '#C4B5FD',
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 10,
-    marginBottom: 12,
-  },
-  demoBannerText: {
-    flex: 1,
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#6B21A8',
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
+  tileHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  tileIcon: { width: 32, height: 32, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  tileLabel: { flex: 1, fontSize: font.sm, fontWeight: weight.bold, color: color.text },
+  valueRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginTop: space.md },
+  value: { fontSize: font.xxl, lineHeight: 36, fontWeight: weight.heavy, color: color.text, letterSpacing: -0.5 },
+  unit: { fontSize: font.sm, color: color.textSecondary, fontWeight: weight.bold, marginBottom: 4 },
+  hint: { fontSize: font.xs, color: color.textSecondary, marginTop: space.xs, lineHeight: 16 },
+  source: { fontSize: font.xs, color: color.textMuted, marginTop: space.xs },
 });

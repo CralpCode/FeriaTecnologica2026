@@ -31,9 +31,6 @@ interface DemoSampleInfo {
   sound_type: string;
   is_abnormal: number;
   duration: string;
-  bpm: number;
-  spo2: number;
-  db: number;
   description: string;
   clinical_tip: string;
   color: string;
@@ -44,15 +41,12 @@ interface DemoSampleInfo {
 const DEMO_CASES: DemoSampleInfo[] = [
   {
     id: 'sano',
-    name: 'Control Fisiológico Sano',
+    name: 'Sano (sin ruidos agregados)',
     patient_id: 159,
     diagnosis: 'Sano (etiqueta ICBHI: Healthy)',
     sound_type: 'Ciclo normal (sin crepitantes ni sibilancias)',
     is_abnormal: 0,
     duration: '6.0s',
-    bpm: 72,
-    spo2: 98.5,
-    db: 16.5,
     description: 'Murmullo vesicular: sonido respiratorio suave, sin ruidos agregados.',
     clinical_tip: 'Referencia de un caso sin hallazgos: compara lo que dice el modelo con la etiqueta real de ICBHI.',
     color: '#10B981',
@@ -67,9 +61,6 @@ const DEMO_CASES: DemoSampleInfo[] = [
     sound_type: 'Ciclo con sibilancias (Wheezes)',
     is_abnormal: 1,
     duration: '6.0s',
-    bpm: 96,
-    spo2: 93.0,
-    db: 34.0,
     description: 'Sibilancias: sonido musical continuo y agudo, típico de vías aéreas estrechadas.',
     clinical_tip: 'El modelo base estima si el ciclo es patológico; el asistente lo explica sin diagnosticar ni recomendar medicamentos.',
     color: '#F59E0B',
@@ -84,9 +75,6 @@ const DEMO_CASES: DemoSampleInfo[] = [
     sound_type: 'Ciclo con crepitantes (Crackles)',
     is_abnormal: 1,
     duration: '6.0s',
-    bpm: 88,
-    spo2: 91.0,
-    db: 38.5,
     description: 'Crepitantes: sonidos breves y discontinuos, como chasquidos, durante la respiración.',
     clinical_tip: 'Si el modelo lo marca patológico, se genera una alerta pulmonar y cambia el semáforo de triaje.',
     color: '#EF4444',
@@ -95,32 +83,26 @@ const DEMO_CASES: DemoSampleInfo[] = [
   },
   {
     id: 'ambos',
-    name: 'Patología Mixta Severa',
+    name: 'Sibilancias y crepitantes',
     patient_id: 130,
     diagnosis: 'EPOC (etiqueta ICBHI: COPD)',
     sound_type: 'Ciclo con sibilancias y crepitantes (Both)',
     is_abnormal: 1,
     duration: '6.0s',
-    bpm: 106,
-    spo2: 88.5,
-    db: 46.0,
     description: 'Ciclo con ambos tipos de ruido agregado: sibilancias y crepitantes.',
-    clinical_tip: 'Con la SpO2 de ejemplo baja, el semáforo combina ambos datos y puede pasar a ROJO.',
+    clinical_tip: 'Si el modelo lo marca patológico, el semáforo de la sesión lo muestra marcado como DEMO: no es de la persona.',
     color: '#8B5CF6',
     softColor: '#F5F3FF',
     icon: 'alert-octagon',
   },
   {
     id: 'neumonia',
-    name: 'Neumonía Consolidativa',
+    name: 'Neumonía (etiqueta ICBHI)',
     patient_id: 140,
     diagnosis: 'Neumonía (etiqueta ICBHI: Pneumonia)',
     sound_type: 'Ciclo con crepitantes (Crackles)',
     is_abnormal: 1,
     duration: '6.0s',
-    bpm: 102,
-    spo2: 89.0,
-    db: 41.0,
     description: 'Grabación de un paciente con neumonía según ICBHI; el ciclo tiene crepitantes.',
     clinical_tip: 'El modelo base solo dice normal o patológico; no identifica la enfermedad.',
     color: '#DC2626',
@@ -203,11 +185,11 @@ export const ClinicalAudioModal: React.FC<ClinicalAudioModalProps> = ({ visible,
     setSuccessMessage(null);
 
     try {
-      // Cargar el caso: vitales de ejemplo + análisis REAL del modelo base en el servidor
+      // Cargar el caso en la sesión actual: análisis REAL del modelo base en el servidor, marcado como demostración
       await injectClinicalDemo(sample.id);
 
       setSuccessMessage(
-        `¡Muestra del Paciente #${sample.patient_id} (${sample.name}) inyectada en el monitor principal!\n${sample.sound_type} · ${sample.bpm} LPM · ${sample.spo2}% SpO2`
+        `Caso del paciente ICBHI #${sample.patient_id} (${sample.name}) cargado en la sesión actual como demostración.\n${sample.sound_type}`
       );
     } catch {
       setSuccessMessage('No se pudo inyectar la muestra.');
@@ -245,7 +227,7 @@ export const ClinicalAudioModal: React.FC<ClinicalAudioModalProps> = ({ visible,
           <View style={styles.infoBanner}>
             <MaterialCommunityIcons name="information" size={16} color={Colors.primary} style={{ marginRight: 6 }} />
             <Text style={styles.infoBannerText}>
-              Selecciona una muestra real del conjunto de validación para reproducir su audio torácico e inyectar sus señales en el monitor y en el modelo de IA.
+              Grabaciones reales de otras personas (ICBHI 2017). Puedes escucharlas o analizarlas con el modelo base; el resultado queda marcado como DEMO en el paciente abierto.
             </Text>
           </View>
 
@@ -305,20 +287,10 @@ export const ClinicalAudioModal: React.FC<ClinicalAudioModalProps> = ({ visible,
                   {/* Descripción acústica y médica */}
                   <Text style={styles.descriptionText}>{item.description}</Text>
 
-                  {/* Signos vitales de EJEMPLO que acompañan al caso (no vienen de ICBHI) */}
-                  <Text style={styles.tipText}>Signos vitales de ejemplo para la demostración:</Text>
                   <View style={styles.metricsRow}>
                     <View style={styles.metricPill}>
-                      <MaterialCommunityIcons name="heart-pulse" size={13} color="#E11D48" />
-                      <Text style={styles.metricPillText}>{item.bpm} LPM</Text>
-                    </View>
-                    <View style={styles.metricPill}>
-                      <Ionicons name="water" size={13} color="#0284C7" />
-                      <Text style={styles.metricPillText}>{item.spo2}% SpO2</Text>
-                    </View>
-                    <View style={styles.metricPill}>
                       <Ionicons name="time-outline" size={13} color="#64748B" />
-                      <Text style={styles.metricPillText}>{item.duration}</Text>
+                      <Text style={styles.metricPillText}>Ciclo de {item.duration}</Text>
                     </View>
                   </View>
 
@@ -369,7 +341,7 @@ export const ClinicalAudioModal: React.FC<ClinicalAudioModalProps> = ({ visible,
                       ) : (
                         <>
                           <MaterialCommunityIcons name="lightning-bolt" size={16} color="#FFFFFF" style={{ marginRight: 5 }} />
-                          <Text style={styles.injectButtonText}>Inyectar en Monitor</Text>
+                          <Text style={styles.injectButtonText}>Analizar como DEMO</Text>
                         </>
                       )}
                     </TouchableOpacity>
@@ -448,7 +420,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   headerTag: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
     color: Colors.aiPurple,
     letterSpacing: 0.5,
@@ -460,7 +432,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   icbhiBadgeText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
     color: Colors.aiPurple,
   },
@@ -487,7 +459,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#DBEAFE',
   },
   infoBannerText: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#1E40AF',
     flex: 1,
     lineHeight: 16,
@@ -518,7 +490,7 @@ const styles = StyleSheet.create({
     color: '#065F46',
   },
   successToastText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '500',
     color: '#047857',
     lineHeight: 16,
@@ -584,7 +556,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   cardSub: {
-    fontSize: 11,
+    fontSize: 12,
     color: Colors.textSecondary,
     marginTop: 1,
   },
@@ -594,7 +566,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   badgePillText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
   },
   descriptionText: {
@@ -621,7 +593,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   metricPillText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: '#334155',
   },
@@ -635,7 +607,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   tipText: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#92400E',
     flex: 1,
     lineHeight: 15,
@@ -650,7 +622,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   playingBannerText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
     flex: 1,
     lineHeight: 15,
@@ -708,7 +680,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
   },
   footerSessionText: {
-    fontSize: 11,
+    fontSize: 12,
     color: Colors.textSecondary,
   },
   doneBtn: {

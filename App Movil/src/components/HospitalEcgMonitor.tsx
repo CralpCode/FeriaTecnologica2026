@@ -475,12 +475,12 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   leadText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '900',
     letterSpacing: 0.8,
   },
   specText: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#64748B',
     fontWeight: '600',
   },
@@ -504,7 +504,7 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   liveStreamingText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0.3,
   },
@@ -533,13 +533,13 @@ const styles = StyleSheet.create({
     borderTopColor: '#F1F5F9',
   },
   footerInfo: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#64748B',
     fontWeight: '600',
     letterSpacing: 0.5,
   },
   footerRhythm: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0.5,
   },

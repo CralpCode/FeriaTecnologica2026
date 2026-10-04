@@ -430,7 +430,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#2563EB',
   },
   exportBtnText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
     color: '#FFFFFF',
   },
@@ -452,7 +452,7 @@ const styles = StyleSheet.create({
     borderColor: '#FECACA',
   },
   feedbackText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
     flex: 1,
   },
