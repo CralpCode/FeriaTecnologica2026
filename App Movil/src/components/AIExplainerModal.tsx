@@ -112,9 +112,11 @@ export const AIExplainerModal: React.FC<{ visible: boolean; onClose: () => void 
 
             <Section icon="lungs" color={Colors.oxygen} title="3. El oído de los pulmones">
               <Text style={styles.p}>
-                {lungCnn
-                  ? 'Redes neuronales entrenadas con la base ICBHI 2017 (126 pacientes). Igual que en el corazón, solo se muestra lo que acierta de forma confiable:'
-                  : 'Las redes neuronales de pulmón están listas, pero aún se están entrenando con la base ICBHI 2017.'}
+                {!lungCnn
+                  ? 'Las redes neuronales de pulmón están listas, pero aún se están entrenando con la base ICBHI 2017.'
+                  : lung?.lung_sounds_cnn?.arquitectura === 'ast'
+                    ? 'Un modelo de audio preentrenado (AST, que aprendió con millones de sonidos de AudioSet) y ajustado con la base ICBHI 2017 (126 pacientes). Se midió con pacientes que nunca vio al entrenar. Igual que en el corazón, solo se muestra lo que acierta de forma confiable:'
+                    : 'Redes neuronales entrenadas con la base ICBHI 2017 (126 pacientes). Igual que en el corazón, solo se muestra lo que acierta de forma confiable:'}
               </Text>
               {lungCnn &&
                 ['crepitantes', 'sibilancias'].map((k) => {

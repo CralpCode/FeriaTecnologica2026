@@ -26,7 +26,9 @@ export function focusStates(recordings: (RecordingResult | null | undefined)[], 
     if (out[r.location]) continue; // ya hay una más reciente para ese foco
     const t = r.created_at ? Date.parse(r.created_at) : now;
     if (Number.isFinite(t) && now - t > WINDOW_MS) continue;
-    out[r.location] = r.result === 'normal' || r.result === 'anormal' ? r.result : 'repetir';
+    // Sin latidos/respiración claros (aviso de colocación) el foco se marca para repetir, aunque el clasificador diga normal
+    const misplaced = (r.details as any)?.colocacion?.ok === false;
+    out[r.location] = (r.result === 'normal' || r.result === 'anormal') && !misplaced ? r.result : 'repetir';
   }
   for (const f of FOCUS_ORDER[mode]) out[f] = out[f] || 'pendiente';
   return out;

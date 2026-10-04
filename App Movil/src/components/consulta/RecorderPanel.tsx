@@ -63,7 +63,7 @@ export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: Auscultati
   const elapsed = recordingHere && recordingStartedAt ? (now - recordingStartedAt) / 1000 : 0;
   const analyzing = recordingHere && elapsed >= RECORDING_SECONDS;
   const stage = armedHere && phase === 'armed' ? 1 : recordingHere ? (analyzing ? 3 : 2) : result ? 4 : 0;
-  const retry = result?.result === 'calidad_insuficiente';
+  const retry = result?.result === 'calidad_insuficiente' || result?.details?.colocacion?.ok === false;
 
   const arm = async () => {
     setError(null); setArming(true);
@@ -308,6 +308,12 @@ export const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) =>
         <View style={styles.waveBox}>
           <Waveform url={apiService.recordingAudioUrl(result.recording_id)} mode={result.mode} tint={t.fg} seconds={result.duration_s} />
         </View>
+      )}
+
+      {result.details?.colocacion?.ok === false && (
+        <Banner tone="warning" icon="locate-outline" style={{ marginTop: space.md, marginBottom: 0 }}
+                title={`No se detectaron ${result.details.colocacion.que} claros`}
+                text="¿El estetoscopio está en el foco correcto y con buen contacto? Conviene repetir esta grabación." />
       )}
 
       {hasProb ? (

@@ -18,6 +18,7 @@ import { PlayButton } from '../PlayButton';
 import { ListeningFilterBar } from '../ListeningFilterBar';
 import { NewPatientModal } from '../NewPatientModal';
 import { useStepAction } from './stepAction';
+import { NotesCard } from './NotesCard';
 
 const SEVERITY = { critical: { label: 'Crítica', tone: 'danger' }, caution: { label: 'Precaución', tone: 'warning' }, info: { label: 'Informativa', tone: 'info' } } as const;
 const modeOf = (r: RecordingResult): AuscultationMode => (r.mode === 'pulmon' ? 'pulmon' : 'corazon');
@@ -123,6 +124,8 @@ export const ResultStep: React.FC<{
         </View>
       )}
       {assessment && <AssessmentView assessment={assessment} showSummary={false} onGoToStep={onGoToStep} />}
+
+      <NotesCard sessionId={currentSessionId} />
 
       {alerts.length > 0 && (
         <Card>

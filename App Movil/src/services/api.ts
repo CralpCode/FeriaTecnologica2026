@@ -208,6 +208,12 @@ class ApiService {
     return this.request(archived ? '/api/history?archived=true' : '/api/history');
   }
 
+  /** Estado del respaldo automático del servidor (Backend/backup.py). */
+  getBackupStatus(): Promise<{ activo: boolean; cada_min: number; destino: string;
+    ultimo: { hora: string; copias_guardadas: number } | null; error: { hora: string; error: string } | null }> {
+    return this.request('/api/backup/status');
+  }
+
   /** Oculta un paciente de las listas. No borra grabaciones, informes ni alertas. */
   archiveSession(sessionId: string): Promise<{ session_id: string; archived: boolean }> {
     return this.request(`/api/sessions/${encodeURIComponent(sessionId)}/archive`, { method: 'POST' });

@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text } from './ui/Text';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useVitals } from '../context/VitalsContext';
 import { useLayout } from '../hooks/useLayout';
-import { patientLabel, isNamedPatient } from '../services/consulta';
+import { patientLabel, isNamedPatient, relativeTime } from '../services/consulta';
+import { apiService } from '../services/api';
 import { color, font, radius, space, touch, weight } from '../theme/tokens';
 import { DeviceConnectionModal } from './DeviceConnectionModal';
 import { ClinicalAudioModal } from './ClinicalAudioModal';
@@ -25,6 +26,18 @@ export const Header: React.FC<HeaderProps> = ({ onNewPatient }) => {
   const [explainerVisible, setExplainerVisible] = useState(false);
   const [newVisible, setNewVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [backupText, setBackupText] = useState<{ text: string; ok: boolean } | null>(null);
+
+  // Estado del respaldo automático: se consulta al abrir el menú
+  useEffect(() => {
+    if (!menuVisible) return;
+    apiService.getBackupStatus().then((b) => {
+      if (b.error) setBackupText({ text: `Respaldo falló ${relativeTime(b.error.hora)}`, ok: false });
+      else if (!b.activo) setBackupText({ text: 'Respaldo automático apagado', ok: false });
+      else if (b.ultimo) setBackupText({ text: `Último respaldo ${relativeTime(b.ultimo.hora)}`, ok: true });
+      else setBackupText({ text: 'Primer respaldo en un minuto', ok: true });
+    }).catch(() => setBackupText(null));
+  }, [menuVisible]);
   const named = isNamedPatient(currentSessionId);
   const demo = connectedType === 'demo_icbhi';
 
@@ -77,10 +90,17 @@ export const Header: React.FC<HeaderProps> = ({ onNewPatient }) => {
       <Modal visible={menuVisible} transparent animationType="fade" onRequestClose={() => setMenuVisible(false)}>
         <Pressable style={styles.menuBackdrop} onPress={() => setMenuVisible(false)}>
           <View style={styles.menu}>
-            <View style={styles.menuStatus}>
+            <View style={[styles.menuStatus, !!backupText && { borderBottomWidth: 0, marginBottom: 0, paddingBottom: 2 }]}>
               <View style={[styles.statusDot, { backgroundColor: isBackendOnline ? color.success : color.danger }]} />
               <Text style={styles.menuStatusText}>{isBackendOnline ? 'Servidor en línea' : 'Sin conexión con el servidor'}</Text>
             </View>
+            {backupText && (
+              <View style={[styles.menuStatus, { paddingTop: 2 }]}>
+                <Ionicons name={backupText.ok ? 'cloud-done-outline' : 'cloud-offline-outline'} size={14}
+                          color={backupText.ok ? color.success : color.danger} />
+                <Text style={[styles.menuStatusText, !backupText.ok && { color: color.danger }]}>{backupText.text}</Text>
+              </View>
+            )}
             <MenuItem icon="hardware-chip-outline" label="Dispositivo y servidor" onPress={() => openFromMenu(() => setDeviceVisible(true))} />
             <MenuItem icon="flask-outline" label="Banco de pruebas (casos ICBHI)" onPress={() => openFromMenu(() => setDemoVisible(true))} />
             <MenuItem icon="information-circle-outline" label="¿Cómo funciona la IA?" onPress={() => openFromMenu(() => setExplainerVisible(true))} />

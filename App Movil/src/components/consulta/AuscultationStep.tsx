@@ -54,7 +54,8 @@ export const AuscultationStep: React.FC<{ mode: AuscultationMode; onNext: () => 
     lastSeen.current = lastResult.recording_id;
     if (lastResult.recording_id.startsWith('demo_') || !lastResult.location) return;
     if ((lastResult.mode === 'pulmon' ? 'pulmon' : 'corazon') !== mode) return;
-    const ok = lastResult.result === 'normal' || lastResult.result === 'anormal';
+    const ok = (lastResult.result === 'normal' || lastResult.result === 'anormal')
+      && (lastResult.details as any)?.colocacion?.ok !== false;   // sin latidos claros: se queda para repetir
     const next = ok ? nextFocus(mode, focusStates([lastResult, ...recordings], mode)) : (lastResult.location as AuscultationFocus);
     if (next) { setFocus(next); setView(viewOf(next)); }
   }, [lastResult, recordings, mode]);

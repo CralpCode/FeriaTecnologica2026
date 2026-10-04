@@ -22,6 +22,7 @@
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/react": "~19.3.0",
     "typescript": "~6.0.3"
   },
@@ -29,7 +30,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "e2e": "bash e2e/run.sh"
   },
   "private": true
 }

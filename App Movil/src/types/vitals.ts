@@ -109,6 +109,8 @@ export interface PatientContext {
   altitude_m: number | null;
   symptoms: Record<'dyspnea' | 'chest_pain' | 'syncope' | 'cyanosis' | 'confusion' | 'severe_breathlessness' | 'cough' | 'fever' | 'wheeze' | 'orthopnea' | 'edema', boolean | null>;
   history: Record<'asthma' | 'copd' | 'smoking', boolean | null>;
+  /** Notas libres del médico (van al informe; no las usan las reglas ni la IA). */
+  notes?: string | null;
 }
 
 export interface ClinicalAssessment {
@@ -146,6 +148,8 @@ export interface RecordingDetails {
   modelo_base?: { prediction: string; probability_abnormal: number; model_name: string; score_icbhi: number };
   /** Presente si el servidor corrigió el audio con la respuesta medida de la pieza (fantoma). */
   ecualizacion?: { perfil: string; bandas_corregidas: number; max_refuerzo_db: number; relativa_a_referencia?: boolean };
+  /** Aviso de colocación (Backend/ml/placement.py): si se oyen latidos con ritmo. No cambia el resultado. */
+  colocacion?: { periodicidad: number; umbral: number; ok: boolean; que: string };
 }
 
 export type TriageLevel = 'rojo' | 'amarillo' | 'verde' | 'gris';
@@ -235,7 +239,8 @@ export interface HeartModelInfo {
 }
 
 export interface LungModelsInfo {
-  lung_sounds_cnn?: { loaded: boolean; metricas_prueba?: Record<string, any> };
+  /** Modelo de crepitantes/sibilancias en uso: 'ast' (preentrenado con AudioSet) o 'cnn'. */
+  lung_sounds_cnn?: { loaded: boolean; metricas_prueba?: Record<string, any>; arquitectura?: 'ast' | 'cnn' };
   lung_disease_cnn?: { loaded: boolean; metricas_prueba?: Record<string, any>; mostrar?: boolean };
   modelo_base?: { loaded: boolean; model_name?: string; puntaje_icbhi_reportado?: number; extractor_listo?: boolean };
 }
