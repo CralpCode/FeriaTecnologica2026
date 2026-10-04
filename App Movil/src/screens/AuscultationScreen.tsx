@@ -105,8 +105,6 @@ export const AuscultationScreen: React.FC = () => {
         </Text>
       </View>
 
-      <ClinicalAssessmentPanel />
-
       {/* 0. Corazón o pulmones */}
       <View style={styles.modeRow}>
         {(['corazon', 'pulmon'] as AuscultationMode[]).map((m) => (
@@ -232,6 +230,9 @@ export const AuscultationScreen: React.FC = () => {
           <View>
       {/* 3. Resultado */}
       {lastResult && <ResultCard result={lastResult} />}
+
+      {/* 4. Valoración orientativa (síntomas, edad, reposo): al lado de la grabación en pantallas grandes */}
+      <ClinicalAssessmentPanel />
 
       {/* Historial */}
       {recordings.length > 0 && (
