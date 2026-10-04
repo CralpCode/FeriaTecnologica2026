@@ -1198,6 +1198,20 @@ async def create_session_report(session_id: str):
             "pdf_url": f"/api/reports/{report_id}/pdf", "content": content}
 
 
+@app.get("/api/reports")
+def list_reports(session_id: Optional[str] = Query(None)):
+    return database.list_reports(session_id=session_id)
+
+
+@app.get("/api/history")
+def sessions_history(limit: int = Query(100)):
+    """Historial por paciente (sesión), con el nivel de triaje actual de cada una."""
+    rows = database.get_sessions_overview(limit)
+    for r in rows:
+        r["triaje"] = triage.evaluate(r["session_id"])["nivel"]
+    return rows
+
+
 @app.get("/api/reports/{report_id}/pdf")
 def get_report_pdf(report_id: int):
     rep = database.get_report(report_id)

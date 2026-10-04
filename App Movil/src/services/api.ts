@@ -2,7 +2,7 @@ import { API_CONFIG, getSessionId } from '../config/api';
 import {
   VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange, AcousticAnalysisResult,
   AuscultationFocus, AuscultationMode, RecordingResult, ClinicalAlert, FocusGuide, HeartModelInfo,
-  SessionReport, TriageResult,
+  SessionReport, TriageResult, SessionOverview, ReportItem, LungModelsInfo,
 } from '../types/vitals';
 
 const ZERO_VITALS: VitalSigns = {
@@ -199,11 +199,35 @@ class ApiService {
     });
   }
 
+  getHistory(): Promise<SessionOverview[]> {
+    return this.request('/api/history');
+  }
+
+  getSessionRecordings(sessionId: string): Promise<RecordingResult[]> {
+    return this.request(`/api/recordings?session_id=${encodeURIComponent(sessionId)}`);
+  }
+
+  listReports(sessionId: string): Promise<ReportItem[]> {
+    return this.request(`/api/reports?session_id=${encodeURIComponent(sessionId)}`);
+  }
+
+  recordingAudioUrl(recordingId: string): string {
+    return `${this.baseUrl}/api/recordings/${encodeURIComponent(recordingId)}/audio`;
+  }
+
+  absoluteUrl(path: string): string {
+    return `${this.baseUrl}${path}`;
+  }
+
+  createReportFor(sessionId: string): Promise<SessionReport> {
+    return this.request(`/api/reports/session/${encodeURIComponent(sessionId)}`, { method: 'POST' });
+  }
+
   getTriage(): Promise<TriageResult> {
     return this.request(`/api/triage/${encodeURIComponent(getSessionId())}`);
   }
 
-  getModelsInfo(): Promise<{ corazon: HeartModelInfo; pulmon: Record<string, { loaded: boolean }> }> {
+  getModelsInfo(): Promise<{ corazon: HeartModelInfo; pulmon: LungModelsInfo }> {
     return this.request('/api/models');
   }
 

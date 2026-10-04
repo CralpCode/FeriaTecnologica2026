@@ -13,10 +13,12 @@ import {
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useVitals } from '../context/VitalsContext';
+import { AIExplainerModal } from '../components/AIExplainerModal';
 
 export const AIAssistantScreen: React.FC = () => {
   const { vitals, chatMessages, isChatLoading, sendChatMessage } = useVitals();
   const [inputText, setInputText] = useState('');
+  const [showExplainer, setShowExplainer] = useState(false);
   const scrollViewRef = useRef<any>(null);
 
   const suggestions = [
@@ -55,6 +57,13 @@ export const AIAssistantScreen: React.FC = () => {
         contentContainerStyle={styles.messagesContent}
         showsVerticalScrollIndicator={true}
       >
+        <TouchableOpacity style={styles.explainerBtn} onPress={() => setShowExplainer(true)} activeOpacity={0.8}>
+          <MaterialCommunityIcons name="brain" size={18} color={Colors.aiPurple} />
+          <Text style={styles.explainerText}>¿Cómo funciona la IA de SpiroScan?</Text>
+          <Ionicons name="chevron-forward" size={16} color={Colors.aiPurple} />
+        </TouchableOpacity>
+        <AIExplainerModal visible={showExplainer} onClose={() => setShowExplainer(false)} />
+
         {/* Banner Superior de Estado en Vivo (Grid Adaptativo 2x2 Antidesbordamiento) */}
         <View style={styles.liveVitalsBanner}>
           <View style={styles.bannerHeaderRow}>
@@ -216,6 +225,18 @@ export const AIAssistantScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  explainerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.aiPurpleSoft,
+    borderColor: '#DDD6FE',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+  },
+  explainerText: { flex: 1, fontSize: 14, fontWeight: '800', color: Colors.aiPurple },
   container: {
     flex: 1,
     backgroundColor: '#F8FAFC',

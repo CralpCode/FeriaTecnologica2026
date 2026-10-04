@@ -4,6 +4,8 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useClinical } from '../context/ClinicalContext';
 import { apiService } from '../services/api';
+import { PlayButton } from '../components/PlayButton';
+import { AIExplainerModal } from '../components/AIExplainerModal';
 import { AuscultationFocus, AuscultationMode, FocusGuide, HeartModelInfo, RecordingResult } from '../types/vitals';
 
 const FOCI: Record<AuscultationMode, { id: AuscultationFocus; label: string }[]> = {
@@ -44,6 +46,7 @@ export const AuscultationScreen: React.FC = () => {
   const [guide, setGuide] = useState<FocusGuide | null>(null);
   const [model, setModel] = useState<HeartModelInfo | null>(null);
   const [lungReady, setLungReady] = useState<boolean | null>(null);
+  const [showExplainer, setShowExplainer] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState<string | null>(null);
@@ -58,7 +61,12 @@ export const AuscultationScreen: React.FC = () => {
     apiService.getHeartModelInfo().then(setModel).catch(() => setModel(null));
     apiService
       .getModelsInfo()
-      .then((m) => setLungReady(Object.values(m.pulmon || {}).some((x) => x.loaded)))
+      .then((m) => {
+        const p = m.pulmon || {};
+        // Hay análisis de pulmón si existe una CNN de pulmón o el modelo base con su extractor validado
+        setLungReady(!!(p.lung_sounds_cnn?.loaded || p.lung_disease_cnn?.loaded ||
+          (p.modelo_base?.loaded && p.modelo_base?.extractor_listo)));
+      })
       .catch(() => setLungReady(null));
   }, []);
 
@@ -85,6 +93,7 @@ export const AuscultationScreen: React.FC = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <AIExplainerModal visible={showExplainer} onClose={() => setShowExplainer(false)} />
       <View style={styles.disclaimer}>
         <Ionicons name="information-circle" size={16} color="#92400E" />
         <Text style={styles.disclaimerText}>
@@ -220,6 +229,7 @@ export const AuscultationScreen: React.FC = () => {
                 <Text style={styles.historyFocus}>{focusName(r.location)}</Text>
                 <Text style={[styles.historyResult, { color: s.color }]}>{s.label}</Text>
                 <Text style={styles.historyProb}>{pct(r.probability)}</Text>
+                {r.has_audio && <PlayButton url={apiService.recordingAudioUrl(r.recording_id)} />}
               </View>
             );
           })}
@@ -244,6 +254,9 @@ export const AuscultationScreen: React.FC = () => {
           {model.limitaciones?.map((l, i) => (
             <Text key={i} style={styles.modelNote}>• {l}</Text>
           ))}
+          <TouchableOpacity onPress={() => setShowExplainer(true)} style={{ marginTop: 8 }}>
+            <Text style={{ color: Colors.aiPurple, fontWeight: '800', fontSize: 13 }}>¿Cómo funciona la IA? →</Text>
+          </TouchableOpacity>
         </View>
       )}
     </ScrollView>
@@ -258,7 +271,10 @@ const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) => {
     <View style={[styles.card, { borderColor: s.color, backgroundColor: s.soft }]}>
       <View style={styles.cardHeader}>
         <MaterialCommunityIcons name={s.icon as any} size={22} color={s.color} />
-        <Text style={[styles.resultTitle, { color: s.color }]}>{s.label}</Text>
+        <Text style={[styles.resultTitle, { color: s.color, flex: 1 }]}>{s.label}</Text>
+        {result.recording_id && !result.recording_id.startsWith('demo_') && (
+          <PlayButton url={apiService.recordingAudioUrl(result.recording_id)} />
+        )}
       </View>
       <Text style={styles.statusText}>Foco {focusName(result.location)} · {result.duration_s?.toFixed(1)} s</Text>
       {result.probability !== null ? (

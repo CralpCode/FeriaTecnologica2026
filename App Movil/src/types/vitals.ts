@@ -126,6 +126,7 @@ export interface RecordingResult {
   duration_s: number;
   result: 'normal' | 'anormal' | 'calidad_insuficiente' | 'modelo_no_disponible' | 'error';
   details?: RecordingDetails;
+  has_audio?: boolean;
   reason?: string | null;
   probability: number | null;
   threshold: number | null;
@@ -149,6 +150,28 @@ export interface ClinicalAlert {
   acknowledged: boolean;
 }
 
+export interface SessionOverview {
+  session_id: string;
+  first_seen: string | null;
+  last_seen: string | null;
+  readings: number;
+  recordings: number;
+  abnormal_recordings: number;
+  alerts: number;
+  active_alerts: number;
+  reports: number;
+  triaje: TriageLevel;
+}
+
+export interface ReportItem {
+  report_id: number;
+  session_id: string;
+  created_at: string;
+  llm_generated: boolean;
+  pdf_url: string;
+  has_pdf: boolean;
+}
+
 export interface FocusGuide {
   foco: AuscultationFocus;
   nombre: string;
@@ -162,6 +185,13 @@ export interface HeartModelInfo {
   umbral?: number;
   metricas_prueba?: { auc: number; sensibilidad: number; especificidad: number; n: number };
   limitaciones?: string[];
+  caracterizacion_soplo?: Record<string, { mostrar: boolean; exactitud_balanceada: number; azar: number }> | null;
+}
+
+export interface LungModelsInfo {
+  lung_sounds_cnn?: { loaded: boolean; metricas_prueba?: Record<string, any> };
+  lung_disease_cnn?: { loaded: boolean; metricas_prueba?: Record<string, any>; mostrar?: boolean };
+  modelo_base?: { loaded: boolean; model_name?: string; puntaje_icbhi_reportado?: number; extractor_listo?: boolean };
 }
 
 export interface SessionReport {

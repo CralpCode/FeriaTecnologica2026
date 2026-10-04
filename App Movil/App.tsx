@@ -12,6 +12,7 @@ import { ChartsScreen } from './src/screens/ChartsScreen';
 import { AIAssistantScreen } from './src/screens/AIAssistantScreen';
 import { AuscultationScreen } from './src/screens/AuscultationScreen';
 import { AlertsScreen } from './src/screens/AlertsScreen';
+import { HistoryScreen } from './src/screens/HistoryScreen';
 
 const MainAppContent: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<TabScreen>('dashboard');
@@ -37,6 +38,7 @@ const MainAppContent: React.FC = () => {
         )}
         {currentTab === 'auscultation' && <AuscultationScreen />}
         {currentTab === 'alerts' && <AlertsScreen />}
+        {currentTab === 'history' && <HistoryScreen />}
         {currentTab === 'charts' && <ChartsScreen />}
         {currentTab === 'ai' && <AIAssistantScreen />}
       </View>

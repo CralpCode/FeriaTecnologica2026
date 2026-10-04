@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 
-export type TabScreen = 'dashboard' | 'auscultation' | 'alerts' | 'charts' | 'ai';
+export type TabScreen = 'dashboard' | 'auscultation' | 'alerts' | 'history' | 'charts' | 'ai';
 
 interface BottomNavBarProps {
   currentTab: TabScreen;
@@ -34,10 +34,10 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({ currentTab, onSelect
       badge: alertsCount > 0,
     },
     {
-      id: 'charts' as TabScreen,
-      label: 'Gráficas',
-      iconFamily: 'Ionicons',
-      iconName: 'analytics-outline',
+      id: 'history' as TabScreen,
+      label: 'Historial',
+      iconFamily: 'MaterialCommunityIcons',
+      iconName: 'folder-account-outline',
     },
     {
       id: 'ai' as TabScreen,

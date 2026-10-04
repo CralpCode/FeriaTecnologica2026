@@ -102,6 +102,7 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
             setLastResult(msg.data);
             setPhase('done');
             setRecordings((prev) => [msg.data, ...prev.filter((r) => r.recording_id !== msg.data.recording_id)]);
+            refresh();  // trae también has_audio y el estado guardado
             break;
         }
       };
