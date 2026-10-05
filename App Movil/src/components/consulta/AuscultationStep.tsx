@@ -47,7 +47,7 @@ export const AuscultationStep: React.FC<{ mode: AuscultationMode; onNext: () => 
   }, [mode]);
 
   // Al llegar un resultado de este modo se selecciona el siguiente foco pendiente (o el mismo si hay que repetir).
-  // No se prepara solo: el médico confirma con "Preparar".
+  // No se graba solo: el médico confirma con "Grabar" (el estetoscopio recibe la orden del servidor).
   const lastSeen = useRef(lastResult?.recording_id);
   useEffect(() => {
     if (!lastResult || lastResult.recording_id === lastSeen.current) return;

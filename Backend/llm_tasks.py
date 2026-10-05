@@ -70,7 +70,7 @@ GUIDE_COMMON = [
     "Ambiente en silencio; pedir a la persona que no hable durante la grabación.",
     "Contacto directo con la piel, sin ropa de por medio, con presión firme pero sin hundir.",
     "No mover el estetoscopio ni rozar el cable durante los 15 segundos.",
-    "Presionar el botón del dispositivo para iniciar; los LEDs indican grabando, enviando y resultado.",
+    "Tocar \"Grabar\" en la app: el estetoscopio empieza solo y graba 15 segundos; no hay que presionar nada.",
     "Si el resultado dice 'calidad insuficiente', revisar el contacto y repetir.",
 ]
 

@@ -15,6 +15,10 @@ interface ClinicalContextProps {
   armedLocation: AuscultationFocus | null;
   triage: TriageResult | null;
   recordingStartedAt: number | null;
+  /** El estetoscopio ya recibió la orden de grabar (preguntó al servidor). */
+  commandDelivered: boolean;
+  /** Hora en que se dio la orden (para avisar si el estetoscopio no responde). */
+  armedAt: number | null;
   isLiveConnected: boolean;
   armRecording: (location: AuscultationFocus, mode: AuscultationMode) => Promise<void>;
   acknowledgeAlert: (id: number) => Promise<void>;
@@ -34,6 +38,8 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [armedLocation, setArmedLocation] = useState<AuscultationFocus | null>(null);
   const [triage, setTriage] = useState<TriageResult | null>(null);
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
+  const [commandDelivered, setCommandDelivered] = useState(false);
+  const [armedAt, setArmedAt] = useState<number | null>(null);
   const [isLiveConnected, setIsLiveConnected] = useState(false);
   const sessionRef = useRef(currentSessionId);
   sessionRef.current = currentSessionId;
@@ -93,9 +99,15 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
           case 'RECORDING_ARMED':
             setPhase('armed');
             setArmedLocation(msg.data.location);
+            setCommandDelivered(false);
+            setArmedAt(Date.now());
+            break;
+          case 'RECORDING_COMMAND_DELIVERED':
+            setCommandDelivered(true);
             break;
           case 'RECORDING_STARTED':
             setPhase('recording');
+            setCommandDelivered(true);
             setRecordingStartedAt(Date.now());
             break;
           case 'TRIAGE_UPDATE':
@@ -139,6 +151,8 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
     if (connectedType === 'none') await connectViaServer();
     setArmedLocation(location);
     setPhase('armed');
+    setCommandDelivered(false);
+    setArmedAt(Date.now());
     setLastResult(null);
   }, [connectedType, connectViaServer]);
 
@@ -161,6 +175,8 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
         armedLocation,
         triage,
         recordingStartedAt,
+        commandDelivered,
+        armedAt,
         isLiveConnected,
         armRecording,
         acknowledgeAlert,

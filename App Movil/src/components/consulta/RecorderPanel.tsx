@@ -24,14 +24,15 @@ export const RESULT_STYLE: Record<string, { label: string; tone: Tone; icon: Rea
   error: { label: 'Error al analizar', tone: 'neutral', icon: 'close-circle' },
 };
 
-const STAGES = ['Preparar', 'Botón', 'Grabando', 'Analizando', 'Resultado'];
+const STAGES = ['Grabar', 'Estetoscopio', 'Grabando', 'Analizando', 'Resultado'];
 
 /**
- * Grabación de un foco: etapas, preparar, cuenta regresiva de 15 s y resultado.
- * La app no prepara sola: el médico toca "Preparar" y presiona el botón del estetoscopio.
+ * Grabación de un foco: etapas, orden de grabar, cuenta regresiva de 15 s y resultado.
+ * El estetoscopio no tiene botón: el médico toca "Grabar" y el ESP32 recibe la orden del servidor
+ * (GET /api/device/comando). La zona la pone el servidor según la orden.
  */
 export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: AuscultationFocus }> = ({ mode, focus }) => {
-  const { phase, armedLocation, lastResult, recordings, armRecording, recordingStartedAt } = useClinical();
+  const { phase, armedLocation, lastResult, recordings, armRecording, recordingStartedAt, commandDelivered, armedAt } = useClinical();
   const [guide, setGuide] = useState<FocusGuide | null>(null);
   const [showSteps, setShowSteps] = useState(false);
   const [showAsk, setShowAsk] = useState(false);
@@ -110,24 +111,24 @@ export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: Auscultati
           {stage === 2 || stage === 3 ? (
             <RecordingCountdown elapsed={elapsed} analyzing={analyzing} focus={FOCUS_INFO[focus].short} />
           ) : stage === 1 ? (
-            <Armed />
+            <Armed delivered={commandDelivered} armedAt={armedAt} focus={FOCUS_INFO[focus].short} />
           ) : (
             <View style={styles.idleRow}>
               <View style={styles.idleIcon}><MaterialCommunityIcons name="stethoscope" size={26} color={color.primary} /></View>
               <Text style={styles.stageText}>
                 {retry ? 'La grabación anterior no sirvió (ruido o poco contacto). Revisa el contacto con la piel y repite.'
                   : result ? 'Este foco ya tiene resultado. Puedes repetirlo si dudas de la grabación.'
-                  : <>Coloca el estetoscopio en <Text style={styles.strong}>{FOCUS_INFO[focus].short.toLowerCase()}</Text>, toca
-                    "Preparar" y luego presiona 1 s el botón del dispositivo.</>}
+                  : <>Coloca el estetoscopio en <Text style={styles.strong}>{FOCUS_INFO[focus].short.toLowerCase()}</Text> y toca
+                    "Grabar". El estetoscopio empieza solo; no hay que presionar nada.</>}
               </Text>
             </View>
           )}
         </View>
 
         <Button
-          label={stage === 1 ? 'Volver a preparar' : retry ? 'Repetir este foco' : result ? `Repetir · ${FOCUS_INFO[focus].short}`
-            : `Preparar grabación · ${FOCUS_INFO[focus].short}`}
-          icon={retry || result ? 'refresh' : 'radio-button-on'} size="lg" full onPress={arm} loading={arming}
+          label={stage === 1 ? 'Volver a enviar la orden' : retry ? 'Repetir este foco' : result ? `Repetir · ${FOCUS_INFO[focus].short}`
+            : `Grabar · ${FOCUS_INFO[focus].short}`}
+          icon={retry || result ? 'refresh' : 'mic'} size="lg" full onPress={arm} loading={arming}
           variant={result && !retry && stage !== 1 ? 'secondary' : 'primary'}
           disabled={recordingHere}
         />
@@ -196,10 +197,12 @@ const StageTrack: React.FC<{ stage: number }> = ({ stage }) => (
   </View>
 );
 
-/** Preparado: espera a que el médico presione el botón del estetoscopio. */
-const Armed: React.FC = () => {
+/** Orden enviada: espera a que el estetoscopio la reciba y empiece a grabar (sin botón). */
+const Armed: React.FC<{ delivered: boolean; armedAt: number | null; focus: string }> = ({ delivered, armedAt, focus }) => {
   const reduced = useReducedMotion();
   const v = useRef(new Animated.Value(0)).current;
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   useEffect(() => {
     if (reduced) return;
     const loop = Animated.loop(Animated.sequence([
@@ -209,15 +212,25 @@ const Armed: React.FC = () => {
     loop.start();
     return () => loop.stop();
   }, [reduced, v]);
+  const waited = armedAt ? (now - armedAt) / 1000 : 0;
+  const slow = !delivered && waited > 15;   // el ESP32 pregunta cada segundo: 15 s sin respuesta es raro
   return (
-    <View style={styles.idleRow}>
-      <Animated.View style={[styles.idleIcon, styles.armedIcon, { transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 1.1] }) }] }]}>
-        <Ionicons name="finger-print" size={26} color="#FFFFFF" />
-      </Animated.View>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.stageText, styles.strong]}>Listo. Presiona 1 s el botón del estetoscopio.</Text>
-        <Text style={styles.stageText}>Los LED se llenan de azul mientras graba 15 s. La preparación dura 2 minutos.</Text>
+    <View>
+      <View style={styles.idleRow}>
+        <Animated.View style={[styles.idleIcon, styles.armedIcon, { transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 1.1] }) }] }]}>
+          <Ionicons name={delivered ? 'checkmark' : 'radio-outline'} size={26} color="#FFFFFF" />
+        </Animated.View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.stageText, styles.strong]}>
+            {delivered ? 'El estetoscopio recibió la orden: empieza a grabar en un momento.' : 'Enviando la orden al estetoscopio…'}
+          </Text>
+          <Text style={styles.stageText}>Mantén el estetoscopio en {focus.toLowerCase()}, sin moverlo, y pide silencio.</Text>
+        </View>
       </View>
+      {slow && (
+        <Banner tone="warning" style={{ marginTop: space.md, marginBottom: 0 }} title="El estetoscopio no ha respondido"
+                text="Revisa que esté encendido y con internet. La orden sigue vigente 2 minutos; puedes volver a enviarla." />
+      )}
     </View>
   );
 };

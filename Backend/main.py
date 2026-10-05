@@ -147,6 +147,8 @@ class AudioStartInput(BaseModel):
     location: Optional[str] = ""
     sample_rate: int = Field(16000, ge=4000, le=48000)
     source: Literal["real", "simulated", "unknown"] = "unknown"
+    # Número de la orden de grabación que el ESP32 recibió (GET /api/device/comando); opcional (botón)
+    comando_id: Optional[str] = Field(None, max_length=32)
 
 class AudioArmInput(BaseModel):
     session_id: str
@@ -304,7 +306,7 @@ async def receive_telemetry(request: Request):
         await _publish_alert(alert)
     await _publish_triage_if_changed(sid)
     
-    return {"status": "ok", "saved": saved, "session_id": sid, "avisos": avisos}
+    return {"status": "ok", "saved": saved, "session_id": sid, "avisos": avisos, "comando": await _deliver_command()}
 
 @app.post("/api/sessions/{session_id}/disconnect")
 async def disconnect_session(session_id: str):
@@ -520,8 +522,29 @@ async def ack_alert(alert_id: int):
 
 # El ESP32 no sabe qué foco eligió la app: la app "arma" la próxima grabación (y vincula su sesión).
 # Una preparación sirve para UNA grabación y vence pronto, para que nada caiga en otro foco o paciente.
+# Sin botón en el estetoscopio, la preparación es además una ORDEN: el ESP32 pregunta cada segundo
+# (GET /api/device/comando, o en la respuesta de /api/telemetry) y, si hay orden, graba y envía el audio
+# con su comando_id. Con botón (firmware antiguo) sigue funcionando igual, sin comando_id.
 ARM_TTL_S = 120
+RECORDING_SECONDS = 15
 _armed: dict = {}
+
+
+def _pending_command() -> dict | None:
+    if not _armed or time.time() - _armed["at"] > ARM_TTL_S:
+        return None
+    return {"accion": "grabar", "id": _armed["comando_id"], "foco": _armed["location"], "modo": _armed["mode"],
+            "segundos": RECORDING_SECONDS, "vence_en_s": int(ARM_TTL_S - (time.time() - _armed["at"]))}
+
+
+async def _deliver_command() -> dict | None:
+    """Orden vigente para el dispositivo; la primera vez que se entrega se avisa a la app."""
+    cmd = _pending_command()
+    if cmd and not _armed.get("entregado"):
+        _armed["entregado"] = time.time()
+        await manager.broadcast({"type": "RECORDING_COMMAND_DELIVERED", "session_id": _armed["session_id"],
+                                 "data": {"location": _armed["location"], "comando_id": _armed["comando_id"]}})
+    return cmd
 
 
 class DeviceLinkInput(BaseModel):
@@ -546,8 +569,9 @@ async def audio_arm(payload: AudioArmInput):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     mode = audio_service.resolve_mode(loc, payload.mode)
+    _armed.clear()
     _armed.update({"session_id": _get_effective_session(payload.session_id), "location": loc, "mode": mode,
-                   "at": time.time()})
+                   "at": time.time(), "comando_id": uuid.uuid4().hex[:8], "entregado": None})
     _device_link.update({"session_id": _armed["session_id"], "at": time.time()})
     await manager.broadcast({"type": "RECORDING_ARMED", "session_id": _armed["session_id"],
                              "data": {"location": loc, "mode": mode}})
@@ -568,8 +592,19 @@ async def _after_classification(result: dict):
     await _publish_triage_if_changed(result["session_id"])
 
 
+@app.get("/api/device/comando")
+async def device_command(device_id: Optional[str] = Query(None, max_length=64)):
+    """El ESP32 pregunta si debe grabar. {"accion": "grabar", "id", "foco", "segundos"} o {"accion": null}."""
+    return await _deliver_command() or {"accion": None}
+
+
 @app.post("/api/audio/start")
 async def audio_start(payload: AudioStartInput):
+    if payload.comando_id and not payload.session_id:
+        cmd = _pending_command()
+        if not cmd or cmd["id"] != payload.comando_id:
+            # La orden venció o el médico eligió otra zona: no se guarda para no asignarla a una zona equivocada
+            raise HTTPException(status_code=409, detail="La orden de grabación ya no está vigente; espera una nueva.")
     armed = None if payload.session_id else _consume_armed()
     sid = armed["session_id"] if armed else _get_effective_session(
         payload.session_id or _linked_session() or payload.device_id)

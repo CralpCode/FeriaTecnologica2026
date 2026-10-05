@@ -33,9 +33,17 @@ function wav(pcm: Buffer): Buffer {
   return Buffer.concat([h, pcm]);
 }
 
-/** El ESP32: toma la preparación vigente y envía la grabación en bloques de 0.5 s. */
+/** El ESP32 (sin botón): pregunta si hay orden de grabar, graba y envía el audio en bloques de 0.5 s con su número. */
 async function simulateRecording(api: APIRequestContext) {
-  const start = await (await api.post('/api/audio/start', { data: { device_id: 'esp32', sample_rate: SR } })).json();
+  let cmd: any = { accion: null };
+  for (let i = 0; i < 20 && !cmd.accion; i++) {
+    cmd = await (await api.get('/api/device/comando?device_id=ESP32-BIO-01')).json();
+    if (!cmd.accion) await new Promise((r) => setTimeout(r, 500));
+  }
+  expect(cmd.accion).toBe('grabar');
+  const start = await (await api.post('/api/audio/start', {
+    data: { device_id: 'ESP32-BIO-01', sample_rate: SR, comando_id: cmd.id },
+  })).json();
   const pcm = heartbeatPcm();
   for (let i = 0; i < pcm.length; i += SR) {   // SR bytes = 0.5 s de audio de 16 bits
     await api.post(`/api/audio/chunk?recording_id=${start.recording_id}`, {
@@ -85,8 +93,8 @@ test('consulta completa: paciente, datos, pulso, corazón, resultado, notas, inf
 
   // 4. Corazón: foco aórtico, preparar y grabación simulada
   await button(page, /^Foco aórtico: pendiente/).click();
-  await button(page, /^Preparar grabación · Aórtico/).click();
-  await expect(page.getByText('Presiona 1 s el botón', { exact: false })).toBeVisible();
+  await button(page, /^Grabar · Aórtico/).click();
+  await expect(page.getByText('orden', { exact: false }).first()).toBeVisible();
   await simulateRecording(request);
   await expect(button(page, /^Foco aórtico: (grabado|repetir)/)).toBeVisible({ timeout: 60_000 });
 
