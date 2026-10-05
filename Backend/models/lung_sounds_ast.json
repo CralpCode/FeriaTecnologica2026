@@ -1,0 +1,90 @@
+{
+  "tarea": "crepitantes y sibilancias (ICBHI 2017)",
+  "arquitectura": "ast",
+  "preentrenado": "MIT/ast-finetuned-audioset-10-10-0.4593",
+  "salidas": [
+    "crepitantes",
+    "sibilancias"
+  ],
+  "metricas_prueba": {
+    "crepitantes": {
+      "sensibilidad": 0.6108597285067874,
+      "especificidad": 0.6963298139768728,
+      "auc": 0.7052703898591575,
+      "umbral": 0.5309184193611145,
+      "n_positivos": 884,
+      "mostrar": false,
+      "criterio_mostrar": "AUC y sensibilidad exclusivamente en validación",
+      "validacion": {
+        "auc": 0.691837908496732,
+        "sensibilidad": 0.6313725490196078
+      },
+      "umbral_grabacion": 0.844923734664917,
+      "grabacion_completa": {
+        "sensibilidad": 0.48756218905472637,
+        "especificidad": 0.7409326424870466,
+        "auc": 0.6752506895573944,
+        "grabaciones": 394,
+        "positivas": 201,
+        "mostrar": false
+      }
+    },
+    "sibilancias": {
+      "sensibilidad": 0.6221122112211221,
+      "especificidad": 0.8566387295985884,
+      "auc": 0.8376054191215329,
+      "umbral": 0.3871150314807892,
+      "n_positivos": 606,
+      "mostrar": true,
+      "criterio_mostrar": "AUC y sensibilidad exclusivamente en validación",
+      "validacion": {
+        "auc": 0.921224552708647,
+        "sensibilidad": 0.7979274611398963
+      },
+      "umbral_grabacion": 0.3704385459423065,
+      "grabacion_completa": {
+        "sensibilidad": 0.8413793103448276,
+        "especificidad": 0.7590361445783133,
+        "auc": 0.8665835756820386,
+        "grabaciones": 394,
+        "positivas": 145,
+        "mostrar": true
+      }
+    },
+    "icbhi": {
+      "sensibilidad": 0.49221183800623053,
+      "especificidad": 0.5531780994336061,
+      "puntaje": 0.5226949687199183,
+      "mostrar": true
+    }
+  },
+  "agregacion": "promedio de las 2 ventanas más altas de la grabación",
+  "features": {
+    "sr": 16000,
+    "frames": 512,
+    "num_mel_bins": 128,
+    "frame_shift_ms": 10,
+    "ventana_s": 5.12,
+    "salto_s": 2.56,
+    "media": -4.2677393,
+    "desviacion": 4.5689974
+  },
+  "particiones": {
+    "train": 3395,
+    "val": 630,
+    "test": 2873
+  },
+  "particion": {
+    "fuente": "oficial ICBHI 2017",
+    "pacientes_en_ambos_lados_movidos_a_prueba": [
+      "156",
+      "218"
+    ]
+  },
+  "entrenado": "2026-10-04T15:15:06",
+  "limitaciones": [
+    "Sugerencia de tamizaje, no diagnóstico.",
+    "ICBHI tiene pocos pacientes en varias clases; resultados orientativos.",
+    "Validado con grabaciones de estetoscopios clínicos, no con el dispositivo propio."
+  ]
+}

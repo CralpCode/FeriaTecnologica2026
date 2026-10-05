@@ -8,6 +8,8 @@ import threading
 from pathlib import Path
 
 import numpy as np
+
+from . import placement
 import soundfile as sf
 
 from . import features as F
@@ -113,10 +115,11 @@ def model_info() -> dict:
     }
 
 
-def classify_wav(path: str | Path, eq=None) -> dict:
+def classify_wav(path: str | Path, eq=None, check_placement: bool = False) -> dict:
     """Devuelve probabilidad de anormalidad, resultado y calidad de la señal.
 
-    eq: función (y, sr) -> y del ecualizador (ml/equalizer.py); se aplica tras el control de calidad."""
+    eq: función (y, sr) -> y del ecualizador (ml/equalizer.py); se aplica tras el control de calidad.
+    check_placement: agrega details.colocacion (aviso de si se oyen latidos; ml/placement.py), solo del dispositivo."""
     y, sr = sf.read(str(path), dtype="float32", always_2d=False)
     if y.ndim > 1:
         y = y.mean(axis=1)
@@ -135,6 +138,7 @@ def classify_wav(path: str | Path, eq=None) -> dict:
         return {"result": "calidad_insuficiente", "reason": "Señal casi en silencio: revisar contacto del estetoscopio",
                 "probability": None, "threshold": None, "quality": quality}
 
+    colocacion = placement.check(y, sr, "corazon") if check_placement else None
     if eq is not None:
         y = eq(y, sr)
     _load()
@@ -151,9 +155,12 @@ def classify_wav(path: str | Path, eq=None) -> dict:
         raise ValueError("Umbral del modelo inválido")
     quality["windows"] = int(len(window_probs))
     result = "anormal" if prob >= thr else "normal"
+    details = {"caracteristicas_soplo": describe_murmur(x)} if result == "anormal" else {}
+    if colocacion:
+        details["colocacion"] = colocacion
     return {
         "result": result,
-        "details": {"caracteristicas_soplo": describe_murmur(x)} if result == "anormal" else {},
+        "details": details,
         "reason": None,
         "probability": round(prob, 4),
         "probability_kind": "uncalibrated_model_score",

@@ -14,6 +14,7 @@ import os
 import time
 import json
 import math
+import re
 
 try:
     import requests
@@ -128,7 +129,24 @@ def normalizar_telemetria(packet):
 def formato_medida(packet, key, valid_key, unit):
     return f"{packet[key]:g} {unit}" if packet.get(valid_key) else "no disponible"
 
-def reenviar_al_backend(datos_json):
+def reenviar_orden(payload, ser, last_command_id):
+    """Forward each server order once; retries use a new server command ID."""
+    command = payload.get("comando") if isinstance(payload, dict) else None
+    if not isinstance(command, dict) or command.get("accion") != "grabar":
+        return last_command_id
+    command_id = command.get("id")
+    if not isinstance(command_id, str) or not re.fullmatch(r"[0-9a-fA-F]{8}", command_id):
+        return last_command_id
+    command_id = command_id.lower()
+    if command_id == last_command_id:
+        return last_command_id
+    message = f"REC_{command_id}\n".encode("ascii")
+    if ser.write(message) != len(message):
+        raise IOError("Serial recording command was not fully written")
+    return command_id
+
+
+def reenviar_al_backend(datos_json, on_response=None):
     try:
         if http_session:
             resp = http_session.post(
@@ -137,7 +155,11 @@ def reenviar_al_backend(datos_json):
                 headers={"Content-Type": "application/json"},
                 timeout=0.8
             )
-            return resp.status_code == 200
+            if resp.status_code != 200:
+                return False
+            if on_response:
+                on_response(resp.json())
+            return True
         else:
             req = urllib.request.Request(
                 BACKEND_URL,
@@ -146,7 +168,11 @@ def reenviar_al_backend(datos_json):
                 method="POST"
             )
             with urllib.request.urlopen(req, timeout=1.0) as resp:
-                return resp.status == 200
+                if resp.status != 200:
+                    return False
+                if on_response:
+                    on_response(json.loads(resp.read()))
+                return True
     except Exception:
         return False
 
@@ -169,6 +195,11 @@ def ejecutar_gateway(puerto_com, baudrate=115200):
                 print(f"[OK] ¡Conectado exitosamente al puerto {puerto_com}!")
                 print("[*] Esperando telemetría del ESP32...\n")
                 reintentos = 0
+                last_command_id = None
+
+                def deliver_command(payload):
+                    nonlocal last_command_id
+                    last_command_id = reenviar_orden(payload, ser, last_command_id)
 
                 while True:
                     linea = ser.readline().decode("latin1", errors="ignore").strip()
@@ -183,7 +214,7 @@ def ejecutar_gateway(puerto_com, baudrate=115200):
                             spo2 = formato_medida(packet, "spo2", "bloodOxygenValid", "%")
                             dedo = "SI" if packet.get("finger", False) else "NO"
 
-                            ok = reenviar_al_backend(json.dumps(packet, allow_nan=False))
+                            ok = reenviar_al_backend(json.dumps(packet, allow_nan=False), deliver_command)
                             estado_backend = "-> Backend OK" if ok else "-> Backend [Error/Offline]"
 
                             print(f"[SPIROSCAN] FC: {bpm} | SpO2: {spo2} | Origen: {packet['source']} | Dedo: {dedo} | {estado_backend}")

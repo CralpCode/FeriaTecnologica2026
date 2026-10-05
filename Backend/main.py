@@ -17,6 +17,7 @@ except ImportError:
     pass
 
 import database
+import backup
 import ai_engine
 import discovery
 import alerts
@@ -66,6 +67,29 @@ async def _announce_on_network():
 @app.on_event("shutdown")
 async def _stop_announcing():
     await discovery.stop()
+
+
+async def _backup_loop():
+    """Respaldo automático: el primero un minuto después de arrancar y luego cada SPIROSCAN_BACKUP_MIN minutos."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            await asyncio.to_thread(backup.run_backup)
+        except Exception as e:  # el servidor sigue funcionando aunque falle el respaldo; se avisa en la app
+            backup.record_error(e)
+            print(f"[RESPALDO] Falló: {e}")
+        await asyncio.sleep(max(1.0, backup.interval_min()) * 60)
+
+
+@app.on_event("startup")
+async def _start_backups():
+    if backup.interval_min() > 0:
+        app.state.backup_task = asyncio.create_task(_backup_loop())
+
+
+@app.get("/api/backup/status")
+def backup_status():
+    return backup.status()
 
 # El ESP32 no sabe qué sesión está abierta en la app: la app "vincula" su sesión y el backend
 # asigna a esa sesión la telemetría y el audio que lleguen del dispositivo sin session_id.
@@ -129,6 +153,8 @@ class AudioStartInput(BaseModel):
     location: Optional[str] = ""
     sample_rate: int = Field(16000, ge=4000, le=48000)
     source: Literal["real", "simulated", "unknown"] = "unknown"
+    # Número de la orden de grabación que el ESP32 recibió (GET /api/device/comando); opcional (botón)
+    comando_id: Optional[str] = Field(None, max_length=32)
 
 class AudioArmInput(BaseModel):
     session_id: str
@@ -167,8 +193,11 @@ def read_root():
 def list_active_sessions():
     """Lista todas las sesiones activas y registradas en el sistema."""
     db_sessions = database.get_distinct_sessions()
+    hidden = database.archived_ids()
     combined = {}
     for item in db_sessions:
+        if item["session_id"] in hidden:
+            continue
         sid = item["session_id"]
         combined[sid] = {
             "session_id": sid,
@@ -178,6 +207,8 @@ def list_active_sessions():
             "is_live": False
         }
     for sid, info in _sessions_cache.items():
+        if sid in hidden:
+            continue
         is_live = (time.time() - info["timestamp"]) <= 20
         if sid in combined:
             combined[sid]["is_live"] = is_live
@@ -281,7 +312,7 @@ async def receive_telemetry(request: Request):
         await _publish_alert(alert)
     await _publish_triage_if_changed(sid)
     
-    return {"status": "ok", "saved": saved, "session_id": sid, "avisos": avisos}
+    return {"status": "ok", "saved": saved, "session_id": sid, "avisos": avisos, "comando": await _deliver_command()}
 
 @app.post("/api/sessions/{session_id}/disconnect")
 async def disconnect_session(session_id: str):
@@ -503,8 +534,29 @@ async def ack_alert(alert_id: int):
 
 # El ESP32 no sabe qué foco eligió la app: la app "arma" la próxima grabación (y vincula su sesión).
 # Una preparación sirve para UNA grabación y vence pronto, para que nada caiga en otro foco o paciente.
+# Sin botón en el estetoscopio, la preparación es además una ORDEN: el ESP32 pregunta cada segundo
+# (GET /api/device/comando, o en la respuesta de /api/telemetry) y, si hay orden, graba y envía el audio
+# con su comando_id. Con botón (firmware antiguo) sigue funcionando igual, sin comando_id.
 ARM_TTL_S = 120
+RECORDING_SECONDS = 15
 _armed: dict = {}
+
+
+def _pending_command() -> dict | None:
+    if not _armed or time.time() - _armed["at"] > ARM_TTL_S:
+        return None
+    return {"accion": "grabar", "id": _armed["comando_id"], "foco": _armed["location"], "modo": _armed["mode"],
+            "segundos": RECORDING_SECONDS, "vence_en_s": int(ARM_TTL_S - (time.time() - _armed["at"]))}
+
+
+async def _deliver_command() -> dict | None:
+    """Orden vigente para el dispositivo; la primera vez que se entrega se avisa a la app."""
+    cmd = _pending_command()
+    if cmd and not _armed.get("entregado"):
+        _armed["entregado"] = time.time()
+        await manager.broadcast({"type": "RECORDING_COMMAND_DELIVERED", "session_id": _armed["session_id"],
+                                 "data": {"location": _armed["location"], "comando_id": _armed["comando_id"]}})
+    return cmd
 
 
 class DeviceLinkInput(BaseModel):
@@ -529,8 +581,9 @@ async def audio_arm(payload: AudioArmInput):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     mode = audio_service.resolve_mode(loc, payload.mode)
+    _armed.clear()
     _armed.update({"session_id": _get_effective_session(payload.session_id), "location": loc, "mode": mode,
-                   "at": time.time()})
+                   "at": time.time(), "comando_id": uuid.uuid4().hex[:8], "entregado": None})
     _device_link.update({"session_id": _armed["session_id"], "at": time.time()})
     await manager.broadcast({"type": "RECORDING_ARMED", "session_id": _armed["session_id"],
                              "data": {"location": loc, "mode": mode}})
@@ -551,8 +604,19 @@ async def _after_classification(result: dict):
     await _publish_triage_if_changed(result["session_id"])
 
 
+@app.get("/api/device/comando")
+async def device_command(device_id: Optional[str] = Query(None, max_length=64)):
+    """El ESP32 pregunta si debe grabar. {"accion": "grabar", "id", "foco", "segundos"} o {"accion": null}."""
+    return await _deliver_command() or {"accion": None}
+
+
 @app.post("/api/audio/start")
 async def audio_start(payload: AudioStartInput):
+    if payload.comando_id and not payload.session_id:
+        cmd = _pending_command()
+        if not cmd or cmd["id"] != payload.comando_id:
+            # La orden venció o el médico eligió otra zona: no se guarda para no asignarla a una zona equivocada
+            raise HTTPException(status_code=409, detail="La orden de grabación ya no está vigente; espera una nueva.")
     armed = None if payload.session_id else _consume_armed()
     sid = armed["session_id"] if armed else _get_effective_session(
         payload.session_id or _linked_session() or payload.device_id)
@@ -674,10 +738,29 @@ def list_reports(session_id: Optional[str] = Query(None)):
     return database.list_reports(session_id=session_id)
 
 
+@app.post("/api/sessions/{session_id}/archive")
+def archive_session(session_id: str):
+    """Oculta una sesión de las listas (historial y sesiones). No borra grabaciones, informes ni alertas."""
+    sid = _get_effective_session(session_id)
+    if not database.session_exists(sid):
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    database.archive_session(sid)
+    return {"session_id": sid, "archived": True}
+
+
+@app.post("/api/sessions/{session_id}/unarchive")
+def unarchive_session(session_id: str):
+    sid = _get_effective_session(session_id)
+    if not database.session_exists(sid):
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    database.unarchive_session(sid)
+    return {"session_id": sid, "archived": False}
+
+
 @app.get("/api/history")
-def sessions_history(limit: int = Query(100)):
-    """Historial por paciente (sesión), con el nivel de triaje actual de cada una."""
-    rows = database.get_sessions_overview(limit)
+def sessions_history(limit: int = Query(100), archived: bool = Query(False)):
+    """Historial por paciente (sesión), con el nivel de triaje actual de cada una. archived=true: las archivadas."""
+    rows = database.get_sessions_overview(limit, archived=archived)
     for r in rows:
         r["triaje"] = triage.evaluate(r["session_id"])["nivel"]
     return rows

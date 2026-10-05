@@ -98,3 +98,8 @@ tools/spo2/documentacion/*.pdf
 
 # Respaldos locales de SQLite y sus archivos auxiliares
 *.db.*
+
+# Modelo AST de pulmón (343 MB): supera el límite de GitHub; se regenera con IA/train_lung_ast.py
+IA/models/lung_sounds_ast.pt
+Backend/models/lung_sounds_ast.pt
+IA/models/lung_sounds_cnn_oficial.pt

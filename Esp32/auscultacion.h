@@ -24,6 +24,7 @@
 #include <ESPmDNS.h>
 #include <driver/i2s.h>
 #include <Adafruit_NeoPixel.h>
+#include "recording_command.h"
 
 #if __has_include("spiroscan_config.h")
 #include "spiroscan_config.h"
@@ -71,6 +72,24 @@ static unsigned long ausc_telem_queued_ms = 0;
 static volatile bool ausc_telem_pending = false;
 static portMUX_TYPE ausc_telem_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t ausc_telem_task = nullptr;
+static RecordingCommand ausc_command;
+static portMUX_TYPE ausc_command_mux = portMUX_INITIALIZER_UNLOCKED;
+static void ausc_receive_command(const String& body);
+
+static bool ausc_queue_recording_id(const String& id) {
+  portENTER_CRITICAL(&ausc_command_mux);
+  bool queued = ausc_command.queue("grabar", id.c_str());
+  portEXIT_CRITICAL(&ausc_command_mux);
+  return queued;
+}
+
+static String ausc_take_recording_command() {
+  char id[9] = {};
+  portENTER_CRITICAL(&ausc_command_mux);
+  ausc_command.take(id);
+  portEXIT_CRITICAL(&ausc_command_mux);
+  return String(id);
+}
 
 static bool ausc_is_https() {
   return ausc_server_base.startsWith("https://");
@@ -195,7 +214,8 @@ static void ausc_telemetry_task(void*) {
     ausc_http_begin(http, tls, plain, url);
     http.addHeader("Content-Type", "application/json");
     int code = http.POST((uint8_t*)json, strlen(json));
-    http.getString();  // vaciar la respuesta para poder reutilizar la conexion
+    String response = http.getString();
+    if (code == 200) ausc_receive_command(response);
     open = true;
     if (code != 200) {
       Serial.printf("[NET] Telemetria no enviada (HTTP %d)\r\n", code);
@@ -225,6 +245,21 @@ static String ausc_json_field(const String& body, const char* key) {
   i += k.length();
   int j = body.indexOf('"', i);
   return j > i ? body.substring(i, j) : "";
+}
+
+static void ausc_receive_command(const String& body) {
+  // Scope fields to the command object (never to the telemetry/session object).
+  int start = body.indexOf("\"comando\":");
+  if (start < 0) return;
+  start += 10;
+  while (start < (int)body.length() && body[start] == ' ') ++start;
+  if (start >= (int)body.length() || body[start] != '{') return;
+  int end = body.indexOf('}', start);
+  if (end < 0) return;
+  String command = body.substring(start, end + 1);
+  if (ausc_json_field(command, "accion") == "grabar") {
+    ausc_queue_recording_id(ausc_json_field(command, "id"));
+  }
 }
 
 // ------------------------------------------------------------------------------
@@ -261,7 +296,7 @@ static void ausc_upload_task(void*) {
 // ------------------------------------------------------------------------------
 // Inicio / fin de grabacion
 // ------------------------------------------------------------------------------
-bool ausc_start() {
+bool ausc_start(const String& command_id = "") {
   if (ausc_state == AUSC_RECORDING || ausc_state == AUSC_PROCESSING) return false;
   if (!ausc_wifi_ready() || !ausc_server_known()) {
     Serial.println(ausc_wifi_ready()
@@ -292,7 +327,9 @@ bool ausc_start() {
   HTTPClient http;
   ausc_http_begin(http, tls, plain, ausc_server() + "/api/audio/start");
   http.addHeader("Content-Type", "application/json");
-  String body = String("{\"device_id\":\"") + DEVICE_ID + "\",\"sample_rate\":" + AUSC_SAMPLE_RATE + ",\"source\":\"real\"}";
+  String body = String("{\"device_id\":\"") + DEVICE_ID + "\",\"sample_rate\":" + AUSC_SAMPLE_RATE + ",\"source\":\"real\"";
+  if (command_id.length()) body += String(",\"comando_id\":\"") + command_id + "\"";
+  body += "}";
   int code = http.POST(body);
   String resp = http.getString();
   http.end();

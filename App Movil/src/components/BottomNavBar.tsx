@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { Text } from './ui/Text';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { color as T } from '../theme/tokens';
@@ -48,7 +49,7 @@ export const BottomNavBar: React.FC<NavProps> = ({ currentTab, onSelectTab, hasA
             <Text
               style={[
                 styles.tabLabel,
-                { color: isActive ? tabColor(tab.id) : Colors.textSecondary, fontWeight: isActive ? '800' : '600' },
+                { color: isActive ? tabColor(tab.id) : T.textSecondary, fontWeight: isActive ? '800' : '500' },
               ]}
             >
               {tab.label}
@@ -84,7 +85,7 @@ const styles = StyleSheet.create({
     position: 'relative',
     cursor: 'pointer' as any,
   },
-  tabButtonActive: { backgroundColor: Colors.background, borderRadius: 12 },
+  tabButtonActive: { backgroundColor: T.primarySoft, borderRadius: 12 },
   iconContainer: { position: 'relative', marginBottom: 3 },
   alertBadge: {
     position: 'absolute',

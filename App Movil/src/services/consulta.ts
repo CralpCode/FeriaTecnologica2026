@@ -26,7 +26,9 @@ export function focusStates(recordings: (RecordingResult | null | undefined)[], 
     if (out[r.location]) continue; // ya hay una más reciente para ese foco
     const t = r.created_at ? Date.parse(r.created_at) : now;
     if (Number.isFinite(t) && now - t > WINDOW_MS) continue;
-    out[r.location] = r.result === 'normal' || r.result === 'anormal' ? r.result : 'repetir';
+    // Sin latidos/respiración claros (aviso de colocación) el foco se marca para repetir, aunque el clasificador diga normal
+    const misplaced = (r.details as any)?.colocacion?.ok === false;
+    out[r.location] = (r.result === 'normal' || r.result === 'anormal') && !misplaced ? r.result : 'repetir';
   }
   for (const f of FOCUS_ORDER[mode]) out[f] = out[f] || 'pendiente';
   return out;
@@ -69,3 +71,17 @@ export const isNamedPatient = (sessionId: string) => !/^(pc|movil|apk|sess)_[a-z
 /** Código legible del paciente: "p017_ab12c" -> "P017". */
 export const patientLabel = (sessionId: string) =>
   isNamedPatient(sessionId) ? sessionId.replace(/_[a-z0-9]{5}$/, '').toUpperCase() : 'Sin identificar';
+
+/** Tiempo relativo corto: "hace 5 min", "hace 2 h", "ayer", "3 oct". */
+export function relativeTime(iso?: string | null, now = Date.now()): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const min = Math.round((now - t) / 60000);
+  if (min < 1) return 'ahora';
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  if (h < 48) return 'ayer';
+  return new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short' });
+}

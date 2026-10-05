@@ -11,6 +11,8 @@ import threading
 from pathlib import Path
 
 import numpy as np
+
+from . import placement
 import soundfile as sf
 
 from . import lung_baseline
@@ -37,19 +39,49 @@ def _load(name: str):
         return _cache[name]
 
 
+def _sounds_model():
+    """Modelo de crepitantes/sibilancias en uso: el AST preentrenado si está publicado; si no, la CNN."""
+    return _load("lung_sounds_ast") or _load("lung_sounds_cnn")
+
+
+def ast_features(y: np.ndarray, sr: int, f: dict):
+    """Ventanas de audio -> fbank Kaldi normalizado (ventanas, cuadros, 128), igual que IA/train_lung_ast.py."""
+    import torch
+    import torchaudio
+    w = torch.from_numpy(np.asarray(y, dtype=np.float32))
+    if sr != f["sr"]:
+        w = torchaudio.functional.resample(w, sr, f["sr"])
+    n, hop = int(round(f["ventana_s"] * f["sr"])), int(round(f["salto_s"] * f["sr"]))
+    starts = list(range(0, max(1, len(w) - n + 1), hop)) or [0]
+    out = []
+    for s in starts:
+        seg = w[s:s + n]
+        if len(seg) < n:   # se repite el audio hasta completar la ventana (como en el entrenamiento)
+            seg = seg.repeat(int(np.ceil(n / max(1, len(seg)))))[:n]
+        seg = seg - seg.mean()
+        fb = torchaudio.compliance.kaldi.fbank(seg.unsqueeze(0), htk_compat=True, sample_frequency=f["sr"],
+                                               use_energy=False, window_type="hanning", num_mel_bins=f["num_mel_bins"],
+                                               dither=0.0, frame_shift=f["frame_shift_ms"])
+        frames = f["frames"]
+        fb = fb[:frames] if fb.shape[0] >= frames else torch.nn.functional.pad(fb, (0, 0, 0, frames - fb.shape[0]))
+        out.append((fb - f["media"]) / (f["desviacion"] * 2))
+    return torch.stack(out)
+
+
 def model_info() -> dict:
     out = {}
     for name in ("lung_sounds_cnn", "lung_disease_cnn"):
-        m = _load(name)
+        m = _sounds_model() if name == "lung_sounds_cnn" else _load(name)
         out[name] = {"loaded": False} if m is None else {
             "loaded": True, "tarea": m[1].get("tarea"), "metricas_prueba": m[1].get("metricas_prueba"),
             "mostrar": m[1].get("mostrar", True), "limitaciones": m[1].get("limitaciones", []),
+            "arquitectura": m[1].get("arquitectura", "cnn"),
         }
     out["modelo_base"] = lung_baseline.model_info()
     return out
 
 
-def classify_wav(path: str | Path, eq=None) -> dict:
+def classify_wav(path: str | Path, eq=None, check_placement: bool = False) -> dict:
     """eq: función (y, sr) -> y del ecualizador (ml/equalizer.py); se aplica tras el control de calidad."""
     y, sr = sf.read(str(path), dtype="float32", always_2d=False)
     if y.ndim > 1:
@@ -69,9 +101,10 @@ def classify_wav(path: str | Path, eq=None) -> dict:
         return {**base, "result": "calidad_insuficiente", "details": {},
                 "reason": "Señal casi en silencio: revisar contacto del estetoscopio"}
 
+    colocacion = placement.check(y, sr, "pulmon") if check_placement else None   # inactivo si no separa
     if eq is not None:
         y = eq(y, sr)
-    sounds, disease = _load("lung_sounds_cnn"), _load("lung_disease_cnn")
+    sounds, disease = _sounds_model(), _load("lung_disease_cnn")
     # Modelo base del equipo (regresión logística): se usa solo, o como comparación si hay CNN
     baseline = lung_baseline.classify_audio(y, sr)
     if sounds is None and disease is None:
@@ -95,8 +128,9 @@ def classify_wav(path: str | Path, eq=None) -> dict:
 
     if sounds is not None:
         model, meta = sounds
+        xs = ast_features(y, sr, meta["features"]) if meta.get("arquitectura") == "ast" else x
         with torch.no_grad():
-            p = torch.sigmoid(model(x)).numpy()          # (ventanas, 2)
+            p = torch.sigmoid(model(xs)).numpy()         # (ventanas, 2)
         k = min(2, len(p))
         score = np.sort(p, axis=0)[-k:].mean(0)          # promedio de las 2 ventanas más altas
         found = {}
@@ -131,6 +165,8 @@ def classify_wav(path: str | Path, eq=None) -> dict:
 
     if baseline.get("estado") == "ok":
         details["modelo_base"] = baseline
+    if colocacion:
+        details["colocacion"] = colocacion
     if not usable_outputs:
         return {**base, "result": "indeterminado", "details": details,
                 "reason": "Ninguna salida del modelo cumple los criterios de uso; no se puede concluir normalidad"}

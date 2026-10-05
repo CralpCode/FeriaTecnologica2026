@@ -20,6 +20,8 @@ SOURCES = [
     {"id": "nhlbi_pneumonia", "title": "NHLBI: Pneumonia - Diagnosis", "url": "https://www.nhlbi.nih.gov/health/pneumonia/diagnosis"},
     {"id": "nhlbi_failure", "title": "NHLBI: Heart Failure - Diagnosis", "url": "https://www.nhlbi.nih.gov/health/heart-failure/diagnosis"},
     {"id": "nhs_dyspnea", "title": "NHS: Shortness of breath", "url": "https://www.nhs.uk/conditions/shortness-of-breath/"},
+    {"id": "circor_sites", "title": "PhysioNet: The CirCor DigiScope Phonocardiogram Dataset (puntos de auscultación por válvula)",
+     "url": "https://physionet.org/content/circor-heart-sound/1.0.3/"},
 ]
 
 
@@ -53,6 +55,8 @@ class ClinicalContext(ContextModel):
     altitude_m: float | None = Field(None, ge=-500, le=9000)
     symptoms: Symptoms = Field(default_factory=Symptoms)
     history: History = Field(default_factory=History)
+    # Notas libres del médico: van al informe, pero nunca a las reglas ni al modelo de lenguaje
+    notes: str | None = Field(None, max_length=2000)
 
 
 def recent_vitals(session_id: str) -> dict:
@@ -78,6 +82,36 @@ def is_demo(rec: dict) -> bool:
 
 def _evidence(rec: dict, text: str) -> list[str]:
     return [DEMO_NOTICE, text] if is_demo(rec) else [text]
+
+
+# Punto de auscultación de cada válvula (mismos focos que CirCor, la base con la que se entrenó la red del corazón)
+VALVE_BY_FOCUS = {
+    "AV": ("foco aórtico", "la válvula aórtica"),
+    "PV": ("foco pulmonar", "la válvula pulmonar"),
+    "TV": ("foco tricuspídeo", "la válvula tricúspide"),
+    "MV": ("foco mitral", "la válvula mitral (punta del corazón)"),
+}
+
+
+def _focus_lines(heart: list[dict]) -> list[str]:
+    """Descripción orientativa por foco: dónde salió anormal y qué válvula se ausculta mejor ahí.
+    Usa solo el foco y el resultado; la caracterización del soplo no se usa porque no pasó la validación."""
+    recorded = [f for f in VALVE_BY_FOCUS if any(r.get("location") == f for r in heart)]
+    abnormal = [f for f in VALVE_BY_FOCUS if any(r.get("location") == f and r.get("result") == "anormal" for r in heart)]
+    if not abnormal:
+        return []
+    lines = [f"Anormal en {VALVE_BY_FOCUS[f][0]} ({f}): es el punto donde mejor se ausculta {VALVE_BY_FOCUS[f][1]}."
+             for f in abnormal]
+    if len(abnormal) == 1:
+        lines.append(f"Solo en 1 de {len(recorded)} focos grabados.")
+    else:
+        lines.append(f"En {len(abnormal)} de {len(recorded)} focos grabados: un soplo fuerte puede oírse en varios focos; "
+                     "también puede deberse a ruido, por lo que conviene repetir.")
+    missing = [f for f in VALVE_BY_FOCUS if f not in recorded]
+    if missing:
+        lines.append("Focos sin grabar: " + ", ".join(missing) + ".")
+    lines.append("Orientativo: el foco no identifica qué válvula ni qué soplo; se requiere ecocardiograma.")
+    return lines
 
 
 def recent_recordings(session_id: str) -> list[dict]:
@@ -174,9 +208,14 @@ def assess(context: dict, vitals: dict, recordings: list[dict]) -> dict:
             finding("abnormal_heart_sound", "Sonido cardíaco anormal según modelo experimental", _evidence(r, f"Grabación {r.get('id', '')}, foco {r.get('location')}; puede corresponder a soplo u otra anormalidad acústica."))
     if any(r.get("result") == "anormal" for r in heart):
         possibility("Soplo a evaluar: puede ser inocente o asociarse a alteración estructural o valvular",
-                    ["Clasificador cardíaco con hallazgo acústico anormal; no identifica la causa."],
-                    ["Auscultación por personal de salud y ecocardiograma si está indicado."], ["nhlbi_valves"])
+                    ["Clasificador cardíaco con hallazgo acústico anormal; no identifica la causa."] + _focus_lines(heart),
+                    ["Auscultación por personal de salud y ecocardiograma si está indicado."], ["nhlbi_valves", "circor_sites"])
         steps.append("Solicitar valoración médica del hallazgo cardíaco; la red no distingue una valvulopatía específica.")
+    for r in heart + lungs:
+        col = (r.get("details") or {}).get("colocacion") or {}
+        if col.get("ok") is False:
+            steps.append(f"Repetir {r.get('location')}: no se detectaron {col.get('que', 'ritmos')} claros en la grabación; "
+                         "revisar la colocación del estetoscopio.")
 
     wheeze = symptoms["wheeze"] is True
     crackles = False
@@ -217,7 +256,8 @@ def assess(context: dict, vitals: dict, recordings: list[dict]) -> dict:
     return {"status": status, "summary": summary, "findings": findings, "possibilities": possibilities,
             "missing_data": missing, "limitations": limitations, "next_steps": list(dict.fromkeys(steps)),
             "urgent": urgent, "sources": SOURCES, "disease_probabilities": None,
-            "rules_version": RULES_VERSION, "vitals_used": vitals, "context": ctx,
+            "rules_version": RULES_VERSION, "vitals_used": vitals,
+            "context": {k: v for k, v in ctx.items() if k != "notes"},
             "recording_ids": [r.get("id") for r in recordings],
             "demo": any(is_demo(r) for r in recordings)}
 

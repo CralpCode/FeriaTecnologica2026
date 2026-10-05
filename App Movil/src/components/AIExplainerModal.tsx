@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { Modal, View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { Text } from './ui/Text';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useModalLayout } from '../hooks/useLayout';
@@ -60,6 +61,12 @@ export const AIExplainerModal: React.FC<{ visible: boolean; onClose: () => void 
               quién referir a un médico.
             </Text>
 
+            <View style={styles.parts}>
+              <Part icon="ear-hearing" color={Colors.heartRate} title="Oído" text="redes que escuchan" />
+              <Part icon="traffic-light" color={Colors.warning} title="Reglas" text="deciden el semáforo" />
+              <Part icon="message-text-outline" color={Colors.aiPurple} title="Voz" text="lo explica en palabras" />
+            </View>
+
             {!heart && !error && <ActivityIndicator color={Colors.primary} style={{ marginVertical: 16 }} />}
             {error && <Text style={styles.warn}>No se pudo consultar el servidor para mostrar los porcentajes.</Text>}
 
@@ -105,9 +112,11 @@ export const AIExplainerModal: React.FC<{ visible: boolean; onClose: () => void 
 
             <Section icon="lungs" color={Colors.oxygen} title="3. El oído de los pulmones">
               <Text style={styles.p}>
-                {lungCnn
-                  ? 'Redes neuronales entrenadas con la base ICBHI 2017 (126 pacientes). Igual que en el corazón, solo se muestra lo que acierta de forma confiable:'
-                  : 'Las redes neuronales de pulmón están listas, pero aún se están entrenando con la base ICBHI 2017.'}
+                {!lungCnn
+                  ? 'Las redes neuronales de pulmón están listas, pero aún se están entrenando con la base ICBHI 2017.'
+                  : lung?.lung_sounds_cnn?.arquitectura === 'ast'
+                    ? 'Un modelo de audio preentrenado (AST, que aprendió con millones de sonidos de AudioSet) y ajustado con la base ICBHI 2017 (126 pacientes). Se midió con pacientes que nunca vio al entrenar. Igual que en el corazón, solo se muestra lo que acierta de forma confiable:'
+                    : 'Redes neuronales entrenadas con la base ICBHI 2017 (126 pacientes). Igual que en el corazón, solo se muestra lo que acierta de forma confiable:'}
               </Text>
               {lungCnn &&
                 ['crepitantes', 'sibilancias'].map((k) => {
@@ -180,10 +189,22 @@ const Section: React.FC<{ icon: string; color: string; title: string; children: 
 }) => (
   <View style={styles.section}>
     <View style={styles.sectionHeader}>
-      <MaterialCommunityIcons name={icon as any} size={18} color={color} />
+      <View style={[styles.sectionIcon, { backgroundColor: `${color}14` }]}>
+        <MaterialCommunityIcons name={icon as any} size={18} color={color} />
+      </View>
       <Text style={styles.sectionTitle}>{title}</Text>
     </View>
     {children}
+  </View>
+);
+
+const Part: React.FC<{ icon: string; color: string; title: string; text: string }> = ({ icon, color, title, text }) => (
+  <View style={styles.part}>
+    <View style={[styles.partIcon, { backgroundColor: `${color}14` }]}>
+      <MaterialCommunityIcons name={icon as any} size={22} color={color} />
+    </View>
+    <Text style={styles.partTitle}>{title}</Text>
+    <Text style={styles.partText}>{text}</Text>
   </View>
 );
 
@@ -205,28 +226,38 @@ const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.55)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: Colors.background,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     maxHeight: '92%',
-    padding: 16,
+    padding: 20,
   },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  title: { flex: 1, fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
-  close: { padding: 6 },
-  lead: { fontSize: 14, color: Colors.textPrimary, lineHeight: 21, marginBottom: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  title: { flex: 1, fontSize: 20, fontWeight: '800', color: Colors.textPrimary, letterSpacing: -0.3 },
+  close: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
+  lead: { fontSize: 15, color: Colors.textPrimary, lineHeight: 22, marginBottom: 14 },
+  parts: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  part: {
+    flex: 1, alignItems: 'center', backgroundColor: Colors.card, borderRadius: 16, borderWidth: 1, borderColor: Colors.border,
+    paddingVertical: 12, paddingHorizontal: 6, boxShadow: '0px 1px 2px rgba(15, 23, 42, 0.05)',
+  },
+  partIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  partTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  partText: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center' },
   b: { fontWeight: '800' },
   warn: { fontSize: 12, color: Colors.danger, marginBottom: 10 },
   section: {
     backgroundColor: Colors.card,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.border,
-    padding: 12,
-    marginBottom: 10,
+    padding: 16,
+    marginBottom: 12,
+    boxShadow: '0px 1px 2px rgba(15, 23, 42, 0.05)',
   },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  sectionTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
-  p: { fontSize: 13, color: Colors.textSecondary, lineHeight: 19, marginBottom: 6 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  sectionIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  sectionTitle: { flex: 1, fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  p: { fontSize: 14, color: Colors.textSecondary, lineHeight: 21, marginBottom: 8 },
   small: { fontSize: 12, color: Colors.textMuted, marginTop: 4 },
   statsRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
   stat: { flex: 1, backgroundColor: Colors.backgroundSecondary, borderRadius: 10, padding: 10 },

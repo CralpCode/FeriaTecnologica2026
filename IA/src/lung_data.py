@@ -24,6 +24,8 @@ def rglob(root: Path, pattern: str):
             yield Path(dirpath) / name
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+# Pacientes que la lista oficial pone en ambos lados y se dejaron completos en prueba (ver load_icbhi)
+MOVED_TO_TEST: list[str] = []
 FILE_RE = re.compile(r"^(\d{3})_([0-9a-zA-Z]+)_(Tc|Al|Ar|Pl|Pr|Ll|Lr)_(sc|mc)_([A-Za-z0-9]+)\.wav$")
 
 # Agrupación de diagnósticos (asma: 1 solo paciente -> se descarta)
@@ -95,7 +97,11 @@ def _cycles(txt: Path) -> list[tuple[float, float, int, int]]:
     return cyc
 
 
-def load_icbhi(data_dir: Path = DATA_DIR) -> list[LungRecording]:
+def load_icbhi(data_dir: Path = DATA_DIR, overlap_to_test: bool = False) -> list[LungRecording]:
+    """
+    overlap_to_test: la lista oficial pone a los pacientes 156 y 218 en train Y test. Por defecto eso se rechaza
+    (fuga de datos). Con True, esos pacientes quedan completos en prueba y se anotan en MOVED_TO_TEST.
+    """
     diag = _diagnoses(data_dir)
     official = _official_split(data_dir)
     seen, recs = set(), []
@@ -110,6 +116,15 @@ def load_icbhi(data_dir: Path = DATA_DIR) -> list[LungRecording]:
         if split is None:
             raise ValueError(f"Falta partición oficial para {wav.name}: se requiere ICBHI_challenge_train_test.txt")
         recs.append(LungRecording(wav, pid, zone, device, d, split, _cycles(wav.with_suffix(".txt"))))
+    if overlap_to_test:
+        sides: dict[str, set] = {}
+        for r in recs:
+            sides.setdefault(r.patient, set()).add(r.split)
+        crossing = sorted(p for p, v in sides.items() if len(v) > 1)
+        for r in recs:
+            if r.patient in crossing:
+                r.split = "test"
+        MOVED_TO_TEST[:] = crossing
     patient_splits = {}
     for r in recs:
         if r.patient in patient_splits and patient_splits[r.patient] != r.split:

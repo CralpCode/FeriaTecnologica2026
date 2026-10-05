@@ -3,5 +3,11 @@
   "compilerOptions": {
     "strict": true
   },
-  "exclude": ["node_modules", "dist", "web-build"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "web-build",
+    "e2e",
+    "playwright.config.ts"
+  ]
 }

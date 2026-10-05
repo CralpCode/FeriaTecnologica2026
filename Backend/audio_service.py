@@ -11,12 +11,13 @@ import json
 import uuid
 import wave
 from datetime import datetime
+import os
 from pathlib import Path
 
 import database
 from ml import classifier, equalizer, lung
 
-REC_DIR = Path(__file__).resolve().parent / "recordings"
+REC_DIR = Path(os.getenv("SPIROSCAN_REC_DIR", Path(__file__).resolve().parent / "recordings"))
 REC_DIR.mkdir(exist_ok=True)
 
 MAX_BYTES = 16000 * 2 * 60  # 60 s a 16 kHz / 16 bit
@@ -114,7 +115,7 @@ def _classify_and_store(rec_id: str, wav: Path, duration: float, device: bool = 
         # Archivos subidos (casos demo, pruebas) ya vienen de estetoscopios clínicos: no se ecualizan
         profile = equalizer.profile_for(mode) if device else None
         eq = (lambda y, sr: equalizer.apply(y, sr, profile)) if profile else None
-        out = (lung if mode == "pulmon" else classifier).classify_wav(wav, eq=eq)
+        out = (lung if mode == "pulmon" else classifier).classify_wav(wav, eq=eq, check_placement=device)
         if eq is not None and out.get("result") not in ("calidad_insuficiente", None):
             out["details"] = {**(out.get("details") or {}), "ecualizacion": equalizer.describe(profile)}
         database.update_recording(

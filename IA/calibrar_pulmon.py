@@ -22,7 +22,6 @@ from src.lung_data import load_icbhi
 from train_lung import SOUND_LABELS, cached, split_train_val, youden
 
 ROOT = Path(__file__).resolve().parent
-META = ROOT / "models" / "lung_sounds_cnn.json"
 
 
 def recording_score(model, path) -> np.ndarray:
@@ -43,9 +42,14 @@ def metrics(y, s, t):
 
 
 def main():
-    model = torch.jit.load(str(ROOT / "models" / "lung_sounds_cnn.pt"), map_location="cpu").eval()
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model", default="lung_sounds_cnn")
+    name = ap.parse_args().model
+    META = ROOT / "models" / f"{name}.json"
+    model = torch.jit.load(str(ROOT / "models" / f"{name}.pt"), map_location="cpu").eval()
     meta = json.loads(META.read_text())
-    recs = [r for r in load_icbhi() if r.cycles]
+    recs = [r for r in load_icbhi(overlap_to_test=True) if r.cycles]
     groups = np.array([r.patient for r in recs])
     train_idx = np.array([i for i, r in enumerate(recs) if r.split == "train"])
     _, va = split_train_val(groups, train_idx, 42)           # misma validación que en el entrenamiento

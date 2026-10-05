@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native';
+import { View, StyleSheet, Platform, Animated, Easing } from 'react-native';
+import { Text } from './ui/Text';
 import Svg, { Path } from 'react-native-svg';
 
 export interface HospitalEcgMonitorProps {
@@ -62,7 +63,7 @@ export const HospitalEcgMonitor: React.FC<HospitalEcgMonitorProps> = ({
   }, [currentBpm]);
 
   const isLive = isLiveActive || currentBpm > 0;
-  const ecgColor = !isLive ? '#94A3B8' : isAlert ? '#DC2626' : currentBpm > 100 ? '#D97706' : '#E11D48';
+  const ecgColor = !isLive ? '#94A3B8' : isAlert ? '#DC2626' : currentBpm > 100 ? '#B45309' : '#1D4ED8';
 
   // Complejo electrocardiográfico fisiológico P-Q-R-S-T
   const getEcgY = (xNorm: number) => {
@@ -120,7 +121,7 @@ export const HospitalEcgMonitor: React.FC<HospitalEcgMonitorProps> = ({
       const h = canvas.height;
 
       // Fondo hospitalario suave con rejilla médica
-      ctx.fillStyle = '#FFF8F8';
+      ctx.fillStyle = '#F8FAFC';
       ctx.fillRect(0, 0, w, h);
 
       // Rejilla médica milimétrica (5mm menor, 25mm mayor)
@@ -130,7 +131,7 @@ export const HospitalEcgMonitor: React.FC<HospitalEcgMonitorProps> = ({
 
       for (let x = 0; x < w; x += gridMinor) {
         const isMajor = x % gridMajor === 0;
-        ctx.strokeStyle = isMajor ? '#FECDD3' : '#FFF1F2';
+        ctx.strokeStyle = isMajor ? '#E2E8F0' : '#EEF2F6';
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, h);
@@ -139,7 +140,7 @@ export const HospitalEcgMonitor: React.FC<HospitalEcgMonitorProps> = ({
 
       for (let y = 0; y < h; y += gridMinor) {
         const isMajor = y % gridMajor === 0;
-        ctx.strokeStyle = isMajor ? '#FECDD3' : '#FFF1F2';
+        ctx.strokeStyle = isMajor ? '#E2E8F0' : '#EEF2F6';
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(w, y);
@@ -270,7 +271,7 @@ export const HospitalEcgMonitor: React.FC<HospitalEcgMonitorProps> = ({
         <Path
           key={`vx-${x}`}
           d={`M ${x} 0 L ${x} ${MONITOR_HEIGHT}`}
-          stroke="#FECDD3"
+          stroke="#E2E8F0"
           strokeWidth={0.8}
         />
       );
@@ -280,7 +281,7 @@ export const HospitalEcgMonitor: React.FC<HospitalEcgMonitorProps> = ({
         <Path
           key={`hy-${y}`}
           d={`M 0 ${y} L ${w} ${y}`}
-          stroke="#FECDD3"
+          stroke="#E2E8F0"
           strokeWidth={0.8}
         />
       );
@@ -529,10 +530,10 @@ const styles = StyleSheet.create({
     height: MONITOR_HEIGHT,
     position: 'relative',
     overflow: 'hidden',
-    backgroundColor: '#FFF8F8',
+    backgroundColor: '#F8FAFC',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#FECDD3',
+    borderColor: '#E2E8F0',
   },
   monitorFooter: {
     flexDirection: 'row',

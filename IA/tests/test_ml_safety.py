@@ -84,6 +84,9 @@ class SafetyTests(unittest.TestCase):
             (p / "ICBHI_challenge_train_test.txt").write_text(f"{names[0]} train\n{names[1]} test\n")
             with self.assertRaisesRegex(ValueError, "Fuga"):
                 load_icbhi(p)
+            # Solo con la opción explícita: el paciente que cruza queda completo en prueba
+            recs = load_icbhi(p, overlap_to_test=True)
+            self.assertEqual({r.split for r in recs}, {"test"})
 
     def test_empty_metrics_and_nonfinite_scores_rejected(self):
         with self.assertRaises(ValueError):

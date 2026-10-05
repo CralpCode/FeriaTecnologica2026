@@ -1609,6 +1609,10 @@ void handle_incoming_commands(String raw_cmd) {
     recording_requested = true; // El HTTP se ejecuta en loop, no en el callback BLE.
     return;
   }
+  if (cmd.startsWith("REC_")) {
+    ausc_queue_recording_id(cmd.substring(4));
+    return;
+  }
   if (ausc_busy() && cmd != "STATUS" && cmd != "INFO") {
     Serial.println(F("[AUSC] Grabacion en curso; espera el resultado antes de iniciar otro modo."));
     return;
@@ -2161,10 +2165,13 @@ void loop() {
     optical_probe_requested = false;
     run_optical_emitter_probe();
   }
-  if (recording_requested && !ausc_busy()) {
-    recording_requested = false;
-    enter_standby();
-    ausc_start();
+  if (!ausc_busy()) {
+    String command_id = ausc_take_recording_command();
+    if (recording_requested || command_id.length()) {
+      recording_requested = false;
+      enter_standby();
+      ausc_start(command_id);
+    }
   }
   if (ausc_busy()) {
     // I2S pertenece a la grabacion; nunca reutilizar lecturas opticas anteriores.

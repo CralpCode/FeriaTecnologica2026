@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { View, StyleSheet, Platform, StatusBar as RNStatusBar } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFonts } from 'expo-font';
+import { FONT_FILES } from './src/theme/fonts';
+import { installWebStyles } from './src/theme/webStyles';
 import { Colors } from './src/theme/colors';
 import { VitalsProvider } from './src/context/VitalsContext';
 import { ClinicalProvider, useClinical } from './src/context/ClinicalContext';
@@ -49,7 +52,7 @@ const MainAppContent: React.FC = () => {
 
       <View style={styles.body}>
         {/* Navegación lateral en computadora y tablet horizontal */}
-        {useSideNav && <SideNavBar {...nav} compact={!isDesktop} />}
+        {useSideNav && <SideNavBar {...nav} compact={!isDesktop} onOpenConsulta={openConsulta} />}
 
       {/* Contenido según pestaña seleccionada */}
       <View style={styles.screenContainer}>
@@ -77,7 +80,12 @@ const MainAppContent: React.FC = () => {
   );
 };
 
+installWebStyles();
+
 export default function App() {
+  // Inter va incluida en la app; si no carga, se sigue con la letra del sistema
+  const [fontsLoaded, fontError] = useFonts(FONT_FILES);
+  if (!fontsLoaded && !fontError) return <View style={styles.root} />;
   return (
     <SafeAreaProvider>
       <VitalsProvider>

@@ -36,6 +36,7 @@ export const emptyContext = (): PatientContext => ({
   altitude_m: null,
   symptoms: Object.fromEntries([...ALARM_SYMPTOMS, ...OTHER_SYMPTOMS].map(([k]) => [k, null])) as PatientContext['symptoms'],
   history: Object.fromEntries(HISTORY.map(([k]) => [k, null])) as PatientContext['history'],
+  notes: null,
 });
 
 /** Une lo guardado en el servidor con la plantilla vacía (lo no contestado queda como desconocido). */
