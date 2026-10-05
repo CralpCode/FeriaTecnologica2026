@@ -4,7 +4,7 @@
 #   - mantiene encendido el servidor (start_server.sh) y lo vuelve a levantar si se cae;
 #   - mantiene un túnel público de Cloudflare (gratis, sin cuenta) y crea uno nuevo si Cloudflare lo tumba;
 #   - publica el link vigente en GitHub Pages (rama gh-pages: index.html que redirige + link.json),
-#     así la dirección fija nunca cambia: https://cralpcode.github.io/FeriaTecnologica2026/
+#     así la dirección fija nunca cambia: https://willor16.github.io/spiroscan/ (repo willor16/spiroscan, rama gh-pages)
 #   - evita que la Mac se duerma mientras corre (caffeinate).
 # Se deja corriendo siempre (ítem de inicio de sesión: "SpiroScan en línea.command").
 # Variables opcionales: VENV, PORT, PAGES_DIR, CHECK_S
