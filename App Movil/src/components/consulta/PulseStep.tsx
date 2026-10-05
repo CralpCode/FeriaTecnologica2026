@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useDisplayedMeasurements } from '../../hooks/useDisplayedMeasurements';
 import { useVitals } from '../../context/VitalsContext';
 import { DeviceScanControls } from '../DeviceScanControls';
+import { BloodOxygenReading, MicrophoneLevel } from '../SensorReadouts';
 import { useClinical } from '../../context/ClinicalContext';
 import { measurementValidity } from '../../services/measurementQuality';
 import { color, font, radius, space, weight } from '../../theme/tokens';
@@ -10,24 +12,22 @@ import { Banner, Button, Card, KeyValue, SectionHeader, StatusPill } from '../ui
 
 /** Paso 3: pulso validado y el resto de lecturas del dispositivo (con su estado real, sin rellenar). */
 export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
-  const { vitals, connectedType, connectViaServer, isBackendOnline } = useVitals();
+  const { vitals, connectedType, connectViaServer, isBackendOnline, currentSessionId } = useVitals();
   const { triage } = useClinical();
-  const [now, setNow] = useState(Date.now());
   const [connecting, setConnecting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
 
+  const { now, readings: display } = useDisplayedMeasurements(vitals, `${currentSessionId}:${connectedType}`);
   const valid = measurementValidity(vitals, now);
+  const pulse = display.heartRate;
+  const oxygen = display.bloodOxygen;
+  const prv = display.hrv;
+  const audio = display.audio_rms;
+  const stress = display.experimentalStressScore;
   const used = triage?.datos_usados?.vitales_ultimo_minuto;
   const readings = used?.lecturas ?? 0;
   const pulseUsed = used?.fc ?? null;
   const connected = connectedType !== 'none';
-  const fresh = now - Date.parse(vitals.timestamp) >= 0 && now - Date.parse(vitals.timestamp) < 10000
-    && vitals.device_connected !== false && vitals.power !== 'standby';
-  const oxygenEstimateAvailable = vitals.source === 'real' && vitals.validity?.bloodOxygen === true && fresh;
-  const prvValid = vitals.source === 'real' && vitals.validity?.hrv === true && fresh;
-  const audioAvailable = vitals.source === 'real' && vitals.audioUnit === 'dBFS'
-    && vitals.validity?.audio_rms === true && Number.isFinite(vitals.audio_rms) && vitals.audio_rms < 0 && fresh;
 
   const connect = async () => {
     setConnecting(true);
@@ -63,13 +63,13 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
       <Card tone={valid.heartRate ? 'success' : undefined}>
         <Text style={styles.kicker}>Pulso (MAX30102)</Text>
         <View style={styles.bpmRow}>
-          <Text style={[styles.bpm, !valid.heartRate && { color: color.textMuted }]}>
-            {valid.heartRate ? Math.round(vitals.heartRate) : '--'}
+          <Text style={[styles.bpm, !pulse && { color: color.textMuted }]}>
+            {pulse ? Math.round(pulse.value) : '--'}
           </Text>
           <Text style={styles.unit}>BPM</Text>
         </View>
         <Text style={styles.status}>
-          {valid.heartRate ? 'Lectura válida. Se interpreta con la edad y el reposo.' : 'Esperando una lectura estable del sensor…'}
+          {pulse?.state === 'held' ? 'Última lectura válida; esperando una señal estable.' : valid.heartRate ? 'Lectura válida. Se interpreta con la edad y el reposo.' : 'Esperando una lectura estable del sensor…'}
         </Text>
         <View style={styles.progressRow}>
           <View style={styles.track}><View style={[styles.fill, { width: `${Math.min(1, readings / 3) * 100}%` }]} /></View>
@@ -80,18 +80,17 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
         )}
       </Card>
 
+      <View style={{ marginBottom: space.lg }}><BloodOxygenReading reading={oxygen} vitals={vitals} /></View>
       <Card>
         <Text style={styles.cardTitle}>Otras lecturas del dispositivo</Text>
         <View style={styles.grid}>
-          <KeyValue label="Oxígeno (SpO2)" value={oxygenEstimateAvailable ? `${vitals.bloodOxygen.toFixed(1)} %` : '--'}
-                    hint={valid.bloodOxygen ? 'Estimación calibrada' : oxygenEstimateAvailable ? 'Estimación sin calibrar; excluida del triaje' : 'Sin lectura válida'} />
-          <KeyValue label="Variabilidad de pulso (PRV)" value={prvValid ? `${vitals.hrv} ms` : "--"}
-                    hint={prvValid ? "RMSSD de intervalos ópticos; no es ECG" : "Sin intervalos válidos suficientes"} />
-          <KeyValue label="Índice de estrés" value="--" hint="No disponible: experimental" />
-          <KeyValue label="Micrófono" value={audioAvailable ? `${vitals.audio_rms.toFixed(1)} dBFS` : '--'}
-                    hint={audioAvailable ? 'Nivel digital, no presión sonora' : 'Sin lectura de audio'} />
+          <KeyValue label="Variabilidad de pulso (PRV)" value={prv ? `${prv.value} ms` : "--"}
+                    hint={prv?.state === "held" ? "Última PRV válida; reuniendo intervalos" : prv ? "RMSSD de intervalos ópticos; no es ECG" : "Reuniendo intervalos de pulso válidos"} />
+          <KeyValue label="Estrés experimental" value={stress ? `${stress.value}/100` : 'Sin estimación'}
+                    hint={stress?.state === 'held' ? 'Última estimación; no validada' : 'Regla por PRV del firmware; fuera del triaje'} />
         </View>
       </Card>
+      <View style={{ marginBottom: space.lg }}><MicrophoneLevel reading={audio} /></View>
 
       {pulseUsed === null && (
         <Banner tone="warning" text="Puedes continuar sin pulso válido; la valoración lo marcará como dato faltante." />

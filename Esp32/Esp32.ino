@@ -21,6 +21,8 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include "spo2_safe.h"
+#include "spo2_signal.h"
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -35,7 +37,7 @@
 #include <soc/gpio_struct.h>
 #include <soc/io_mux_reg.h>
 #include <Adafruit_NeoPixel.h>
-#include "MAX30105.h"
+#include "MAX30105Buffered.h"
 #include "spo2_algorithm.h"
 #include "heartRate.h"
 
@@ -98,7 +100,9 @@ unsigned long cardiac_wait_start_ms = 0;      // Tiempo de espera para colocar e
 Adafruit_NeoPixel strip(NUM_LEDS, WS2812_PIN, NEO_GRB + NEO_KHZ800);
 #include "auscultacion.h"
 static volatile bool recording_requested = false;
-MAX30105 particleSensor;
+static volatile bool optical_probe_requested = false;
+static volatile bool optical_probe_running = false;
+MAX30105Buffered particleSensor;
 
 // ------------------------------------------------------------------------------
 // 3. VARIABLES GLOBALES BIOMEDICAS Y ACUSTICAS (100% FISICAS)
@@ -154,6 +158,41 @@ uint32_t spo2_ir_sum = 0;
 uint32_t spo2_red_sum = 0;
 uint8_t spo2_decimation_count = 0;
 unsigned long spo2_last_result_ms = 0;
+unsigned long spo2_last_valid_ms = 0;
+const char* spo2_status = "acquiring";
+uint32_t ppg_fifo_dropped = 0;
+uint32_t ppg_i2c_errors = 0;
+uint32_t ppg_samples_acquired = 0;
+uint8_t ppg_max_batch = 0;
+uint32_t ppg_last_raw_red = 0;
+uint32_t ppg_last_raw_ir = 0;
+uint8_t spo2_consistent_windows = 0;
+int32_t spo2_previous_candidate = 0;
+const char* FIRMWARE_ID = "2026-10-04-optical-emitter-test";
+void invalidate_spo2(const char* reason, bool clear_window) {
+  spo2_valid = false;
+  spo2_val = 0.0f;
+  spo2_last_valid_ms = 0;
+  spo2_status = reason;
+  spo2_consistent_windows = 0;
+  spo2_previous_candidate = 0;
+  if (clear_window) {
+    spo2_sample_count = 0;
+    spo2_decimation_count = 0;
+    spo2_ir_sum = spo2_red_sum = 0;
+  }
+}
+bool max_read_register(uint8_t reg, uint8_t* values, uint8_t count) {
+  Wire.beginTransmission(0x57);
+  Wire.write(reg);
+  // SparkFun/main uses STOP when selecting FIFO_DATA, repeated START for
+  // ordinary registers. Preserve that tested transaction pattern.
+  if (Wire.endTransmission(reg == 0x07) != 0) return false;
+  if (Wire.requestFrom((uint8_t)0x57, count) != count) return false;
+  for (uint8_t i = 0; i < count; i++) values[i] = Wire.read();
+  return true;
+}
+
 void reset_biometric_state(bool clear_fifo);
 void broadcast_telemetry();
 
@@ -618,6 +657,8 @@ void update_audio_rms() {
 // 7. PROCESAMIENTO BIOMEDICO OPTICO REAL (MAX30102) - CERO SIMULACION
 // ------------------------------------------------------------------------------
 void reset_biometric_state(bool clear_fifo) {
+  invalidate_spo2("acquiring", true);
+  chip_temp_pending = false;
   finger_detected = false;
   bpm_valid = false;
   spo2_valid = false;
@@ -667,17 +708,36 @@ void update_biometric_signals() {
   uint64_t now_us = esp_timer_get_time();
 
   // Leer muestras disponibles en el FIFO del MAX30102
-  particleSensor.check();
+  if (ppg_last_data_ms && now_ms - ppg_last_data_ms > 250) invalidate_spo2("sample_gap", true);
+  uint16_t fetched = particleSensor.check();
+  if (fetched > 31) {
+    ppg_i2c_errors++;
+    invalidate_spo2("i2c_error", true);
+    bpm_valid = hrv_valid = false;
+    beat_avg = hrv_ms = stress_score = 0;
+    particleSensor.clearFIFO();
+    return;
+  }
+  uint8_t retained = particleSensor.available();
+  ppg_max_batch = max(ppg_max_batch, retained);
+  ppg_samples_acquired += retained;
+  if (fetched > retained) {
+    ppg_fifo_dropped += fetched - retained;
+    invalidate_spo2("software_fifo_gap", true);
+  }
   while (particleSensor.available()) {
     uint32_t raw_ir = particleSensor.getFIFOIR();
     uint32_t raw_red = particleSensor.getFIFORed();
     particleSensor.nextSample();
+    ppg_last_raw_red = raw_red;
+    ppg_last_raw_ir = raw_ir;
 
     ppg_last_data_ms = now_ms;
     bool prev_finger = finger_detected;
 
     // 1. Detección física real de dedo (umbral óptico IR > 40000)
     if (raw_ir < 40000) {
+      invalidate_spo2("no_contact", true);
       if (prev_finger) {
         finger_detected = false;
         bpm_valid = false;
@@ -737,6 +797,12 @@ void update_biometric_signals() {
     }
 
     // 2. Acumulación y Decimación para Algoritmo Maxim SpO2 (100 Hz -> 25 Hz)
+    // Reject ADC clipping / absent red data rather than interpreting it as oxygen.
+    bool optical_sample_ok = raw_red > 0 && raw_ir < 262000 && raw_red < 262000;
+    if (!optical_sample_ok) {
+      invalidate_spo2("optical_clipping", true);
+      continue;
+    }
     spo2_ir_sum += raw_ir;
     spo2_red_sum += raw_red;
     spo2_decimation_count++;
@@ -761,7 +827,6 @@ void update_biometric_signals() {
         spo2_red[BUFFER_SIZE - 1] = avg_red;
       }
     }
-
     // 3. Filtro IIR DC y Separacion AC para Deteccion de Onda de Pulso
     // Constante de tiempo ~0.5s a 100 Hz
     ppg_ir_dc = (ppg_ir_dc * 0.985f) + ((float)raw_ir * 0.015f);
@@ -939,30 +1004,78 @@ void update_biometric_signals() {
   }
 
   // 4. Ejecucion periodica del algoritmo Maxim para SpO2 cuando el buffer de 100 muestras esta listo
-  if (spo2_sample_count >= BUFFER_SIZE && (now_ms - spo2_last_result_ms >= 1000)) {
+  if (finger_detected && now_ms - ppg_last_data_ms <= 250 && spo2_sample_count >= BUFFER_SIZE && (now_ms - spo2_last_result_ms >= 1000)) {
     spo2_last_result_ms = now_ms;
     int32_t n_spo2 = 0;
     int8_t ch_spo2_valid = 0;
     int32_t n_heart_rate = 0;
     int8_t ch_hr_valid = 0;
 
-    maxim_heart_rate_and_oxygen_saturation(spo2_ir, BUFFER_SIZE, spo2_red, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid);
+    SpO2Signal optical = spiroscan_analyze_spo2(spo2_ir, spo2_red, BUFFER_SIZE);
+    spiroscan_oxygen_saturation(spo2_ir, BUFFER_SIZE, spo2_red, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid);
+    float reference_ratio = spiroscan_reference_ratio();
 
-    if (ch_spo2_valid == 1 && n_spo2 >= 70 && n_spo2 <= 100) {
-      if (spo2_val == 0.0f) {
-        spo2_val = (float)n_spo2;
-      } else {
-        spo2_val = (spo2_val * 0.75f) + ((float)n_spo2 * 0.25f);
-      }
-      spo2_valid = true;
+    // Engineering consistency gate, not clinical calibration. Both pulse
+    // detectors must agree and three successive oxygen windows must cohere.
+    bool pulse_agrees = bpm_valid && ch_hr_valid == 1 &&
+      abs(n_heart_rate - beat_avg) <= max(10, beat_avg / 5);
+    bool ratios_agree = spiroscan_spo2_ratios_agree(reference_ratio, optical.ratio);
+    // The common-cycle RMS ratio is a diagnostic and quality check. It is
+    // not substituted into the peak-based lookup without device calibration.
+    if (optical.quality_valid && ratios_agree && ch_spo2_valid == 1 && n_spo2 >= 70 && n_spo2 <= 100 && pulse_agrees) {
+      spo2_consistent_windows = spo2_previous_candidate && abs(n_spo2 - spo2_previous_candidate) <= 3
+        ? min((int)spo2_consistent_windows + 1, 3) : 1;
+      spo2_previous_candidate = n_spo2;
+      spo2_valid = spo2_consistent_windows >= 3;
+      spo2_val = spo2_valid ? (float)n_spo2 : 0.0f;
+      spo2_last_valid_ms = spo2_valid ? now_ms : 0;
+      spo2_status = spo2_valid ? "reference_estimate" : "acquiring_consistency";
+    } else {
+      const char* reason = "pulse_mismatch";
+      if (!optical.quality_valid) reason = optical.status;
+      else if (ch_spo2_valid != 1)
+        reason = reference_ratio <= 0.02f || reference_ratio >= 1.84f ? "ratio_out_of_range" : "algorithm_invalid";
+      else if (!ratios_agree) reason = "ratio_mismatch";
+      else if (n_spo2 < 70 || n_spo2 > 100) reason = "estimate_out_of_range";
+      invalidate_spo2(reason, false);
     }
+    uint32_t min_ir = UINT32_MAX, max_ir = 0, min_red = UINT32_MAX, max_red = 0;
+    uint64_t sum_ir = 0, sum_red = 0;
+    for (int i = 0; i < BUFFER_SIZE; i++) {
+      sum_ir += spo2_ir[i]; sum_red += spo2_red[i];
+      min_ir = min(min_ir, spo2_ir[i]); max_ir = max(max_ir, spo2_ir[i]);
+      min_red = min(min_red, spo2_red[i]); max_red = max(max_red, spo2_red[i]);
+    }
+    Serial.printf("[SPO2] algorithm:%ld valid:%d pulse_ref:%ld pulse_valid:%d status:%s IR_dc:%lu IR_pp:%lu RED_dc:%lu RED_pp:%lu fifo_lost:%lu i2c_errors:%lu\r\n",
+                  (long)n_spo2, ch_spo2_valid, (long)n_heart_rate, ch_hr_valid, spo2_status,
+                  (unsigned long)(sum_ir / BUFFER_SIZE), (unsigned long)(max_ir - min_ir),
+                  (unsigned long)(sum_red / BUFFER_SIZE), (unsigned long)(max_red - min_red),
+                  (unsigned long)ppg_fifo_dropped, (unsigned long)ppg_i2c_errors);
+    Serial.printf("[SPO2 QUALITY] ratio_ref:%.3f ratio_rms:%.3f cycles:%u pulse_cycles:%.1f correlation:%.3f interval_cv:%.3f ratio_mad:%.3f quality:%d ratio_agrees:%d reason:%s\r\n",
+                  reference_ratio, optical.ratio, optical.cycles, optical.pulse_bpm,
+                  optical.min_correlation, optical.interval_cv, optical.ratio_mad_fraction,
+                  optical.quality_valid, ratios_agree, optical.status);
   }
+  if (spo2_valid && (!finger_detected || now_ms - ppg_last_data_ms > 250 || now_ms - spo2_last_valid_ms > 2000))
+    invalidate_spo2("stale", false);
 
   // 5. Lectura de temperatura del silicio del chip MAX30102 (cada 4 segundos)
-  if (now_ms - chip_temp_last_read_ms >= 4000) {
+  // Start die-temperature conversion without blocking optical FIFO acquisition.
+  if (!chip_temp_pending && now_ms - chip_temp_last_read_ms >= 4000) {
     chip_temp_last_read_ms = now_ms;
-    float temp_c = particleSensor.readTemperature();
-    if (temp_c >= 15.0f && temp_c <= 60.0f) {
+    Wire.beginTransmission(0x57);
+    Wire.write(0x21); Wire.write(0x01);
+    chip_temp_pending = Wire.endTransmission() == 0;
+    chip_temp_start_ms = now_ms;
+  }
+  if (chip_temp_pending && now_ms - chip_temp_start_ms >= 35) {
+    uint8_t config = 1, raw_temp[2] = {};
+    bool ready = max_read_register(0x21, &config, 1) && (config & 1) == 0;
+    if (!ready && now_ms - chip_temp_start_ms < 100) return;
+    bool read_ok = ready && max_read_register(0x1F, raw_temp, 2);
+    chip_temp_pending = false;
+    float temp_c = (int8_t)raw_temp[0] + raw_temp[1] * 0.0625f;
+    if (read_ok && temp_c >= 15.0f && temp_c <= 60.0f) {
       chip_temp = temp_c;
       chip_temp_valid = true;
       body_temp = chip_temp; // Informado con chip_temp_valid
@@ -1362,6 +1475,113 @@ void check_buttons() {
   last_k2 = current_k2;
 }
 
+// Diagnostic acquisition runs exclusively in loop(), never in a BLE callback.
+bool optical_probe_set_currents(uint8_t red, uint8_t ir) {
+  Wire.beginTransmission(0x57);
+  Wire.write(0x0C); Wire.write(red);
+  if (Wire.endTransmission() != 0) return false;
+  Wire.beginTransmission(0x57);
+  Wire.write(0x0D); Wire.write(ir);
+  if (Wire.endTransmission() != 0) return false;
+  uint8_t actual[2] = {};
+  return max_read_register(0x0C, actual, 2) && actual[0] == red && actual[1] == ir;
+}
+
+void optical_probe_clear_samples() {
+  while (particleSensor.available()) particleSensor.nextSample();
+  particleSensor.clearFIFO();
+}
+
+bool optical_probe_phase(const char* name, uint8_t red_current, uint8_t ir_current) {
+  if (!optical_probe_set_currents(red_current, ir_current)) {
+    Serial.printf("[OPTICAL ERROR] phase:%s reason:current_write_failed\r\n", name);
+    return false;
+  }
+  delay(200); // Discard averaging/settling data, not part of the capture.
+  optical_probe_clear_samples();
+  uint32_t red[100] = {}, ir[100] = {};
+  uint16_t count = 0, errors = 0;
+  unsigned long start = millis();
+  while (count < 100 && millis() - start < 2200) {
+    uint16_t fetched = particleSensor.check();
+    if (fetched > 31) {
+      ++errors;
+      optical_probe_clear_samples();
+      break; // A window spanning an acquisition failure is not usable.
+    }
+    while (particleSensor.available() && count < 100) {
+      red[count] = particleSensor.getFIFORed();
+      ir[count] = particleSensor.getFIFOIR();
+      particleSensor.nextSample();
+      ++count;
+    }
+    delay(2);
+  }
+  uint64_t red_sum = 0, ir_sum = 0;
+  uint32_t red_min = UINT32_MAX, red_max = 0, ir_min = UINT32_MAX, ir_max = 0;
+  for (uint16_t i = 0; i < count; ++i) {
+    red_sum += red[i]; ir_sum += ir[i];
+    red_min = min(red_min, red[i]); red_max = max(red_max, red[i]);
+    ir_min = min(ir_min, ir[i]); ir_max = max(ir_max, ir[i]);
+  }
+  Serial.printf("[OPTICAL PHASE] {\"phase\":\"%s\",\"red_pa\":%u,\"ir_pa\":%u,\"count\":%u,\"errors\":%u,\"elapsed_ms\":%lu,\"red_dc\":%.1f,\"ir_dc\":%.1f,\"red_pp\":%lu,\"ir_pp\":%lu,\"red\":[",
+                name, red_current, ir_current, count, errors, millis() - start,
+                count ? double(red_sum) / count : 0, count ? double(ir_sum) / count : 0,
+                count ? (unsigned long)(red_max - red_min) : 0,
+                count ? (unsigned long)(ir_max - ir_min) : 0);
+  for (uint16_t i = 0; i < count; ++i) Serial.printf("%s%lu", i ? "," : "", (unsigned long)red[i]);
+  Serial.print("],\"ir\":[");
+  for (uint16_t i = 0; i < count; ++i) Serial.printf("%s%lu", i ? "," : "", (unsigned long)ir[i]);
+  Serial.println("]}");
+  return count == 100 && errors == 0;
+}
+
+void run_optical_emitter_probe() {
+  if (!sensor_hw_found || power_state != STATE_TRANSMITTING_ACTIVE) {
+    Serial.println(F("[OPTICAL ERROR] reason:sensor_not_active; activate CONT first"));
+    return;
+  }
+  const uint8_t addresses[] = {0x08, 0x09, 0x0A, 0x0C, 0x0D};
+  uint8_t saved[5] = {};
+  for (uint8_t i = 0; i < 5; ++i) {
+    if (!max_read_register(addresses[i], saved + i, 1)) {
+      Serial.println(F("[OPTICAL ERROR] reason:cannot_save_configuration"));
+      return; // Nothing changed.
+    }
+  }
+  if ((saved[1] & 7) != 3 || saved[3] == 0 || saved[4] == 0) {
+    Serial.println(F("[OPTICAL ERROR] reason:expected_active_red_ir_mode"));
+    return;
+  }
+  optical_probe_running = true;
+  reset_biometric_state(true);
+  broadcast_telemetry(); // Measurements invalid during emitter isolation.
+  Serial.printf("[OPTICAL START] firmware:%s fifo:%02X mode:%02X adc:%02X red:%02X ir:%02X\r\n",
+                FIRMWARE_ID, saved[0], saved[1], saved[2], saved[3], saved[4]);
+  bool complete = optical_probe_phase("both_before", saved[3], saved[4]) &&
+    optical_probe_phase("dark", 0, 0) &&
+    optical_probe_phase("red_only", saved[3], 0) &&
+    optical_probe_phase("ir_only", 0, saved[4]);
+
+  // Always restore after a started probe, including a failed phase.
+  bool restored = false;
+  for (int attempt = 0; attempt < 3 && !restored; ++attempt) {
+    restored = optical_probe_set_currents(saved[3], saved[4]);
+    if (!restored) delay(10);
+  }
+  if (restored && complete)
+    complete = optical_probe_phase("both_after", saved[3], saved[4]);
+  bool configuration_ok = restored;
+  for (uint8_t i = 0; i < 5; ++i) {
+    uint8_t actual = 0;
+    if (!max_read_register(addresses[i], &actual, 1) || actual != saved[i]) configuration_ok = false;
+  }
+  reset_biometric_state(true);
+  optical_probe_clear_samples();
+  optical_probe_running = false;
+  Serial.printf("[OPTICAL END] complete:%d restored:%d configuration_unchanged:%d\r\n", complete, restored, configuration_ok);
+}
+
 // ------------------------------------------------------------------------------
 // 9. PROCESADOR DE COMANDOS ENTRANTE (BLUETOOTH & SERIAL USB)
 // ------------------------------------------------------------------------------
@@ -1380,6 +1600,11 @@ void handle_incoming_commands(String raw_cmd) {
 
   Serial.printf("[COMANDO RX] Procesando: \"%s\" (len: %d)\r\n", cmd.c_str(), cmd.length());
 
+  if (optical_probe_running) {
+    Serial.println(F("[OPTICAL] probe in progress; wait for restoration"));
+    return;
+  }
+
   if (cmd == "REC" || cmd == "GRABAR") {
     recording_requested = true; // El HTTP se ejecuta en loop, no en el callback BLE.
     return;
@@ -1388,7 +1613,48 @@ void handle_incoming_commands(String raw_cmd) {
     Serial.println(F("[AUSC] Grabacion en curso; espera el resultado antes de iniciar otro modo."));
     return;
   }
-  if (cmd == "DIAG") {
+  if (cmd == "OPTICAL") {
+    optical_probe_requested = true;
+    Serial.println(F("[OPTICAL] queued for main loop"));
+  } else if (cmd == "BAUD") {
+    Serial.printf("[BAUD] current:%lu default:115200\r\n", (unsigned long)Serial.baudRate());
+  } else if (cmd.startsWith("BAUD_")) {
+    // Temporary diagnostic only: boot always retains main's 115200 setting.
+    uint32_t target = cmd == "BAUD_57600" ? 57600 :
+      cmd == "BAUD_115200" ? 115200 :
+      cmd == "BAUD_230400" ? 230400 :
+      cmd == "BAUD_460800" ? 460800 : 0;
+    if (!target) {
+      Serial.println(F("[BAUD] allowed:57600,115200,230400,460800"));
+      return;
+    }
+    Serial.printf("[BAUD SWITCH] from:%lu target:%lu\r\n", (unsigned long)Serial.baudRate(), (unsigned long)target);
+    Serial.flush(true);
+    Serial.updateBaudRate(target);
+    Serial.printf("[BAUD] current:%lu default:115200\r\n", (unsigned long)Serial.baudRate());
+  } else if (cmd == "SPO2") {
+    Serial.printf("[SPO2 CONFIG] firmware:%s adc:400Hz average:4 fifo:100Hz algorithm:25Hz window:%u/100 status:%s valid:%d age_ms:%lu fifo_lost:%lu samples:%lu max_batch:%u i2c_errors:%lu raw_red:%lu raw_ir:%lu calibration:false\r\n",
+                  FIRMWARE_ID, spo2_sample_count, spo2_status, spo2_valid,
+                  spo2_last_valid_ms ? millis() - spo2_last_valid_ms : 0, (unsigned long)ppg_fifo_dropped,
+                  (unsigned long)ppg_samples_acquired, ppg_max_batch, (unsigned long)ppg_i2c_errors,
+                  (unsigned long)ppg_last_raw_red, (unsigned long)ppg_last_raw_ir);
+  } else if (cmd == "PPG") {
+    // Snapshot for signal inspection; values are the acquired 25 Hz samples.
+    Serial.printf("[PPG WINDOW] {\"rate_hz\":25,\"count\":%u,\"ir\":[", spo2_sample_count);
+    for (int i = 0; i < spo2_sample_count; i++) Serial.printf("%s%lu", i ? "," : "", (unsigned long)spo2_ir[i]);
+    Serial.print("],\"red\":[");
+    for (int i = 0; i < spo2_sample_count; i++) Serial.printf("%s%lu", i ? "," : "", (unsigned long)spo2_red[i]);
+    Serial.println("]}");
+  } else if (cmd == "PPGREG") {
+    const uint8_t addresses[] = {0x04, 0x05, 0x06, 0x08, 0x09, 0x0A, 0x0C, 0x0D, 0xFF};
+    Serial.print("[PPG REG]");
+    for (uint8_t address : addresses) {
+      uint8_t value = 0;
+      bool ok = max_read_register(address, &value, 1);
+      Serial.printf(" %02X:%02X:%s", address, value, ok ? "ok" : "error");
+    }
+    Serial.println();
+  } else if (cmd == "DIAG") {
     ausc_diag(sensor_hw_found, finger_detected, beat_avg, spo2_val);
   } else if (cmd.indexOf("WAKE") >= 0 || cmd == "W" || cmd == "ACTIVE" || cmd.indexOf("V0FLRQ") >= 0) {
     activate_transmission();
@@ -1641,13 +1907,13 @@ void update_led_effects() {
   strip.setPixelColor(5, led5_color);
 
   // LED 6: ACÚSTICA MÉDICA / MICRÓFONO INMP441 (VUMetro Reactivo Proporcional)
-  // Totalmente apagado en silencio de fondo (<62 dB); brillo dinámico que crece con los decibelios
+  // Escala digital dBFS: conserva la respuesta equivalente del indicador anterior.
   static float smooth_audio_level = 0.0f;
   float target_level = 0.0f;
 
-  if (audio_rms >= 62.0f) {
-    // Normalizar entre 62 dB (umbral de voz) y 90 dB (sonido fuerte / aplauso)
-    float ratio = (audio_rms - 62.0f) / 28.0f;
+  if (audio_valid && audio_rms >= -58.0f) {
+    // Umbrales visuales de -58 a -30 dBFS; no son niveles de presión sonora.
+    float ratio = (audio_rms + 58.0f) / 28.0f;
     if (ratio > 1.0f) ratio = 1.0f;
     target_level = ratio * ratio; // Curva cuadrática para percepción visual natural
   }
@@ -1666,7 +1932,7 @@ void update_led_effects() {
     // Proporción Verde dominante (255) y Rojo (180): Amarillo Limón puro sin virar a naranja/rojo
     int g = (int)(255.0f * smooth_audio_level);
     int r = (int)(180.0f * smooth_audio_level);
-    // Destello de blanco brillante cuando el sonido es muy fuerte (>85 dB / aplauso)
+    // Destello blanco al acercarse al extremo superior del indicador digital.
     int b = (smooth_audio_level > 0.75f) ? (int)(160.0f * (smooth_audio_level - 0.75f) * 4.0f) : 0;
     led6_color = strip.Color(r, g, b);
   } else {
@@ -1789,6 +2055,7 @@ class MyServerCallbacks: public BLEServerCallbacks {
 void setup() {
   Serial.setTxBufferSize(1024);
   Serial.begin(115200);
+  Serial.printf("[FIRMWARE] %s\r\n", FIRMWARE_ID);
   delay(300);
 
   // Asegurar que el LED Azul interno de la placa permanezca apagado
@@ -1890,6 +2157,10 @@ void loop() {
   }
 
   ausc_net_maintain();
+  if (optical_probe_requested && !ausc_busy()) {
+    optical_probe_requested = false;
+    run_optical_emitter_probe();
+  }
   if (recording_requested && !ausc_busy()) {
     recording_requested = false;
     enter_standby();

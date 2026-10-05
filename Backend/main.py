@@ -451,7 +451,7 @@ def analyze_pulmonary(payload: PulmonaryAnalyzeInput):
 @app.post("/api/ai/chat")
 async def chat_ai(payload: ChatInput):
     sid = _get_effective_session(payload.session_id)
-    reply = await asyncio.to_thread(llm_tasks.chat, sid, payload.message)
+    reply = await asyncio.to_thread(llm_tasks.chat, sid, payload.message, payload.vitals)
     return {"reply": reply, "message": reply, "session_id": sid}
 
 @app.post("/api/ai/llm/generate")

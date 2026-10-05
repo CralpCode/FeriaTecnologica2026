@@ -58,6 +58,11 @@ export function normalizeDevicePacket(raw: RawDevicePacket): VitalSigns {
     calories: 'unavailable',
   };
 
+  const reportedStress = raw.stress ?? raw.stress_score ?? raw.experimentalStressScore;
+  const expectedStress = (raw.hrv ?? 0) >= 45 ? 25 : (raw.hrv ?? 0) >= 25 ? 50 : 75;
+  const experimentalStressScore = validity.hrv && reportedStress === expectedStress
+    && (!raw.source || ['real', 'esp32', 'ble_hr'].includes(raw.source)) ? reportedStress : null;
+
   return {
     heartRate: validity.heartRate ? raw.bpm! : 0,
     bloodOxygen: validity.bloodOxygen ? raw.spo2! : 0,
@@ -66,6 +71,7 @@ export function normalizeDevicePacket(raw: RawDevicePacket): VitalSigns {
     temperature: 0,
     hrv: validity.hrv ? raw.hrv! : 0,
     stressLevel: 0,
+    experimentalStressScore,
     chipTemperature: validity.chipTemperature ? raw.chip_temp! : 0,
     audio_rms: validity.audio_rms ? raw.audio_rms! : 0,
     audio_peak: validity.audio_peak ? raw.audio_peak! : 0,
@@ -105,7 +111,7 @@ export function normalizePublicVitals(vitals: Partial<VitalSigns>): VitalSigns {
     (has('bloodOxygen') ? 2 : 0) |
     (has('hrv') ? 4 : 0) |
     (has('chipTemperature') ? 8 : 0) |
-    (has('audio_rms') && has('audio_peak') ? 16 : 0);
+    (has('audio_rms') || has('audio_peak') ? 16 : 0);
   const normalized = normalizeDevicePacket({
     v: qualityPresent ? 2 : undefined,
     valid: mask,
@@ -119,7 +125,7 @@ export function normalizePublicVitals(vitals: Partial<VitalSigns>): VitalSigns {
     diastolic: vitals.diastolicPressure,
     temperature: vitals.temperature,
     chip_temp: vitals.chipTemperature,
-    stress: vitals.stressLevel,
+    stress: vitals.experimentalStressScore,
     hrv: vitals.hrv,
     audio_rms: vitals.audio_rms,
     audio_peak: vitals.audio_peak,
@@ -130,6 +136,13 @@ export function normalizePublicVitals(vitals: Partial<VitalSigns>): VitalSigns {
     cardiac_locked: vitals.cardiac_locked,
     power: vitals.power,
   });
+  for (const metric of ['audio_rms', 'audio_peak'] as const) {
+    if (!has(metric)) {
+      normalized[metric] = 0;
+      normalized.validity![metric] = false;
+      normalized.provenance![metric] = 'unavailable';
+    }
+  }
   return {
     ...normalized,
     timestamp: typeof vitals.timestamp === 'string' ? vitals.timestamp : normalized.timestamp,

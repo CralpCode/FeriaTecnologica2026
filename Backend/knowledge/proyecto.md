@@ -8,9 +8,9 @@ Prototipo de tamizaje cardiorrespiratorio con ESP32, MAX30102 e INMP441. El PDF 
 
 ## Datos disponibles
 
-- El firmware actualizado obtiene señales roja e infrarroja del MAX30102 y estima pulso, con controles de contacto, calidad, estabilización y caducidad. El ESP32 de la feria puede tener todavía el firmware original, sin esos controles: en ese caso el servidor da el pulso por válido solo con el dedo puesto, entre 30 y 220 BPM y estable en 3 lecturas seguidas, y descarta la SpO2, la HRV y el estrés de ese firmware.
-- La SpO2 queda **no disponible**: el cálculo anterior incluía valores inventados y recortes. Se requiere implementar y validar un algoritmo calibrado para el sistema óptico completo. No se debe activar un indicador de calibración para saltar este requisito.
-- HRV, estrés, presión arterial, temperatura corporal y ECG no se presentan como mediciones válidas.
+- El firmware actualizado obtiene señales roja e infrarroja del MAX30102 y estima pulso, con controles de contacto, calidad, estabilización y caducidad. Los paquetes v2 indican por separado la validez de pulso, SpO2, PRV y audio. En el formato original sin esos indicadores, el servidor admite pulso solo con contacto y varias lecturas estables; no valida SpO2 ni PRV por una cifra plausible.
+- La SpO2 puede mostrarse como **estimación del sensor sin calibrar** cuando el ESP32 la envía con validez explícita. El firmware usa el algoritmo de referencia Maxim, pero eso no valida ni calibra clínicamente el sistema óptico completo. Sin calibración real se excluye del triaje. Si falta una lectura válida, se indica que se espera señal; no se inventan valores ni se activa la calibración para omitir este requisito.
+- La variabilidad disponible es PRV (RMSSD de intervalos ópticos), no HRV medida por ECG. El estrés experimental es una heurística por PRV enviada por el firmware, no una medición clínica de estrés; queda fuera del triaje. Presión arterial, temperatura corporal y ECG no se presentan como mediciones válidas. Un nivel digital o relativo de micrófono no equivale a presión sonora ni diagnostica hallazgos acústicos.
 - El INMP441 graba sonido. El nivel digital en dBFS no es presión sonora en dB SPL.
 - La edad, síntomas, reposo, altitud y antecedentes provienen de respuestas explícitas del usuario. Un dato no contestado permanece desconocido.
 - Los casos demo ICBHI son audios de pacientes de esa base pública, no de la persona medida. Entran al semáforo de su sesión siempre marcados DEMO y no aportan signos vitales.

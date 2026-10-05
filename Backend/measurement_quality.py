@@ -29,6 +29,12 @@ def normalize_measurements(data: dict) -> dict:
     normalized = normalize_reading(payload)
     source = normalized.get('source')
     normalized['source'] = 'real' if source in ('esp32', 'ble_hr') else source
+    # Preserve the device's discrete heuristic separately from clinical stressLevel.
+    reported_stress = number(data.get('stress', data.get('stress_score', data.get('experimentalStressScore'))))
+    prv = normalized['hrv']
+    expected_stress = 25 if prv >= 45 else 50 if prv >= 25 else 75
+    normalized['experimentalStressScore'] = (reported_stress if normalized['source'] == 'real'
+        and normalized['validity']['hrv'] and reported_stress == expected_stress else None)
     normalized.update({
         'heartRateValid': normalized['validity']['heartRate'],
         'bloodOxygenValid': normalized['validity']['bloodOxygen'],
@@ -44,7 +50,7 @@ def normalize_measurements(data: dict) -> dict:
 def metadata(data: dict) -> dict:
     normalized = normalize_measurements(data)
     return {**{key: data.get(key, normalized.get(key)) for key in QUALITY_FIELDS},
-            **{key: normalized[key] for key in ('validity', 'provenance', 'spo2_calibrated', 'chipTemperature',
+            **{key: normalized[key] for key in ('validity', 'provenance', 'spo2_calibrated', 'chipTemperature', 'experimentalStressScore',
                 'source', 'heartRateValid', 'bloodOxygenValid', 'spo2Calibrated', 'audioUnit', 'signalQuality', 'sampleAgeMs')},
             **{key: normalized[key] for key in ('v', 'valid', 'cal', 'scan_mode', 'scan_sec', 'scan_phase',
                 'cardiac_locked', 'power') if key in normalized}}
@@ -151,10 +157,10 @@ def clean_packet(raw: dict) -> tuple[dict, list[str]]:
     out["bpm"] = num("bpm", pick("bpm", "heartRate"), 0, 300, as_int=True)
     out["spo2"] = num("spo2", pick("spo2", "bloodOxygen"), 0, 100)
     out["audio_rms"] = num("audio_rms", raw.get("audio_rms"), -200, 200)
-    out["audio_peak"] = num("audio_peak", raw.get("audio_peak"), -200, 200)
+    out["audio_peak"] = num("audio_peak", raw.get("audio_peak"), 0, 8_388_608)
     out["hrv"] = num("hrv", raw.get("hrv"), 0, 5000, as_int=True)
     out["stress"] = num("stress", pick("stress", "stress_score", "stressLevel"), 0, 100, as_int=True)
-    out["sampleAgeMs"] = num("sampleAgeMs", pick("sampleAgeMs", "sample_age_ms", "v", "valid", "validity"), 0, 86_400_000)
+    out["sampleAgeMs"] = num("sampleAgeMs", pick("sampleAgeMs", "sample_age_ms"), 0, 86_400_000)
 
     # Indicadores de validez: solo un booleano JSON cuenta; cualquier otra cosa queda como no válido.
     for key, aliases in (("heartRateValid", ("heartRateValid", "heart_rate_valid")),
@@ -173,7 +179,7 @@ def clean_packet(raw: dict) -> tuple[dict, list[str]]:
             out[key] = None
 
     for key, aliases, max_len in (("source", ("source",), 12), ("signalQuality", ("signalQuality", "signal_quality"), 24),
-                                  ("audioUnit", ("audioUnit",), 12), ("device_id", ("device_id",), 64),
+                                  ("audioUnit", ("audioUnit",), 32), ("device_id", ("device_id",), 64),
                                   ("session_id", ("session_id",), 64), ("session_name", ("session_name",), 80)):
         try:
             out[key] = _text(pick(*aliases), max_len)

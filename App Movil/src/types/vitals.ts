@@ -7,6 +7,7 @@ export type VitalMetric =
 export type MeasurementProvenance = 'measured' | 'derived' | 'estimated' | 'unavailable' | 'unverified';
 
 export interface MeasurementQuality {
+  experimentalStressScore?: number | null; // Device PRV threshold heuristic; excluded from clinical metrics.
   validity?: Partial<Record<VitalMetric, boolean>>;
   provenance?: Partial<Record<VitalMetric, MeasurementProvenance>>;
   spo2_calibrated?: boolean;

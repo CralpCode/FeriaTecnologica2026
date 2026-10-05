@@ -6,6 +6,7 @@ export interface HospitalEcgMonitorProps {
   bpm?: number;
   heartRate?: number;
   bloodOxygen?: number;
+  bloodOxygenHint?: string;
   systolicPressure?: number;
   diastolicPressure?: number;
   audioDecibels?: number;
@@ -21,6 +22,7 @@ export const HospitalEcgMonitor: React.FC<HospitalEcgMonitorProps> = ({
   bpm,
   heartRate,
   bloodOxygen,
+  bloodOxygenHint,
   systolicPressure,
   diastolicPressure,
   audioDecibels,
@@ -354,6 +356,15 @@ export const HospitalEcgMonitor: React.FC<HospitalEcgMonitorProps> = ({
             {isLive ? `${currentBpm} BPM` : '-- BPM'}
           </Text>
         </View>
+      </View>
+
+      <View style={{ paddingHorizontal: 14, paddingBottom: 10 }}>
+        <Text style={{ fontSize: 14, fontWeight: '700', color: '#0284C7' }}>
+          Oxígeno en sangre (SpO2): {bloodOxygen && bloodOxygen > 0 ? `${bloodOxygen.toFixed(1)} %` : '--'}
+        </Text>
+        <Text style={{ fontSize: 11, color: '#64748B', marginTop: 3 }}>
+          {bloodOxygenHint ?? 'Esperando una estimación válida del sensor'}
+        </Text>
       </View>
 
       {/* Pantalla del Osciloscopio (Canvas en Web / SVG Animado en Nativo) */}

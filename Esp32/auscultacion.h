@@ -95,8 +95,14 @@ static void ausc_http_begin(HTTPClient& http, WiFiClientSecure& tls, WiFiClient&
 // WiFi
 // ------------------------------------------------------------------------------
 void ausc_wifi_begin() {
+#if !__has_include("spiroscan_config.h")
+  // Without WiFi credentials, USB/BLE remain usable without retrying a placeholder network.
+  WiFi.mode(WIFI_OFF);
+  Serial.println(F("[WiFi] Sin configuracion local: telemetria disponible por USB/BLE."));
+  return;
+#endif
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);  // menor latencia de envio
+  WiFi.setSleep(true);   // ESP32 requiere modem sleep al coexistir WiFi y BLE.
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.printf("[*] WiFi: conectando a \"%s\"...\r\n", WIFI_SSID);
 }

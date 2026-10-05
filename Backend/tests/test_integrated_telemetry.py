@@ -1,11 +1,13 @@
 """Regression coverage for the merge: actual v2 wire shape, synthetic fixtures only."""
 import unittest
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import test_esp32_inputs as fixtures
 import database
 import measurement_quality
+import llm_tasks
 
 
 class IntegratedTelemetryTests(unittest.TestCase):
@@ -25,6 +27,84 @@ class IntegratedTelemetryTests(unittest.TestCase):
         response = self.client.post('/api/telemetry', json=packet)
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()['saved']
+
+    def test_reported_stress_heuristic_survives_storage_separately_from_clinical_stress(self):
+        saved = self.send_v2(hrv=40, stress=50)
+        self.assertEqual(saved['experimentalStressScore'], 50)
+        self.assertEqual(saved['stressLevel'], 0)
+        self.assertFalse(saved['validity']['stressLevel'])
+        current = self.client.get('/api/vitals/current?session_id=merge-patient').json()
+        self.assertEqual(current['experimentalStressScore'], 50)
+        for change in ({'stress': None}, {'stress': 0}, {'stress': 25}, {'valid': 27}, {'test': True}):
+            self.assertIsNone(self.send_v2(**{'hrv': 40, 'stress': 50, **change})['experimentalStressScore'])
+
+    def test_previous_v2_audio_is_preserved_without_claiming_dbfs_or_pulse(self):
+        saved = self.send_v2(valid=24, bpm=0, finger=False, audio_unit=None,
+                             audioUnit='relative_uncalibrated',
+                             audio_rms=65.8, audio_peak=33052.3)
+        self.assertEqual(saved['audio_rms'], 65.8)
+        self.assertEqual(saved['audio_peak'], 33052.3)
+        self.assertTrue(saved['validity']['audio_rms'])
+        self.assertEqual(saved['audioUnit'], 'relative_uncalibrated')
+        self.assertEqual(saved['sampleAgeMs'], 0)
+        self.assertEqual(saved['heartRate'], 0)
+        self.assertFalse(saved['heartRateValid'])
+        current = self.client.get('/api/vitals/current?session_id=merge-patient').json()
+        self.assertEqual(current['audio_rms'], 65.8)
+        self.assertEqual(current['audioUnit'], 'relative_uncalibrated')
+
+    def test_chat_receives_device_estimates_without_making_them_clinical(self):
+        self.send_v2(hrv=40, stress=50, audio_unit=None, audioUnit='relative_uncalibrated', audio_rms=53.6)
+        with patch('ai_engine.llm_chat', return_value='Lecturas recibidas') as llm:
+            response = self.client.post('/api/ai/chat', json={'session_id': 'merge-patient', 'message': 'Mis datos'})
+        self.assertEqual(response.status_code, 200)
+        system = llm.call_args.args[0][0]['content']
+        ctx = json.loads(system.split('DATOS DE LA SESIÓN (fuente única de verdad):\n')[1])
+        vitals = ctx['vitales_ultimas_lecturas']
+        self.assertIsNone(vitals['bloodOxygen'])  # Still excluded from clinical rules.
+        readings = vitals['lecturas_dispositivo']
+        self.assertEqual(readings['bloodOxygen']['value'], 97.5)
+        self.assertFalse(readings['bloodOxygen']['calibrated'])
+        self.assertEqual(readings['hrv']['value'], 40)
+        self.assertEqual(readings['experimentalStressScore']['value'], 50)
+        self.assertEqual(readings['audio_rms']['value'], 53.6)
+        self.assertEqual(readings['audio_rms']['unit'], 'relative_uncalibrated')
+        with patch('ai_engine.llm_chat', side_effect=TimeoutError('prueba')):
+            reply = self.client.post('/api/ai/chat', json={'session_id': 'merge-patient', 'message': 'Mis datos'}).json()['reply']
+        self.assertIn('Oxígeno SpO2: 97.5 %', reply)
+        self.assertIn('sin calibrar', reply)
+        self.assertIn('Variabilidad PRV: 40 ms', reply)
+        self.assertIn('Micrófono: 53.6 relative_uncalibrated', reply)
+        self.assertIsNone(llm_tasks._chat_vitals('empty-patient', database.get_latest_reading('empty-patient'), None)
+                          ['lecturas_dispositivo']['bloodOxygen']['value'])
+
+    def test_chat_retains_recent_values_but_clears_on_loss_of_contact(self):
+        self.send_v2(hrv=40, stress=50)
+        latest = self.send_v2(valid=24)
+        reading = llm_tasks._chat_vitals('merge-patient', latest, None)['lecturas_dispositivo']['bloodOxygen']
+        self.assertEqual(reading['value'], 97.5)
+        self.assertEqual(reading['status'], 'ultima_valida_esperando_senal')
+        latest = self.send_v2(valid=24, finger=False)
+        readings = llm_tasks._chat_vitals('merge-patient', latest, None)['lecturas_dispositivo']
+        self.assertIsNone(readings['bloodOxygen']['value'])
+        self.assertIsNotNone(readings['audio_rms']['value'])
+
+    def test_chat_accepts_current_ble_snapshot_but_not_stale_or_simulated_data(self):
+        snapshot = self.send_v2(hrv=40, stress=50)
+        empty = database.get_latest_reading('ble-patient')
+        # Actual app shape, without another session's session_id.
+        snapshot.pop('session_id', None)
+        snapshot.pop('device_id', None)
+        with patch('ai_engine.llm_chat', return_value='Datos Bluetooth') as llm:
+            self.client.post('/api/ai/chat', json={'session_id': 'ble-patient', 'message': 'Mis datos', 'vitals': snapshot})
+        ctx = json.loads(llm.call_args.args[0][0]['content'].split('DATOS DE LA SESIÓN (fuente única de verdad):\n')[1])
+        self.assertEqual(ctx['vitales_ultimas_lecturas']['lecturas_dispositivo']['bloodOxygen']['value'], 97.5)
+        self.assertEqual(database.get_latest_reading('ble-patient')['heartRate'], 0)  # Chat never persists telemetry.
+        for changes in ({'source': 'simulated'}, {'timestamp': (datetime.now() - timedelta(seconds=20)).isoformat()},
+                        {'power': 'standby'}, {'session_id': 'another-patient'}, {'device_connected': False}):
+            with self.subTest(changes=changes):
+                readings = llm_tasks._chat_vitals('ble-patient', empty, {**snapshot, **changes})['lecturas_dispositivo']
+                self.assertIsNone(readings['bloodOxygen']['value'])
 
     def test_v2_survives_storage_history_and_clinical_checks(self):
         for _ in range(3):

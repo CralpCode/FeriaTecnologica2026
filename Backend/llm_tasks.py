@@ -5,13 +5,14 @@ convierten en texto claro. Cada función tiene un texto de respaldo si el LLM no
 """
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 import ai_engine
 import database
 import triage
 import clinical_assessment
-from measurement_quality import usable_value
+from measurement_quality import usable_value, normalize_measurements, number
 
 BASE_RULES = (
     "Eres el asistente de comunicación de SpiroScan, un prototipo universitario de TAMIZAJE "
@@ -100,10 +101,66 @@ def _session_context(session_id: str) -> dict:
     }
 
 
+def _reading_time(v: dict) -> datetime | None:
+    try:
+        timestamp = datetime.fromisoformat(v['timestamp'].replace('Z', '+00:00'))
+        age = (datetime.now(timestamp.tzinfo) - timestamp).total_seconds()
+        sample_age = number(v.get('sampleAgeMs', 0))
+        if sample_age is not None and sample_age >= 0 and -1 <= age and max(0, age) + sample_age / 1000 <= 10:
+            return timestamp
+    except (KeyError, TypeError, ValueError, AttributeError):
+        pass
+    return None
+
+
 def _clean_vitals(v: dict) -> dict:
-    return {"heartRate": usable_value(v, "heartRate"),
-            "bloodOxygen": usable_value(v, "bloodOxygen"),
-            "timestamp": v.get("timestamp"), "source": v.get("source")}
+    """Keep clinical eligibility separate from device estimates in the LLM context."""
+    normalized = normalize_measurements(v)
+    fresh = _reading_time(v) is not None and v.get('device_connected') is not False
+    fresh = fresh and normalized['source'] == 'real' and v.get('power') != 'standby'
+    readings = {}
+    for metric, unit in (('heartRate', 'BPM'), ('bloodOxygen', '%'), ('hrv', 'ms'),
+                         ('audio_rms', normalized['audioUnit']), ('experimentalStressScore', '/100')):
+        flag = 'hrv' if metric == 'experimentalStressScore' else metric
+        value = normalized.get(metric)
+        available = fresh and normalized['validity'][flag] and number(value) is not None
+        if metric != 'audio_rms' and v.get('finger') is False:
+            available = False
+        readings[metric] = {'value': value if available else None, 'unit': unit,
+                            'timestamp': v.get('timestamp') if available else None,
+                            'status': 'actual' if available else 'sin_lectura_valida'}
+    readings['bloodOxygen']['calibrated'] = normalized['spo2Calibrated']
+    readings['bloodOxygen']['limitation'] = 'Estimación del sensor; sin calibrar se excluye del triaje.'
+    readings['hrv']['limitation'] = 'PRV: RMSSD de intervalos ópticos, no HRV medida por ECG.'
+    readings['experimentalStressScore']['limitation'] = 'Heurística enviada por el firmware; no mide estrés clínico, fuera del triaje.'
+    readings['audio_rms']['limitation'] = 'Nivel digital o relativo; no es presión sonora ni un resultado de auscultación.'
+    return {'heartRate': usable_value(v, 'heartRate'), 'bloodOxygen': usable_value(v, 'bloodOxygen'),
+            'timestamp': v.get('timestamp'), 'source': v.get('source'), 'lecturas_dispositivo': readings}
+
+
+def _chat_vitals(session_id: str, latest: dict, app_vitals: dict | None) -> dict:
+    # Recent values retain their own timestamps. A gap never becomes a new valid sample.
+    candidates = database.get_recent_readings(session_id, seconds=10)
+    candidates.append(latest)
+    if app_vitals and app_vitals.get('session_id', session_id) == session_id and _reading_time(app_vitals):
+        candidates.append(app_vitals)
+    dated = [(timestamp.timestamp(), v) for v in candidates if (timestamp := _reading_time(v)) is not None]
+    candidates = [v for _, v in sorted(dated, key=lambda item: item[0])]
+    current = candidates[-1] if candidates else latest
+    clean = _clean_vitals(current)
+    retained = {}
+    for v in candidates:
+        if v.get('source') == 'simulated' or v.get('power') == 'standby' or v.get('device_connected') is False:
+            retained.clear()
+        if v.get('finger') is False:
+            retained = {k: r for k, r in retained.items() if k == 'audio_rms'}
+        for key, reading in _clean_vitals(v)['lecturas_dispositivo'].items():
+            if reading['value'] is not None:
+                retained[key] = reading
+    for key, reading in retained.items():
+        if clean['lecturas_dispositivo'][key]['value'] is None:
+            clean['lecturas_dispositivo'][key] = {**reading, 'status': 'ultima_valida_esperando_senal'}
+    return clean
 
 
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
@@ -229,9 +286,9 @@ def _fallback_report(ctx: dict) -> dict:
 _history: dict[str, list[dict]] = {}
 
 
-def chat(session_id: str, message: str) -> str:
+def chat(session_id: str, message: str, app_vitals: dict | None = None) -> str:
     ctx = _session_context(session_id)
-    ctx["vitales_ultimas_lecturas"] = _clean_vitals(ctx["vitales_ultimas_lecturas"])
+    ctx["vitales_ultimas_lecturas"] = _chat_vitals(session_id, ctx["vitales_ultimas_lecturas"], app_vitals)
     system = (
         BASE_RULES
         + "Respondes dos tipos de preguntas, siempre breve (máximo 2 párrafos cortos):\n"
@@ -242,6 +299,11 @@ def chat(session_id: str, message: str) -> str:
         + "Si preguntan algo que el dispositivo no mide o que requiere diagnóstico, explícalo con amabilidad.\n"
         + "Si la persona cuenta síntomas en el chat, pídele que los registre en la valoración de Auscultación.\n"
         + "La 'puntuacion_modelo' es la puntuación de la red neuronal, no una probabilidad ni una certeza clínica.\n"
+        + "En 'lecturas_dispositivo' puedes describir los valores y sus unidades, indicando sus limitaciones. "
+        + "SpO2 sin calibrar es una estimación disponible, no un dato clínico validado. PRV y estrés experimental "
+        + "no permiten diagnosticar estrés. Un nivel de micrófono no detecta enfermedades. "
+        + "Si el estado dice 'ultima_valida_esperando_senal', aclara que es la última lectura, no una muestra actual. "
+        + "Para conclusiones clínicas utiliza exclusivamente 'valoracion' y 'triaje'.\n"
         + f"BASE DE CONOCIMIENTO DEL PROYECTO:\n{project_knowledge()}\n"
         + f"DATOS DE LA SESIÓN (fuente única de verdad):\n{json.dumps(ctx, ensure_ascii=False, default=str)}"
     )
@@ -251,15 +313,33 @@ def chat(session_id: str, message: str) -> str:
         reply = ai_engine.llm_chat(messages, max_tokens=450, temperature=0.4)
     except Exception as e:
         print(f"[LLM chat] {e}")
-        return _chat_fallback(ctx["valoracion"])
+        return _chat_fallback(ctx["valoracion"], ctx['vitales_ultimas_lecturas'])
     hist += [{"role": "user", "content": message}, {"role": "assistant", "content": reply}]
     _history[session_id] = hist[-10:]
     return reply
 
 
-def _chat_fallback(assessment: dict) -> str:
+def _chat_fallback(assessment: dict, vitals: dict | None = None) -> str:
     """Respuesta fija por reglas cuando el modelo de lenguaje no está disponible."""
-    lines = [assessment["summary"]]
+    lines = []
+    if vitals:
+        readings = vitals.get('lecturas_dispositivo', {})
+        labels = {'heartRate': 'Pulso', 'bloodOxygen': 'Oxígeno SpO2', 'hrv': 'Variabilidad PRV',
+                  'experimentalStressScore': 'Estrés experimental', 'audio_rms': 'Micrófono'}
+        values = []
+        for key, label in labels.items():
+            reading = readings.get(key, {})
+            if reading.get('value') is None:
+                values.append(f'{label}: sin lectura válida.')
+                continue
+            note = ' (última lectura válida; esperando señal)' if reading.get('status') == 'ultima_valida_esperando_senal' else ''
+            limitation = (' Estimación sin calibrar, fuera del triaje.' if key == 'bloodOxygen' and not reading.get('calibrated')
+                          else ' Estimación experimental, no validada clínicamente.' if key == 'experimentalStressScore'
+                          else ' Intervalos ópticos; no es ECG.' if key == 'hrv'
+                          else ' Nivel relativo sin calibrar.' if key == 'audio_rms' and reading.get('unit') != 'dBFS' else '')
+            values.append(f"{label}: {reading['value']:g} {reading.get('unit') or ''}{note}.{limitation}")
+        lines.append('El modelo de lenguaje no pudo responder; este resumen usa las lecturas recibidas al enviar la pregunta.\n' + '\n'.join(values))
+    lines.append(assessment["summary"])
     lines += [f["label"] + ": " + " ".join(f["evidence"]) for f in assessment["findings"]]
     for possibility in assessment["possibilities"]:
         lines.append("Posibilidad a confirmar: " + possibility["condition"] + ". " + " ".join(possibility["why"]) + " Confirmación: " + " ".join(possibility["confirmation"]))

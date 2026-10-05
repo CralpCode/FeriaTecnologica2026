@@ -214,7 +214,7 @@ class ApiService {
         API_CONFIG.ENDPOINTS.AI_CHAT,
         {
           method: 'POST',
-          body: JSON.stringify({ message, session_id: sid }),
+          body: JSON.stringify({ message, session_id: sid, vitals: currentVitals }),
         },
         100000 // El servidor local puede tardar hasta 90 s en responder.
       );

@@ -91,3 +91,10 @@ IA/data/icbhi/
 # Entorno aislado usado para validar la integracion
 .venv-integracion/
 Esp32/.cache/
+
+# Descargas y vistas temporales de documentacion de sensores
+tmp/
+tools/spo2/documentacion/*.pdf
+
+# Respaldos locales de SQLite y sus archivos auxiliares
+*.db.*

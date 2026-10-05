@@ -10,6 +10,7 @@ al servidor Backend FastAPI (http://localhost:8000/api/telemetry).
 """
 
 import sys
+import os
 import time
 import json
 import math
@@ -28,7 +29,7 @@ except ImportError:
     serial = None
     list_ports = None
 
-BACKEND_URL = "http://localhost:8000/api/telemetry"
+BACKEND_URL = os.getenv("SPIROSCAN_TELEMETRY_URL", "http://localhost:8000/api/telemetry")
 
 def listar_puertos():
     if list_ports is None:
@@ -159,7 +160,11 @@ def ejecutar_gateway(puerto_com, baudrate=115200):
     reintentos = 0
     while True:
         try:
-            with serial.Serial(puerto_com, baudrate, timeout=0.1) as ser:
+            with serial.Serial(port=None, baudrate=baudrate, timeout=0.3) as ser:
+                ser.port = puerto_com
+                ser.dtr = False
+                ser.rts = False
+                ser.open()
                 ser.reset_input_buffer()  # No reenviar muestras acumuladas antes de conectar.
                 print(f"[OK] ¡Conectado exitosamente al puerto {puerto_com}!")
                 print("[*] Esperando telemetría del ESP32...\n")

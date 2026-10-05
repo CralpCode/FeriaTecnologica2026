@@ -14,15 +14,18 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useVitals } from '../context/VitalsContext';
 import { AIExplainerModal } from '../components/AIExplainerModal';
-import { measurementValidity } from '../services/measurementQuality';
+import { BloodOxygenReading, MicrophoneLevel } from '../components/SensorReadouts';
+import { useDisplayedMeasurements } from '../hooks/useDisplayedMeasurements';
 
 export const AIAssistantScreen: React.FC = () => {
-  const { vitals, chatMessages, isChatLoading, sendChatMessage } = useVitals();
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
-  const valid = measurementValidity(vitals, now);
-  const audioAvailable = vitals.source === 'real' && vitals.audioUnit === 'dBFS'
-    && Number.isFinite(vitals.audio_rms) && vitals.audio_rms < 0 && now - Date.parse(vitals.timestamp) < 10000;
+  const { vitals, currentSessionId, connectedType, chatMessages, isChatLoading, sendChatMessage } = useVitals();
+  const { readings } = useDisplayedMeasurements(vitals, `${currentSessionId}:${connectedType}`);
+  const pulse = readings.heartRate;
+  const oxygen = readings.bloodOxygen;
+  const prv = readings.hrv;
+  const audio = readings.audio_rms;
+  const stress = readings.experimentalStressScore;
+  const retained = (reading?: { state: string }) => reading?.state === 'held' ? 'Última lectura válida; esperando señal' : undefined;
   const [inputText, setInputText] = useState('');
   const [showExplainer, setShowExplainer] = useState(false);
   const scrollViewRef = useRef<any>(null);
@@ -79,17 +82,18 @@ export const AIAssistantScreen: React.FC = () => {
             </View>
             <View style={styles.llamaStatusBadge}>
               <MaterialCommunityIcons name="brain" size={13} color={Colors.success} />
-              <Text style={styles.llamaStatusText}>Qwen3-Next · en esta Mac</Text>
+              <Text style={styles.llamaStatusText}>IA del servidor</Text>
             </View>
           </View>
           <View style={styles.vitalsGrid}>
             <LiveValue icon="heart" tint={Colors.heartRate} label="Pulso"
-                       value={valid.heartRate ? `${Math.round(vitals.heartRate)} BPM` : 'Sin lectura válida'} />
-            <LiveValue icon="water" tint={Colors.oxygen} label="Oxígeno SpO2"
-                       value={valid.bloodOxygen ? `${vitals.bloodOxygen.toFixed(1)} %` : 'No disponible'} />
-            <LiveValue icon="pulse" tint={Colors.stress} label="HRV" value="No disponible" />
-            <LiveValue icon="mic" tint={Colors.audio} label="Micrófono"
-                       value={audioAvailable ? `${vitals.audio_rms.toFixed(1)} dBFS` : 'Sin lectura'} />
+                       value={pulse ? `${Math.round(pulse.value)} BPM` : 'Sin lectura válida'} hint={retained(pulse)} />
+            <BloodOxygenReading reading={oxygen} vitals={vitals} />
+            <LiveValue icon="pulse" tint={Colors.stress} label="Variabilidad (PRV)"
+                       value={prv ? `${prv.value} ms` : 'Reuniendo intervalos'} hint={retained(prv) ?? 'Intervalos ópticos; no es ECG'} />
+            <LiveValue icon="sparkles" tint={Colors.stress} label="Estrés experimental"
+                       value={stress ? `${stress.value}/100` : 'Sin estimación'} hint={retained(stress) ?? 'Regla por PRV; no validada clínicamente'} />
+            <MicrophoneLevel reading={audio} />
           </View>
         </View>
 
@@ -138,7 +142,7 @@ export const AIAssistantScreen: React.FC = () => {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
               <ActivityIndicator size="small" color={Colors.primary} />
               <Text style={{ fontSize: 12, color: Colors.textSecondary, fontStyle: 'italic', flexShrink: 1 }}>
-                Qwen3-Next está redactando la respuesta…
+                El asistente está redactando la respuesta…
               </Text>
             </View>
           </View>
@@ -193,8 +197,8 @@ export const AIAssistantScreen: React.FC = () => {
   );
 };
 
-const LiveValue: React.FC<{ icon: React.ComponentProps<typeof Ionicons>['name']; tint: string; label: string; value: string }> = ({
-  icon, tint, label, value,
+const LiveValue: React.FC<{ icon: React.ComponentProps<typeof Ionicons>['name']; tint: string; label: string; value: string; hint?: string }> = ({
+  icon, tint, label, value, hint,
 }) => (
   <View style={styles.vitalGridCard}>
     <View style={[styles.vitalIconWrap, { backgroundColor: `${tint}14` }]}>
@@ -203,6 +207,7 @@ const LiveValue: React.FC<{ icon: React.ComponentProps<typeof Ionicons>['name'];
     <View style={styles.vitalCardContent}>
       <Text style={styles.vitalCardLabel}>{label}</Text>
       <Text style={styles.vitalCardValue} numberOfLines={1}>{value}</Text>
+      {hint && <Text style={styles.vitalCardHint}>{hint}</Text>}
     </View>
   </View>
 );
@@ -325,6 +330,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#0F172A',
   },
+  vitalCardHint: { fontSize: 11, color: '#64748B', marginTop: 3 },
   messageBubble: {
     flexDirection: 'row',
     padding: 14,

@@ -1,12 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useDisplayedMeasurements } from '../hooks/useDisplayedMeasurements';
 import { useVitals } from '../context/VitalsContext';
 import { useClinical } from '../context/ClinicalContext';
 import { measurementValidity } from '../services/measurementQuality';
 import { Colors } from '../theme/colors';
 import { color, font, radius, space, weight } from '../theme/tokens';
 import { HospitalEcgMonitor } from '../components/HospitalEcgMonitor';
+import { BloodOxygenReading, MicrophoneLevel } from '../components/SensorReadouts';
 import { DeviceScanControls } from '../components/DeviceScanControls';
 import { TriageCard } from '../components/TriageCard';
 import { Centered, Columns } from '../components/ResponsiveContainer';
@@ -21,18 +23,15 @@ interface DashboardScreenProps {
 
 /** Monitoreo: semáforo, pulso en vivo y todas las lecturas del dispositivo con su estado real. */
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToAI, onNavigateToCharts, onOpenConsulta }) => {
-  const { vitals, connectedType } = useVitals();
+  const { vitals, connectedType, currentSessionId } = useVitals();
   const { triage } = useClinical();
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
-
+  const { now, readings } = useDisplayedMeasurements(vitals, `${currentSessionId}:${connectedType}`);
   const valid = measurementValidity(vitals, now);
-  const fresh = now - Date.parse(vitals.timestamp) >= 0 && now - Date.parse(vitals.timestamp) < 10000
-    && vitals.device_connected !== false && vitals.power !== 'standby';
-  const oxygenEstimateAvailable = vitals.source === 'real' && vitals.validity?.bloodOxygen === true && fresh;
-  const prvValid = vitals.source === 'real' && vitals.validity?.hrv === true && fresh;
-  const audioAvailable = vitals.source === 'real' && vitals.audioUnit === 'dBFS'
-    && vitals.validity?.audio_rms === true && Number.isFinite(vitals.audio_rms) && vitals.audio_rms < 0 && fresh;
+  const pulse = readings.heartRate;
+  const oxygen = readings.bloodOxygen;
+  const prv = readings.hrv;
+  const audio = readings.audio_rms;
+  const stress = readings.experimentalStressScore;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -50,7 +49,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToAI
           left={
             <View>
               <TriageCard triage={triage} />
-              <HospitalEcgMonitor heartRate={valid.heartRate ? vitals.heartRate : 0} bloodOxygen={valid.bloodOxygen ? vitals.bloodOxygen : 0}
+              <HospitalEcgMonitor heartRate={valid.heartRate ? vitals.heartRate : 0} bloodOxygen={oxygen?.value ?? 0}
+                                  bloodOxygenHint={oxygen ? `${oxygen.state === 'held' ? 'Última estimación; esperando señal' : 'Estimación del sensor'}; ${oxygen.calibrated ? 'calibrada' : 'sin calibrar, fuera del triaje'}` : undefined}
                                   audioDecibels={0} isAlert={false} />
               <Button label="Preguntar al asistente sobre esta sesión" icon="chatbubbles-outline" variant="secondary"
                       onPress={onNavigateToAI} full style={{ marginBottom: space.lg }} />
@@ -61,19 +61,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToAI
               <SectionHeader title="Lecturas en vivo" subtitle="Solo se muestran valores válidos; el resto indica por qué no hay dato."
                              right={<Button label="Gráficas" icon="stats-chart-outline" variant="ghost" onPress={onNavigateToCharts} />} />
               <View style={styles.grid}>
+                <BloodOxygenReading reading={oxygen} vitals={vitals} />
                 <VitalTile icon="heart-pulse" tint={Colors.heartRate} label="Pulso" unit="BPM"
-                           value={valid.heartRate ? String(Math.round(vitals.heartRate)) : null}
-                           hint={valid.heartRate ? 'Lectura válida; interpretar con edad y reposo' : 'Sin lectura válida'} source="MAX30102" />
-                <VitalTile icon="water-percent" tint={Colors.oxygen} label="Oxígeno (SpO2)" unit="%"
-                           value={oxygenEstimateAvailable ? vitals.bloodOxygen.toFixed(1) : null}
-                           hint={valid.bloodOxygen ? 'Estimación calibrada' : oxygenEstimateAvailable ? 'Estimación sin calibrar; excluida del triaje' : 'Sin lectura válida'} source="MAX30102" />
-                <VitalTile icon="heart-flash" tint={Colors.pressure} label="Variabilidad de pulso (PRV)" unit="ms" value={prvValid ? String(vitals.hrv) : null}
-                           hint={prvValid ? "RMSSD de intervalos ópticos; no es ECG" : "Sin intervalos válidos suficientes"} source="MAX30102" />
-                <VitalTile icon="brain" tint={Colors.stress} label="Índice de estrés" unit="/100" value={null}
-                           hint="No disponible: experimental" source="Estimación" />
-                <VitalTile icon="microphone" tint={Colors.audio} label="Micrófono" unit="dBFS"
-                           value={audioAvailable ? vitals.audio_rms.toFixed(1) : null}
-                           hint={audioAvailable ? 'Nivel digital, no presión sonora' : 'Sin lectura de audio'} source="INMP441" />
+                           value={pulse ? String(Math.round(pulse.value)) : null}
+                           hint={pulse?.state === 'held' ? 'Última lectura válida; esperando señal' : valid.heartRate ? 'Lectura válida; interpretar con edad y reposo' : 'Sin lectura válida'} source="MAX30102" />
+                <VitalTile icon="heart-flash" tint={Colors.pressure} label="Variabilidad (PRV)" unit="ms" value={prv ? String(prv.value) : null}
+                           hint={prv?.state === "held" ? "Última PRV válida; reuniendo intervalos" : prv ? "RMSSD de intervalos ópticos; no es ECG" : "Reuniendo intervalos de pulso válidos"} source="MAX30102" />
+                <VitalTile icon="brain" tint={Colors.stress} label="Estrés experimental" unit={stress ? '/100' : ''}
+                           value={stress ? String(stress.value) : null}
+                           hint={stress?.state === 'held' ? 'Última estimación; no validada' : stress ? 'Regla por PRV; no mide estrés clínico' : 'Sin estimación: requiere PRV válida y valor del ESP32'}
+                           source="Experimental; fuera del triaje" />
+                <MicrophoneLevel reading={audio} />
               </View>
             </View>
           }
