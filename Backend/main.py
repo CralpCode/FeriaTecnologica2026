@@ -150,6 +150,8 @@ class AudioStartInput(BaseModel):
     source: Literal["real", "simulated", "unknown"] = "unknown"
     # Número de la orden de grabación que el ESP32 recibió (GET /api/device/comando); opcional (botón)
     comando_id: Optional[str] = Field(None, max_length=32)
+    # Milisegundos que ya lleva grabando: el ESP32 registra la captura mientras envía la anterior
+    elapsed_ms: int = Field(0, ge=0, le=120000)
 
 class AudioArmInput(BaseModel):
     session_id: str
@@ -571,9 +573,13 @@ async def audio_arm(payload: AudioArmInput):
         raise HTTPException(status_code=400, detail=str(e))
     mode = audio_service.resolve_mode(loc, payload.mode)
     sid = _get_effective_session(payload.session_id)
-    state = audio_service.recording_status(sid)
-    if state["stage"] in ("capturing", "uploading"):
-        raise HTTPException(status_code=409, detail="Espera a que termine la grabación y el envío antes de iniciar otra zona.")
+    blocker = audio_service.arm_blocker(sid)
+    delivered = _armed.get("entregado") if _armed.get("session_id") == sid else None
+    if not blocker and delivered and time.time() - delivered < RECORDING_SECONDS + 10:
+        # El estetoscopio ya tomó la orden anterior y graba; su registro llega entre bloques del envío.
+        blocker = "Espera a que termine de grabar esta zona (15 s)."
+    if blocker:
+        raise HTTPException(status_code=409, detail=blocker)
     _armed.clear()
     _armed.update({"session_id": sid, "location": loc, "mode": mode,
                    "at": time.time(), "comando_id": uuid.uuid4().hex[:8], "entregado": None})
@@ -674,11 +680,13 @@ async def audio_start(payload: AudioStartInput):
     try:
         # Sin "source": solo el ESP32 usa este flujo (los emuladores envían "simulated"), así que es audio del dispositivo.
         source = payload.source if "source" in payload.model_fields_set else "real"
-        rec_id = audio_service.start(sid, location, payload.sample_rate, armed.get("mode") if armed else None, source)
+        rec_id = audio_service.start(sid, location, payload.sample_rate, armed.get("mode") if armed else None, source,
+                                     payload.elapsed_ms / 1000)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await manager.broadcast({"type": "RECORDING_STARTED", "session_id": sid,
-                             "data": {"recording_id": rec_id, "location": location}})
+                             "data": {"recording_id": rec_id, "location": location,
+                                      "elapsed_s": payload.elapsed_ms / 1000}})
     return {"recording_id": rec_id, "session_id": sid}
 
 
@@ -691,7 +699,8 @@ async def audio_chunk(request: Request, recording_id: str = Query(...), offset: 
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"recording_id": recording_id, "bytes": total}
+    # Mientras envía, el ESP32 no manda telemetría: la siguiente orden viaja en esta respuesta.
+    return {"recording_id": recording_id, "bytes": total, "comando": await _deliver_command()}
 
 
 @app.post("/api/audio/finish")
@@ -706,7 +715,7 @@ async def audio_finish(recording_id: str = Query(...), background: bool = False,
             receipt = audio_service.queue_receipt(rec)
             await manager.broadcast({"type": "RECORDING_QUEUED", "session_id": rec["session_id"],
                                      "data": {**receipt, "location": rec["location"]}})
-            return JSONResponse(receipt, status_code=202)
+            return JSONResponse({**receipt, "comando": await _deliver_command()}, status_code=202)
         result = await asyncio.to_thread(audio_service.finish, recording_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))

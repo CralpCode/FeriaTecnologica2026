@@ -2093,7 +2093,8 @@ void loop() {
     optical_probe_requested = false;
     run_optical_emitter_probe();
   }
-  if (!ausc_busy()) {
+  // Se toma una orden solo si hay lugar en la cola de envio (puede seguir enviandose la zona anterior).
+  if (ausc_can_record()) {
     String command_id = ausc_take_recording_command();
     if (recording_requested || command_id.length()) {
       recording_requested = false;

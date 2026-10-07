@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { apiService } from '../services/api';
 import { useVitals } from './VitalsContext';
-import { AuscultationFocus, AuscultationMode, ClinicalAlert, RecordingResult, TriageResult } from '../types/vitals';
+import { AuscultationFocus, AuscultationMode, ClinicalAlert, DevicePendingAudio, RecordingResult, TriageResult } from '../types/vitals';
 
 export type RecordingPhase = 'idle' | 'armed' | 'recording' | 'processing' | 'done';
 
@@ -20,6 +20,8 @@ interface ClinicalContextProps {
   commandDelivered: boolean;
   /** Hora en que se dio la orden (para avisar si el estetoscopio no responde). */
   armedAt: number | null;
+  /** Grabaciones que el estetoscopio aún envía (mientras tanto se puede grabar otra zona). */
+  devicePending: DevicePendingAudio[];
   isLiveConnected: boolean;
   armRecording: (location: AuscultationFocus, mode: AuscultationMode) => Promise<void>;
   acknowledgeAlert: (id: number) => Promise<void>;
@@ -42,6 +44,7 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
   const [commandDelivered, setCommandDelivered] = useState(false);
   const [armedAt, setArmedAt] = useState<number | null>(null);
+  const [devicePending, setDevicePending] = useState<DevicePendingAudio[]>([]);
   const [isLiveConnected, setIsLiveConnected] = useState(false);
   const activeRecording = useRef<string | null>(null);
   const sessionRef = useRef(currentSessionId);
@@ -70,6 +73,7 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
     activeRecording.current = null;
     setArmedAt(null);
     setArmedLocation(null);
+    setDevicePending([]);
     refresh();
 
     let ws: WebSocket | null = null;
@@ -119,7 +123,7 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
             setPhase('recording');
             setRecordingStage('capturing');
             setCommandDelivered(true);
-            setRecordingStartedAt(Date.now());
+            setRecordingStartedAt(Date.now() - (msg.data.elapsed_s || 0) * 1000);
             break;
           case 'TRIAGE_UPDATE':
             setTriage(msg.data);
@@ -160,8 +164,9 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   // Consultar el estado guardado incluso con WebSocket: recupera eventos perdidos
   // y distingue el envío de audio de la inferencia.
+  const sendingAudio = devicePending.length > 0;
   useEffect(() => {
-    if (phase !== 'armed' && phase !== 'recording' && phase !== 'processing') return;
+    if (phase !== 'armed' && phase !== 'recording' && phase !== 'processing' && !sendingAudio) return;
     let closed = false;
     let pending = false;
     const poll = async () => {
@@ -169,7 +174,9 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
       pending = true;
       try {
         const state = await apiService.getRecordingStatus();
-        if (closed || !armedAt || state.age_s > (Date.now() - armedAt) / 1000 + 10
+        if (closed) return;
+        setDevicePending(state.pending ?? []);
+        if (!armedAt || state.age_s > (Date.now() - armedAt) / 1000 + 10
             || state.location !== armedLocation) return;
         if (activeRecording.current && state.recording_id !== activeRecording.current) return;
         if (state.recording_id) activeRecording.current = state.recording_id;
@@ -181,9 +188,13 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
           setPhase('processing');
           setRecordingStage('processing');
           refresh();
-        } else if (['capturing', 'uploading'].includes(state.stage)) {
+        } else if (['waiting_upload', 'uploading'].includes(state.stage)) {
+          // Captura terminada: el estetoscopio la envía y ya se puede grabar otra zona.
+          setPhase('processing');
+          setRecordingStage('uploading');
+        } else if (state.stage === 'capturing') {
           setPhase('recording');
-          setRecordingStage(state.stage as 'capturing' | 'uploading' | 'processing');
+          setRecordingStage('capturing');
           setRecordingStartedAt((prev) => prev ?? Date.now() - state.age_s * 1000);
         }
       } catch {} finally { pending = false; }
@@ -191,7 +202,7 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
     poll();
     const timer = setInterval(poll, 2500);
     return () => { closed = true; clearInterval(timer); };
-  }, [phase, armedAt, armedLocation, refresh]);
+  }, [phase, armedAt, armedLocation, refresh, sendingAudio]);
 
   // Respaldo: si el WebSocket no está disponible (p. ej. algunos túneles), se consulta periódicamente.
   useEffect(() => {
@@ -238,6 +249,7 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
         recordingStartedAt,
         commandDelivered,
         armedAt,
+        devicePending,
         isLiveConnected,
         armRecording,
         acknowledgeAlert,

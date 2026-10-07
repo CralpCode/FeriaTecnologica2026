@@ -13,6 +13,7 @@ import { Banner, Button, Card, ProgressRing, StatusPill, useReducedMotion } from
 import { Waveform } from '../Waveform';
 
 const RECORDING_SECONDS = 15;
+const AUDIO_BYTES = 16000 * 2 * RECORDING_SECONDS;   // 16 kHz, 16 bit, mono
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? '—' : `${Math.round(v * 100)} %`);
 
 export const RESULT_STYLE: Record<string, { label: string; tone: Tone; icon: React.ComponentProps<typeof Ionicons>['name'] }> = {
@@ -32,7 +33,7 @@ const STAGES = ['Grabar', 'Estetoscopio', 'Grabando', 'Envío y análisis', 'Res
  * (GET /api/device/comando). La zona la pone el servidor según la orden.
  */
 export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: AuscultationFocus }> = ({ mode, focus }) => {
-  const { phase, recordingStage, armedLocation, lastResult, recordings, armRecording, recordingStartedAt, commandDelivered, armedAt } = useClinical();
+  const { phase, recordingStage, armedLocation, lastResult, recordings, armRecording, recordingStartedAt, commandDelivered, armedAt, devicePending } = useClinical();
   const [guide, setGuide] = useState<FocusGuide | null>(null);
   const [showSteps, setShowSteps] = useState(false);
   const [showAsk, setShowAsk] = useState(false);
@@ -57,8 +58,16 @@ export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: Auscultati
   }, [recordingHere]);
 
   const pendingAudios = recordings.filter((r) => r.status === 'queued' || r.status === 'processing');
+  // Lo que el estetoscopio todavía envía (la captura ya terminó): se puede grabar otra zona mientras tanto.
+  const sending = devicePending.filter((p) => p.stage !== 'capturing');
   const latestHere = recordings.find((r) => r.location === focus);
-  const processingHere = latestHere?.status === 'queued' || latestHere?.status === 'processing';
+  const sendingHere = sending.some((p) => p.location === focus);
+  const processingHere = sendingHere || latestHere?.status === 'queued' || latestHere?.status === 'processing';
+  const queueNotes = [
+    ...sending.map((p) => `${focusName(p.location)}: ${p.stage === 'uploading'
+      ? `enviando ${Math.min(99, Math.round((p.bytes_received / AUDIO_BYTES) * 100))} %` : 'en cola de envío'}`),
+    ...pendingAudios.map((r) => `${focusName(r.location)}: ${r.status === 'queued' ? 'en cola de análisis' : 'analizando'}`),
+  ];
 
   // Resultado de ESTE foco: el que acaba de llegar o el último guardado
   const result: RecordingResult | null =
@@ -76,7 +85,9 @@ export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: Auscultati
     try {
       await armRecording(focus, mode);
     } catch (e: any) {
-      setError(`No se pudo contactar al servidor: ${e?.message || e}`);
+      // El servidor explica por qué no se puede todavía (grabando o cola llena); si no, falló la conexión.
+      const message = String(e?.message || e);
+      setError(/espera/i.test(message) ? message : `No se pudo contactar al servidor: ${message}`);
     } finally {
       setArming(false);
     }
@@ -98,8 +109,8 @@ export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: Auscultati
 
   return (
     <View>
-      {pendingAudios.length > 0 && <Banner tone="neutral" title={`${pendingAudios.length} audio(s) en análisis`}
-        text={pendingAudios.map((r) => `${focusName(r.location)}: ${r.status === 'queued' ? 'en cola' : 'analizando'}`).join(' · ') + '. Puedes grabar otra zona cuando termine el envío.'} />}
+      {queueNotes.length > 0 && <Banner tone="neutral" title={`${queueNotes.length} grabación(es) en proceso`}
+        text={queueNotes.join(' · ') + '. Puedes grabar otra zona mientras tanto.'} />}
       <Card elevated>
         <View style={styles.headRow}>
           <View style={[styles.codeBadge, status && { backgroundColor: toneColors[status.tone].bg, borderColor: toneColors[status.tone].border }]}>
@@ -123,7 +134,8 @@ export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: Auscultati
             <View style={styles.idleRow}>
               <View style={styles.idleIcon}><MaterialCommunityIcons name="stethoscope" size={26} color={color.primary} /></View>
               <Text style={styles.stageText}>
-                {processingHere ? 'Audio recibido y comprobado. El análisis continúa; puedes grabar otra zona.'
+                {sendingHere ? 'Grabación terminada. El estetoscopio la está enviando; puedes grabar otra zona.'
+                  : processingHere ? 'Audio recibido y comprobado. El análisis continúa; puedes grabar otra zona.'
                   : retry ? 'La grabación anterior no se completó o no tuvo calidad suficiente. Revisa el mensaje del resultado y repite.'
                   : result ? 'Este foco ya tiene resultado. Puedes repetirlo si dudas de la grabación.'
                   : <>Coloca el estetoscopio en <Text style={styles.strong}>{FOCUS_INFO[focus].short.toLowerCase()}</Text> y toca

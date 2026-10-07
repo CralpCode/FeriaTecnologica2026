@@ -192,3 +192,22 @@ El servidor ahora cierra al arrancar (y antes de informar el estado) cualquier c
 sin datos nuevos hace más de 180 s, en cualquier sesión.
 El filtro de escucha «Según el foco» usa en corazón la banda que analiza la IA (20–600 Hz)
 y en pulmón el diafragma (más de 100 Hz).
+
+## Cola de capturas en el ESP32 (7 de octubre)
+
+El análisis tarda ~1 s; el tiempo del examen es el envío (480 KB por hotspot → Tailscale Funnel).
+El ESP32 guarda ahora hasta 2 capturas en flash (partición propia `spiroscan_partitions.csv`, LittleFS
+de 1.56 MB) y una sola tarea de red registra, envía y confirma cada una mientras el loop graba la zona
+siguiente. La siguiente orden viaja en las respuestas de `/api/audio/chunk` y `/finish`. Para que TLS y
+captura quepan juntos: búfer del micrófono de 8 KB, escrituras de 2 KB y nunca un saludo TLS nuevo
+durante una captura (mínimo observado: 23 KB libres, búfer usado como máximo 2.5 de 8 KB).
+
+La confirmación vacía por la conexión reutilizada quedaba sin respuesta (HTTP -11) aunque el servidor
+ya había respondido 202: ahora se envía con cuerpo `{}` y hay 6 reintentos con espera creciente
+(el servidor no duplica bloques ni confirmaciones). Se agregaron DNS de respaldo (1.1.1.1 y 8.8.8.8) y
+diagnóstico de DNS/señal en cada fallo de red.
+
+Prueba física final con el ESP32 cerca del teléfono, 5 zonas por ronda, todas `done`, verificadas y sin
+reintentos: con cola 186 s (37 s por zona), sin cola 241 s (48 s por zona). Envío sin grabación simultánea
+21–30 s; con grabación simultánea 27–39 s. El servidor no deja pedir otra zona mientras una se graba,
+mientras una orden ya entregada aún no se registra, ni con 2 capturas pendientes de envío.

@@ -1,7 +1,7 @@
 import { API_CONFIG, getSessionId } from '../config/api';
 import {
   VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange, AcousticAnalysisResult,
-  AuscultationFocus, AuscultationMode, RecordingResult, ClinicalAlert, FocusGuide, HeartModelInfo,
+  AuscultationFocus, AuscultationMode, RecordingResult, DevicePendingAudio, ClinicalAlert, FocusGuide, HeartModelInfo,
   SessionReport, TriageResult, PatientContext, ClinicalAssessment, SessionOverview, ReportItem, LungModelsInfo,
 } from '../types/vitals';
 
@@ -228,7 +228,7 @@ class ApiService {
   }
 
   getRecordingStatus(): Promise<{ recording_id?: string; stage: string; age_s: number; location: string;
-    bytes_received: number; result: RecordingResult | null }> {
+    bytes_received: number; result: RecordingResult | null; pending?: DevicePendingAudio[] }> {
     return this.request(`/api/audio/status?session_id=${encodeURIComponent(getSessionId())}`);
   }
 

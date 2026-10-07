@@ -256,12 +256,12 @@ def get_distinct_sessions():
 # Grabaciones de auscultación
 # ---------------------------------------------------------------------------
 
-def create_recording(rec_id: str, session_id: str, location: str, sample_rate: int):
+def create_recording(rec_id: str, session_id: str, location: str, sample_rate: int, created_at: datetime | None = None):
     conn = get_db_connection()
     with conn:
         conn.execute(
             "INSERT INTO recordings (id, session_id, location, created_at, sample_rate) VALUES (?, ?, ?, ?, ?)",
-            (rec_id, session_id, location, datetime.now().isoformat(), sample_rate),
+            (rec_id, session_id, location, (created_at or datetime.now()).isoformat(), sample_rate),
         )
     conn.close()
 

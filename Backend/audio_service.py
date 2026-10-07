@@ -13,7 +13,7 @@ import wave
 import time
 import hashlib
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from pathlib import Path
 
@@ -53,11 +53,14 @@ def _wav_path(rec_id: str) -> Path:
     return REC_DIR / f"{rec_id}.wav"
 
 
-def start(session_id: str, location: str, sample_rate: int, mode: str | None = None, source: str = "unknown") -> str:
+def start(session_id: str, location: str, sample_rate: int, mode: str | None = None, source: str = "unknown",
+          elapsed_s: float = 0.0) -> str:
+    """elapsed_s: segundos que el dispositivo ya lleva grabando (registra la captura mientras envía otra)."""
     location = _check_location(location)
-    rec_id = f"rec_{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:4]}"
+    started = datetime.now() - timedelta(seconds=max(0.0, elapsed_s))
+    rec_id = f"rec_{started:%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:4]}"
     _pcm_path(rec_id).write_bytes(b"")
-    database.create_recording(rec_id, session_id, location, sample_rate)
+    database.create_recording(rec_id, session_id, location, sample_rate, created_at=started)
     database.update_recording(rec_id, mode=resolve_mode(location, mode), source=source)
     return rec_id
 
@@ -119,22 +122,49 @@ def expire_stale_recordings(session_id: str | None = None) -> int:
     return expired
 
 
-def recording_status(session_id: str) -> dict:
-    expire_stale_recordings(session_id)
-    rows = database.list_recordings(session_id=session_id, limit=100)
-    if not rows:
-        return {"stage": "idle"}
-    active = next((r for r in rows if r['status'] == 'recording'), rows[0])
-    rec = database.get_recording(active["recording_id"])
+CAPTURE_SECONDS = 15
+DEVICE_QUEUE = 2   # el ESP32 guarda en flash 1 captura enviándose + 1 grabándose
+
+
+def _stage(rec: dict) -> tuple[str, float, int]:
+    """Etapa de una grabación: capturing, waiting_upload, uploading, queued, processing, done o error."""
     age = (datetime.now() - datetime.fromisoformat(rec["created_at"])).total_seconds()
     pcm = _pcm_path(rec["id"])
     size = pcm.stat().st_size if pcm.exists() else 0
     stage = rec["status"]
     if stage == "recording":
-        stage = "uploading" if age >= 15 else "capturing"
+        stage = "uploading" if size else ("capturing" if age < CAPTURE_SECONDS + 2 else "waiting_upload")
+    return stage, age, size
+
+
+def recording_status(session_id: str) -> dict:
+    """La grabación más reciente (la que la app acaba de pedir) y las que el dispositivo aún no termina de enviar."""
+    expire_stale_recordings(session_id)
+    rows = database.list_recordings(session_id=session_id, limit=100)
+    if not rows:
+        return {"stage": "idle", "pending": []}
+    pending = []
+    for r in rows:
+        if r["status"] != "recording":
+            continue
+        stage, age, size = _stage(database.get_recording(r["recording_id"]))
+        pending.append({"recording_id": r["recording_id"], "location": r["location"], "stage": stage,
+                        "age_s": age, "bytes_received": size})
+    rec = database.get_recording(rows[0]["recording_id"])
+    stage, age, size = _stage(rec)
     return {"stage": stage, "recording_id": rec["id"], "location": rec["location"],
-            "age_s": age, "bytes_received": size,
+            "age_s": age, "bytes_received": size, "pending": pending,
             "result": _stored_result(rec) if stage in ("done", "error") else None}
+
+
+def arm_blocker(session_id: str) -> str | None:
+    """Motivo para no pedir otra zona todavía, o None si el dispositivo puede grabarla."""
+    pending = recording_status(session_id)["pending"]
+    if any(p["stage"] == "capturing" for p in pending):
+        return "Espera a que termine de grabar esta zona (15 s)."
+    if len(pending) >= DEVICE_QUEUE:
+        return "El estetoscopio todavía está enviando grabaciones anteriores; espera unos segundos."
+    return None
 
 
 def prepare_finish(rec_id: str, expected_bytes: int | None = None,

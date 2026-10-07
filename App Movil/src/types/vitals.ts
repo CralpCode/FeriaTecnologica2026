@@ -172,6 +172,15 @@ export interface TriageResult {
   };
 }
 
+/** Grabación que el estetoscopio todavía no termina de enviar (GET /api/audio/status -> pending). */
+export interface DevicePendingAudio {
+  recording_id: string;
+  location: AuscultationFocus;
+  stage: 'capturing' | 'waiting_upload' | 'uploading';
+  age_s: number;
+  bytes_received: number;
+}
+
 export interface RecordingResult {
   status?: 'recording' | 'queued' | 'processing' | 'done' | 'error';
   recording_id: string;

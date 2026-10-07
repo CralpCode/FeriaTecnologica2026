@@ -1,0 +1,6 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+# app 2.375 MB (el firmware usa ~1.8 MB); LittleFS 1.56 MB para la cola de audio (1 enviandose + 1 grabandose).
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x260000,
+spiffs,   data, spiffs,  0x270000,0x190000,
