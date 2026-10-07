@@ -65,7 +65,8 @@ export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: Auscultati
   const processingHere = sendingHere || latestHere?.status === 'queued' || latestHere?.status === 'processing';
   const queueNotes = [
     ...sending.map((p) => `${focusName(p.location)}: ${p.stage === 'uploading'
-      ? `enviando ${Math.min(99, Math.round((p.bytes_received / AUDIO_BYTES) * 100))} %` : 'en cola de envío'}`),
+      ? `enviando ${Math.min(99, Math.round((p.bytes_received / (p.bytes_total || AUDIO_BYTES)) * 100))} %`
+      : 'en cola de envío'}`),
     ...pendingAudios.map((r) => `${focusName(r.location)}: ${r.status === 'queued' ? 'en cola de análisis' : 'analizando'}`),
   ];
 

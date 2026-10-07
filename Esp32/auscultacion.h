@@ -4,8 +4,9 @@
 //
 // Protocolo (ver Backend/audio_service.py):
 //   POST /api/audio/start   {"device_id","sample_rate","comando_id","elapsed_ms"}  -> {"recording_id"}
-//   POST /api/audio/chunk?recording_id=...&offset=...   PCM int16 LE mono (64 KB por bloque)
-//   POST /api/audio/finish?recording_id=...&expected_bytes=...&sha256=...  -> 202 en cola de analisis
+//   POST /api/audio/chunk?recording_id=...&offset=...&codec=rice1&total=...   audio comprimido sin perdida
+//   POST /api/audio/finish?recording_id=...&codec=rice1&expected_bytes=...&sha256=...  -> 202 en cola
+// expected_bytes y sha256 son del PCM ORIGINAL (int16 LE mono): el servidor descomprime y los comprueba.
 // Las respuestas de chunk/finish traen la siguiente orden ("comando"): la telemetria se pausa al enviar.
 //
 // La captura se guarda primero en flash, en una cola de 2: mientras la tarea de red envia una zona,
@@ -23,6 +24,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include "SpiroScanTLSClient.h"
+#include "rice_codec.h"
 #include <LittleFS.h>
 #include <mbedtls/sha256.h>
 #include <freertos/stream_buffer.h>
@@ -70,7 +72,8 @@ struct AuscJob {
   volatile bool failed;      // captura incompleta: se avisa al servidor y no se envia
   volatile bool discarded;   // el servidor rechazo la orden (vencida o de otra zona): se borra sin enviar
   unsigned long started_ms;
-  uint32_t bytes;
+  uint32_t bytes;          // PCM original (lo que se verifica en el servidor)
+  uint32_t stream_bytes;   // archivo comprimido que se envia
   uint8_t reg_failures;
   char command[33];
   char rec_id[48];
@@ -90,6 +93,11 @@ static volatile bool ausc_capture_done = false;
 static int ausc_fill_pos = 0;
 static uint32_t ausc_samples_total = 0;
 static float ausc_dc = 0.0f;
+// Compresion sin perdida mientras se graba (rice_codec.h) y SHA-256 del PCM original en la misma pasada.
+static_assert(AUSC_CHUNK_SAMPLES == RICE_BLOCK, "cada escritura en flash es un bloque comprimido");
+static uint8_t ausc_rice_out[RICE_MAX_OUT];
+static mbedtls_sha256_context ausc_sha;
+static uint32_t ausc_stream_written = 0;
 // Bufer fijo (no se reserva en cada captura: la tarea de red puede tener TLS abierto al mismo tiempo).
 static uint8_t ausc_ring_storage[AUSC_RING_BYTES + 1];
 static StaticStreamBuffer_t ausc_ring_struct;
@@ -355,11 +363,12 @@ static void ausc_upload_job(int j, HTTPClient& http, SpiroScanTLSClient& tls, Wi
   bool ok = !job.failed;
   if (ok) {
     File input = LittleFS.open(path, "r");
-    if (!input || input.size() != job.bytes) {
+    if (!input || input.size() != job.stream_bytes) {
       Serial.println("[AUSC] No se pudo abrir el audio local para envio.");
       ok = false;
     }
-    String url = ausc_server() + "/api/audio/chunk?recording_id=" + job.rec_id;
+    String url = ausc_server() + "/api/audio/chunk?recording_id=" + job.rec_id + "&codec=rice1&total=" +
+                 String(job.stream_bytes);
     while (ok && input.available()) {
       ausc_register_pending(http, tls, plain);
       size_t size = min((size_t)input.available(), (size_t)AUSC_UPLOAD_BLOCK);
@@ -385,7 +394,7 @@ static void ausc_upload_job(int j, HTTPClient& http, SpiroScanTLSClient& tls, Wi
   }
   if (ok) {
     String finishUrl = ausc_server() + "/api/audio/finish?recording_id=" + job.rec_id +
-                       "&background=true&expected_bytes=" + String(job.bytes) + "&sha256=" + job.sha;
+                       "&background=true&codec=rice1&expected_bytes=" + String(job.bytes) + "&sha256=" + job.sha;
     ok = false;
     int code = 0;
     for (int attempt = 0; attempt < AUSC_SEND_ATTEMPTS && !ok; ++attempt) {
@@ -624,6 +633,7 @@ bool ausc_start(const String& command_id = "") {
   job.discarded = false;
   job.reg_failures = 0;
   job.bytes = 0;
+  job.stream_bytes = 0;
   job.sha[0] = '\0';
   job.rec_id[0] = '\0';
   strncpy(job.command, command_id.c_str(), sizeof(job.command) - 1);
@@ -631,6 +641,9 @@ bool ausc_start(const String& command_id = "") {
   job.started_ms = millis();
   ausc_capture_job = slot;
 
+  mbedtls_sha256_init(&ausc_sha);
+  mbedtls_sha256_starts_ret(&ausc_sha, 0);
+  ausc_stream_written = 0;
   ausc_capture_error = false;
   ausc_capture_done = false;
   ausc_fill_pos = 0;
@@ -668,22 +681,12 @@ bool ausc_start(const String& command_id = "") {
   return true;
 }
 
-static String ausc_audio_sha256(const char* path) {
-  File audio = LittleFS.open(path, "r");
-  if (!audio || audio.size() != AUSC_SAMPLE_RATE * 2 * AUSC_DURATION_S) return "";
-  mbedtls_sha256_context ctx;
-  mbedtls_sha256_init(&ctx);
-  mbedtls_sha256_starts_ret(&ctx, 0);
-  while (audio.available()) {
-    size_t count = audio.read((uint8_t*)ausc_buffers[0], AUSC_CHUNK_SAMPLES * sizeof(int16_t));
-    if (!count) { audio.close(); mbedtls_sha256_free(&ctx); return ""; }
-    mbedtls_sha256_update_ret(&ctx, (uint8_t*)ausc_buffers[0], count);
-  }
-  uint8_t hash[32]; char hex[65];
-  mbedtls_sha256_finish_ret(&ctx, hash);
-  mbedtls_sha256_free(&ctx); audio.close();
-  for (int i = 0; i < 32; ++i) snprintf(hex + i * 2, 3, "%02x", hash[i]);
-  return String(hex);
+// Comprime y guarda un bloque; el SHA-256 se calcula sobre el PCM original.
+static bool ausc_store_block(size_t samples) {
+  mbedtls_sha256_update_ret(&ausc_sha, (const uint8_t*)ausc_buffers[0], samples * sizeof(int16_t));
+  size_t size = rice_encode_block(ausc_buffers[0], samples, ausc_rice_out);
+  ausc_stream_written += size;
+  return ausc_spool.write(ausc_rice_out, size) == size;
 }
 
 // Cierra la captura y la deja en la cola de envio; el loop queda libre para la zona siguiente.
@@ -691,17 +694,23 @@ static void ausc_finish() {
   ausc_state = AUSC_PROCESSING;
   int slot = ausc_capture_job;
   AuscJob& job = ausc_jobs[slot];
-  if (ausc_fill_pos && ausc_spool.write((uint8_t*)ausc_buffers[0], ausc_fill_pos * sizeof(int16_t)) != ausc_fill_pos * sizeof(int16_t))
-    ausc_capture_error = true;
+  if (ausc_fill_pos && !ausc_store_block(ausc_fill_pos)) ausc_capture_error = true;
   ausc_spool.close();
-  char path[12]; ausc_job_path(slot, path, sizeof(path));
-  String digest = ausc_capture_error ? String("") : ausc_audio_sha256(path);
+  job.stream_bytes = ausc_stream_written;
+  uint8_t hash[32];
+  char hex[65] = "";
+  mbedtls_sha256_finish_ret(&ausc_sha, hash);
+  mbedtls_sha256_free(&ausc_sha);
+  for (int i = 0; i < 32; ++i) snprintf(hex + i * 2, 3, "%02x", hash[i]);
+  String digest = ausc_capture_error || ausc_samples_total != (uint32_t)AUSC_SAMPLE_RATE * AUSC_DURATION_S
+                  ? String("") : String(hex);
   job.bytes = ausc_samples_total * sizeof(int16_t);
   job.failed = ausc_capture_error || digest.length() != 64;
   strncpy(job.sha, digest.c_str(), sizeof(job.sha) - 1);
   job.sha[sizeof(job.sha) - 1] = '\0';
-  Serial.printf("[AUSC] Captura: %u muestras; %s; bufer max %u/%u; memoria libre %u, minima %u\r\n",
-                (unsigned)ausc_samples_total, job.failed ? "INCOMPLETA" : "en cola de envio",
+  Serial.printf("[AUSC] Captura: %u muestras, %u -> %u bytes comprimida; %s; bufer max %u/%u; memoria libre %u, minima %u\r\n",
+                (unsigned)ausc_samples_total, (unsigned)job.bytes, (unsigned)job.stream_bytes,
+                job.failed ? "INCOMPLETA" : "en cola de envio",
                 (unsigned)ausc_ring_peak, (unsigned)AUSC_RING_BYTES,
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
   portENTER_CRITICAL(&ausc_jobs_mux);
@@ -734,8 +743,7 @@ void ausc_capture_step() {
     ausc_fill_pos += got / sizeof(int16_t);
     ausc_samples_total += got / sizeof(int16_t);
     if (ausc_fill_pos >= AUSC_CHUNK_SAMPLES) {
-      size_t size = AUSC_CHUNK_SAMPLES * sizeof(int16_t);
-      if (ausc_spool.write((uint8_t*)ausc_buffers[0], size) != size) {
+      if (!ausc_store_block(AUSC_CHUNK_SAMPLES)) {
         Serial.printf("[AUSC] Fallo al guardar audio local en muestra %u; errno=%d.\r\n", (unsigned)ausc_samples_total, errno);
         ausc_capture_error = true;
       }

@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 import os
 from pathlib import Path
 
+import audio_codec
 import database
 from ml import classifier, equalizer, lung
 
@@ -26,6 +27,8 @@ REC_DIR.mkdir(exist_ok=True)
 MAX_BYTES = 16000 * 2 * 60  # 60 s a 16 kHz / 16 bit
 MAX_CHUNK_BYTES = 256 * 1024  # el ESP32 envía bloques de 0.5 s (16 KB a 16 kHz)
 _audio_lock = threading.RLock()
+CODECS = {"pcm", "rice1"}            # rice1: compresión sin pérdida del ESP32 (audio_codec.py)
+_upload_totals: dict[str, int] = {}  # bytes que el dispositivo dice que enviará (para el % en la app)
 HEART_LOCATIONS = {"AV", "PV", "TV", "MV"}
 LUNG_LOCATIONS = {"TC", "AL", "AR", "PL", "PR", "LL", "LR"}   # zonas del tórax de ICBHI
 LOCATIONS = HEART_LOCATIONS | LUNG_LOCATIONS | {""}
@@ -65,16 +68,21 @@ def start(session_id: str, location: str, sample_rate: int, mode: str | None = N
     return rec_id
 
 
-def append_chunk(rec_id: str, data: bytes, offset: int | None = None) -> int:
+def append_chunk(rec_id: str, data: bytes, offset: int | None = None, codec: str = "pcm",
+                 total: int | None = None) -> int:
     with _audio_lock:
-        return _append_chunk(rec_id, data, offset)
+        if total:
+            _upload_totals[rec_id] = total
+        return _append_chunk(rec_id, data, offset, codec)
 
 
-def _append_chunk(rec_id: str, data: bytes, offset: int | None) -> int:
+def _append_chunk(rec_id: str, data: bytes, offset: int | None, codec: str = "pcm") -> int:
     rec = database.get_recording(rec_id)
     if not rec or rec["status"] != "recording":
         raise KeyError(f"Grabación '{rec_id}' no existe o ya fue cerrada")
-    if len(data) % 2:
+    if codec not in CODECS:
+        raise ValueError(f"Formato de audio desconocido: {codec}")
+    if codec == "pcm" and len(data) % 2:
         raise ValueError("El bloque debe contener muestras int16 completas")
     if len(data) > MAX_CHUNK_BYTES:
         raise ValueError("Bloque de audio demasiado grande")
@@ -149,7 +157,8 @@ def recording_status(session_id: str) -> dict:
             continue
         stage, age, size = _stage(database.get_recording(r["recording_id"]))
         pending.append({"recording_id": r["recording_id"], "location": r["location"], "stage": stage,
-                        "age_s": age, "bytes_received": size})
+                        "age_s": age, "bytes_received": size,
+                        "bytes_total": _upload_totals.get(r["recording_id"])})
     rec = database.get_recording(rows[0]["recording_id"])
     stage, age, size = _stage(rec)
     return {"stage": stage, "recording_id": rec["id"], "location": rec["location"],
@@ -168,12 +177,13 @@ def arm_blocker(session_id: str) -> str | None:
 
 
 def prepare_finish(rec_id: str, expected_bytes: int | None = None,
-                   sha256: str | None = None, background: bool = False) -> dict:
+                   sha256: str | None = None, background: bool = False, codec: str = "pcm") -> dict:
     with _audio_lock:
-        return _prepare_finish(rec_id, expected_bytes, sha256, background)
+        return _prepare_finish(rec_id, expected_bytes, sha256, background, codec)
 
 
-def _prepare_finish(rec_id: str, expected_bytes: int | None, sha256: str | None, background: bool) -> dict:
+def _prepare_finish(rec_id: str, expected_bytes: int | None, sha256: str | None, background: bool,
+                    codec: str = "pcm") -> dict:
     rec = database.get_recording(rec_id)
     if not rec:
         raise KeyError(f"Grabación '{rec_id}' no existe")
@@ -188,6 +198,14 @@ def _prepare_finish(rec_id: str, expected_bytes: int | None, sha256: str | None,
         raise KeyError(f"Grabación '{rec_id}' sin audio recibido")
     wav = _wav_path(rec_id)
     raw = pcm.read_bytes()
+    if codec != "pcm":
+        if codec not in CODECS or expected_bytes is None or sha256 is None or expected_bytes % 2:
+            raise ValueError("El audio comprimido requiere formato conocido, longitud y SHA-256")
+        try:
+            raw = audio_codec.decode(raw, expected_bytes // 2).astype("<i2").tobytes()
+        except ValueError as exc:
+            raise ValueError(f"No se pudo descomprimir el audio recibido: {exc}") from exc
+        # Desde aquí se verifica exactamente igual que el audio sin comprimir (longitud y SHA-256).
     if expected_bytes is not None and len(raw) != expected_bytes:
         raise ValueError("Audio incompleto: faltan muestras o se recibieron muestras duplicadas")
     digest = hashlib.sha256(raw).hexdigest()
@@ -205,6 +223,7 @@ def _prepare_finish(rec_id: str, expected_bytes: int | None, sha256: str | None,
                               transport_verified=int(expected_bytes is not None and sha256 is not None),
                               status='queued' if background else 'processing')
     pcm.unlink(missing_ok=True)
+    _upload_totals.pop(rec_id, None)
     return database.get_recording(rec_id)
 
 

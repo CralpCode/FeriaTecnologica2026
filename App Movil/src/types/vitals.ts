@@ -179,6 +179,8 @@ export interface DevicePendingAudio {
   stage: 'capturing' | 'waiting_upload' | 'uploading';
   age_s: number;
   bytes_received: number;
+  /** Bytes que el estetoscopio enviará (audio comprimido); null hasta el primer bloque. */
+  bytes_total?: number | null;
 }
 
 export interface RecordingResult {

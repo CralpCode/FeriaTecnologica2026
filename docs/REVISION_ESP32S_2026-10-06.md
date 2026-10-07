@@ -211,3 +211,19 @@ Prueba física final con el ESP32 cerca del teléfono, 5 zonas por ronda, todas 
 reintentos: con cola 186 s (37 s por zona), sin cola 241 s (48 s por zona). Envío sin grabación simultánea
 21–30 s; con grabación simultánea 27–39 s. El servidor no deja pedir otra zona mientras una se graba,
 mientras una orden ya entregada aún no se registra, ni con 2 capturas pendientes de envío.
+
+## Compresión sin pérdida del audio (7 de octubre)
+
+El ESP32 comprime cada bloque de 1024 muestras al grabar (`Esp32/rice_codec.h`: predicción de orden 1 o 2
+y código Rice; un bloque que no se reduce se guarda tal cual) y calcula en la misma pasada el SHA-256 del
+PCM original. El servidor (`Backend/audio_codec.py`) reconstruye el PCM y comprueba longitud y SHA-256
+antes de guardar el WAV: si no coincide, responde 400 y la grabación no se analiza.
+
+Verificación: el codificador del firmware, compilado en la Mac, produce los mismos bytes que la referencia
+en Python y el audio reconstruido es idéntico bit a bit en 53 grabaciones reales y 8 casos extremos
+(silencio, ruido a escala completa, saturación, escalones, longitudes cortas). En las grabaciones reales el
+audio comprimido pesa en promedio el 59 % del original; descomprimir 15 s tarda menos de 0.2 s.
+
+Prueba física con el ESP32 a un metro del teléfono, 10 grabaciones, todas `done`, verificadas, sin
+reintentos, 54–58 % del tamaño original: envío 10–15 s por zona (antes 21–30 s).
+Con cola: 117 s para 5 zonas (23 s por zona). Sin cola: 155 s (31 s por zona).

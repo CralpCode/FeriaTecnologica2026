@@ -691,10 +691,12 @@ async def audio_start(payload: AudioStartInput):
 
 
 @app.post("/api/audio/chunk")
-async def audio_chunk(request: Request, recording_id: str = Query(...), offset: Optional[int] = Query(None, ge=0)):
+async def audio_chunk(request: Request, recording_id: str = Query(...), offset: Optional[int] = Query(None, ge=0),
+                      codec: str = Query("pcm", max_length=16),
+                      total: Optional[int] = Query(None, ge=1, le=audio_service.MAX_BYTES + 4096)):
     data = await request.body()
     try:
-        total = audio_service.append_chunk(recording_id, data, offset)
+        total = audio_service.append_chunk(recording_id, data, offset, codec, total)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
@@ -706,12 +708,13 @@ async def audio_chunk(request: Request, recording_id: str = Query(...), offset: 
 @app.post("/api/audio/finish")
 async def audio_finish(recording_id: str = Query(...), background: bool = False,
                        expected_bytes: Optional[int] = Query(None, ge=1, le=audio_service.MAX_BYTES),
-                       sha256: Optional[str] = Query(None, pattern="^[0-9a-fA-F]{64}$")):
+                       sha256: Optional[str] = Query(None, pattern="^[0-9a-fA-F]{64}$"),
+                       codec: str = Query("pcm", max_length=16)):
     try:
         if background:
             if expected_bytes is None or sha256 is None:
                 raise ValueError("Se requieren longitud y SHA-256 para confirmar el envío")
-            rec = await asyncio.to_thread(audio_service.prepare_finish, recording_id, expected_bytes, sha256, True)
+            rec = await asyncio.to_thread(audio_service.prepare_finish, recording_id, expected_bytes, sha256, True, codec)
             receipt = audio_service.queue_receipt(rec)
             await manager.broadcast({"type": "RECORDING_QUEUED", "session_id": rec["session_id"],
                                      "data": {**receipt, "location": rec["location"]}})
