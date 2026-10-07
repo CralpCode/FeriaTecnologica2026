@@ -17,7 +17,7 @@ export function measurementValidity(vitals: VitalSigns, now = Date.now()) {
 }
 
 /** Indicadores que solo envía el firmware nuevo; si no llega ninguno, el paquete es del formato original. */
-const NEW_FORMAT_KEYS = ['source', 'heartRateValid', 'heart_rate_valid', 'bloodOxygenValid', 'spo2_valid',
+const NEW_FORMAT_KEYS = ['v', 'valid', 'source', 'heartRateValid', 'heart_rate_valid', 'bloodOxygenValid', 'spo2_valid',
   'spo2Calibrated', 'spo2_calibrated', 'signalQuality', 'signal_quality', 'sampleAgeMs', 'sample_age_ms'];
 
 export function isLegacyPacket(raw: object): boolean {

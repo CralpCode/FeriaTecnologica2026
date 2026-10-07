@@ -50,7 +50,7 @@ export const AuscultationStep: React.FC<{ mode: AuscultationMode; onNext: () => 
   // No se graba solo: el médico confirma con "Grabar" (el estetoscopio recibe la orden del servidor).
   const lastSeen = useRef(lastResult?.recording_id);
   useEffect(() => {
-    if (!lastResult || lastResult.recording_id === lastSeen.current) return;
+    if (phase === 'armed' || phase === 'recording' || !lastResult || lastResult.recording_id === lastSeen.current) return;
     lastSeen.current = lastResult.recording_id;
     if (lastResult.recording_id.startsWith('demo_') || !lastResult.location) return;
     if ((lastResult.mode === 'pulmon' ? 'pulmon' : 'corazon') !== mode) return;

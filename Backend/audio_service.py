@@ -10,6 +10,9 @@ También se acepta un .wav completo en POST /api/audio/upload (app o pruebas).
 import json
 import uuid
 import wave
+import time
+import hashlib
+import threading
 from datetime import datetime
 import os
 from pathlib import Path
@@ -22,6 +25,7 @@ REC_DIR.mkdir(exist_ok=True)
 
 MAX_BYTES = 16000 * 2 * 60  # 60 s a 16 kHz / 16 bit
 MAX_CHUNK_BYTES = 256 * 1024  # el ESP32 envía bloques de 0.5 s (16 KB a 16 kHz)
+_audio_lock = threading.RLock()
 HEART_LOCATIONS = {"AV", "PV", "TV", "MV"}
 LUNG_LOCATIONS = {"TC", "AL", "AR", "PL", "PR", "LL", "LR"}   # zonas del tórax de ICBHI
 LOCATIONS = HEART_LOCATIONS | LUNG_LOCATIONS | {""}
@@ -58,7 +62,12 @@ def start(session_id: str, location: str, sample_rate: int, mode: str | None = N
     return rec_id
 
 
-def append_chunk(rec_id: str, data: bytes) -> int:
+def append_chunk(rec_id: str, data: bytes, offset: int | None = None) -> int:
+    with _audio_lock:
+        return _append_chunk(rec_id, data, offset)
+
+
+def _append_chunk(rec_id: str, data: bytes, offset: int | None) -> int:
     rec = database.get_recording(rec_id)
     if not rec or rec["status"] != "recording":
         raise KeyError(f"Grabación '{rec_id}' no existe o ya fue cerrada")
@@ -67,33 +76,147 @@ def append_chunk(rec_id: str, data: bytes) -> int:
     if len(data) > MAX_CHUNK_BYTES:
         raise ValueError("Bloque de audio demasiado grande")
     path = _pcm_path(rec_id)
-    if path.stat().st_size + len(data) > MAX_BYTES:
+    current = path.stat().st_size
+    if offset is not None and offset != current:
+        if 0 <= offset < current and offset + len(data) <= current:
+            with open(path, "rb") as previous:
+                previous.seek(offset)
+                if previous.read(len(data)) == data:
+                    return current  # Reintento confirmado: nunca duplicar muestras.
+        raise ValueError("El bloque no coincide con el audio recibido o falta un bloque anterior")
+    if current + len(data) > MAX_BYTES:
         raise ValueError("Grabación demasiado larga (máximo 60 s)")
     with open(path, "ab") as f:
         f.write(data)
     return path.stat().st_size
 
 
-def finish(rec_id: str) -> dict:
+def abort(rec_id: str, reason: str) -> dict:
+    rec = database.get_recording(rec_id)
+    if not rec:
+        raise KeyError(f"Grabación '{rec_id}' no existe")
+    if rec["status"] == "recording":
+        database.update_recording(rec_id, status="error", result="error",
+                                  finished_at=datetime.now().isoformat(), quality={"error": reason})
+    return _stored_result(database.get_recording(rec_id))
+
+
+STALE_RECORDING_S = 180
+
+
+def expire_stale_recordings(session_id: str | None = None) -> int:
+    """Cierra con error las capturas sin datos nuevos hace más de STALE_RECORDING_S (p. ej. el ESP32 se reinició)."""
+    expired = 0
+    for r in database.list_recordings(session_id=session_id, limit=500):
+        if r["status"] != "recording":
+            continue
+        rec = database.get_recording(r["recording_id"])
+        pcm = _pcm_path(rec["id"])
+        last = pcm.stat().st_mtime if pcm.exists() else datetime.fromisoformat(rec["created_at"]).timestamp()
+        if time.time() - last > STALE_RECORDING_S:
+            abort(rec["id"], "No se recibió el audio completo del dispositivo. Repite la grabación.")
+            expired += 1
+    return expired
+
+
+def recording_status(session_id: str) -> dict:
+    expire_stale_recordings(session_id)
+    rows = database.list_recordings(session_id=session_id, limit=100)
+    if not rows:
+        return {"stage": "idle"}
+    active = next((r for r in rows if r['status'] == 'recording'), rows[0])
+    rec = database.get_recording(active["recording_id"])
+    age = (datetime.now() - datetime.fromisoformat(rec["created_at"])).total_seconds()
+    pcm = _pcm_path(rec["id"])
+    size = pcm.stat().st_size if pcm.exists() else 0
+    stage = rec["status"]
+    if stage == "recording":
+        stage = "uploading" if age >= 15 else "capturing"
+    return {"stage": stage, "recording_id": rec["id"], "location": rec["location"],
+            "age_s": age, "bytes_received": size,
+            "result": _stored_result(rec) if stage in ("done", "error") else None}
+
+
+def prepare_finish(rec_id: str, expected_bytes: int | None = None,
+                   sha256: str | None = None, background: bool = False) -> dict:
+    with _audio_lock:
+        return _prepare_finish(rec_id, expected_bytes, sha256, background)
+
+
+def _prepare_finish(rec_id: str, expected_bytes: int | None, sha256: str | None, background: bool) -> dict:
     rec = database.get_recording(rec_id)
     if not rec:
         raise KeyError(f"Grabación '{rec_id}' no existe")
     if rec["status"] != "recording":
-        # finish repetido (p. ej. reintento del ESP32): se devuelve lo que ya se guardó
-        return _stored_result(rec)
+        if expected_bytes is not None and rec.get('audio_bytes') != expected_bytes:
+            raise ValueError("La longitud no coincide con la grabación confirmada")
+        if sha256 and rec.get('audio_sha256') != sha256.lower():
+            raise ValueError("La huella no coincide con la grabación confirmada")
+        return rec
     pcm = _pcm_path(rec_id)
     if not pcm.exists():
         raise KeyError(f"Grabación '{rec_id}' sin audio recibido")
     wav = _wav_path(rec_id)
     raw = pcm.read_bytes()
+    if expected_bytes is not None and len(raw) != expected_bytes:
+        raise ValueError("Audio incompleto: faltan muestras o se recibieron muestras duplicadas")
+    digest = hashlib.sha256(raw).hexdigest()
+    if sha256 and digest != sha256.lower():
+        raise ValueError("La huella SHA-256 del audio recibido no coincide")
     with wave.open(str(wav), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(rec["sample_rate"])
         w.writeframes(raw)
+    with open(wav, "rb") as durable:
+        os.fsync(durable.fileno())
+    database.update_recording(rec_id, wav_path=str(wav), duration_s=len(raw) / 2 / rec['sample_rate'],
+                              audio_bytes=len(raw), audio_sha256=digest,
+                              transport_verified=int(expected_bytes is not None and sha256 is not None),
+                              status='queued' if background else 'processing')
     pcm.unlink(missing_ok=True)
-    # Audio del ESP32: se corrige con la respuesta medida de la pieza, si existe la medición
-    return _classify_and_store(rec_id, wav, len(raw) / 2 / rec["sample_rate"], device=True)
+    return database.get_recording(rec_id)
+
+
+def finish(rec_id: str) -> dict:
+    previous = database.get_recording(rec_id)
+    rec = prepare_finish(rec_id)
+    if previous and previous['status'] != 'recording':
+        return _stored_result(rec)
+    return _classify_and_store(rec_id, Path(rec['wav_path']), rec['duration_s'], device=True)
+
+
+def analyze_queued(rec_id: str) -> dict | None:
+    if not database.claim_audio_job(rec_id):
+        return None
+    rec = database.get_recording(rec_id)
+    try:
+        return _classify_and_store(rec_id, Path(rec['wav_path']), rec['duration_s'], device=True)
+    except Exception:
+        return _stored_result(database.get_recording(rec_id))
+
+
+def queue_receipt(rec: dict) -> dict:
+    return {'recording_id': rec['id'], 'status': rec['status'],
+            'audio_bytes': rec.get('audio_bytes'), 'sha256': rec.get('audio_sha256'),
+            'verified': bool(rec.get('transport_verified'))}
+
+
+def retry_analysis(rec_id: str) -> dict:
+    with _audio_lock:
+        rec = database.get_recording(rec_id)
+        if not rec:
+            raise KeyError('Grabación inexistente')
+        if rec['status'] in ('queued', 'processing'):
+            return rec
+        if rec['status'] != 'error' or not rec.get('wav_path') or not Path(rec['wav_path']).exists():
+            raise ValueError('No hay un audio guardado cuyo análisis pueda repetirse')
+        with wave.open(rec['wav_path'], 'rb') as audio:
+            raw = audio.readframes(audio.getnframes())
+        if rec.get('audio_sha256') and hashlib.sha256(raw).hexdigest() != rec['audio_sha256']:
+            raise ValueError('El archivo guardado no supera la comprobación de integridad')
+        database.update_recording(rec_id, status='queued', result=None, quality=None, finished_at=None)
+        return database.get_recording(rec_id)
 
 
 def save_upload(session_id: str, location: str, data: bytes, mode: str | None = None, source: str = "unknown") -> dict:
@@ -115,7 +238,9 @@ def _classify_and_store(rec_id: str, wav: Path, duration: float, device: bool = 
         # Archivos subidos (casos demo, pruebas) ya vienen de estetoscopios clínicos: no se ecualizan
         profile = equalizer.profile_for(mode) if device else None
         eq = (lambda y, sr: equalizer.apply(y, sr, profile)) if profile else None
+        inference_started = time.perf_counter()
         out = (lung if mode == "pulmon" else classifier).classify_wav(wav, eq=eq, check_placement=device)
+        print(f"[AUDIO] {rec_id} modo={mode} analisis_s={time.perf_counter() - inference_started:.3f}", flush=True)
         if eq is not None and out.get("result") not in ("calidad_insuficiente", None):
             out["details"] = {**(out.get("details") or {}), "ecualizacion": equalizer.describe(profile)}
         database.update_recording(
@@ -149,5 +274,6 @@ def _stored_result(rec: dict) -> dict:
         "source": rec.get("source"), "mode": rec.get("mode") or "corazon", "duration_s": rec.get("duration_s"),
         "result": rec.get("result") or rec["status"], "probability": rec.get("probability"),
         "threshold": rec.get("threshold"), "quality": parsed("quality"), "model": rec.get("model"),
-        "details": parsed("details") or {}, "reason": None, "repetido": True,
+        "details": parsed("details") or {}, "reason": (parsed("quality") or {}).get("error"),
+        "has_audio": bool(rec.get("wav_path")) and Path(rec["wav_path"]).exists(), "repetido": True,
     }

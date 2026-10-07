@@ -7,6 +7,7 @@ export interface MeasurementQuality {
   spo2Calibrated?: boolean;
   signalQuality?: string | null;
   audioUnit?: string;
+  audioValid?: boolean;
   sampleAgeMs?: number | null;
   validadoPor?: string;           // "servidor" si el paquete venía en el formato original del firmware
 }
@@ -83,6 +84,11 @@ export interface DeviceInfo {
 export type TimeRange = '24h' | '7d' | '30d';
 
 export interface RawDevicePacket extends MeasurementQuality {
+  v?: number;
+  valid?: number;
+  cal?: boolean;
+  audio_unit?: string;
+
   bpm: number;
   spo2: number;
   systolic: number;
@@ -167,6 +173,7 @@ export interface TriageResult {
 }
 
 export interface RecordingResult {
+  status?: 'recording' | 'queued' | 'processing' | 'done' | 'error';
   recording_id: string;
   session_id: string;
   location: AuscultationFocus | '';

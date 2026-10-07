@@ -3,7 +3,7 @@ import { apiService } from '../services/api';
 import { useVitals } from './VitalsContext';
 import { AuscultationFocus, AuscultationMode, ClinicalAlert, RecordingResult, TriageResult } from '../types/vitals';
 
-export type RecordingPhase = 'idle' | 'armed' | 'recording' | 'done';
+export type RecordingPhase = 'idle' | 'armed' | 'recording' | 'processing' | 'done';
 
 interface ClinicalContextProps {
   alerts: ClinicalAlert[];
@@ -12,6 +12,7 @@ interface ClinicalContextProps {
   recordings: RecordingResult[];
   lastResult: RecordingResult | null;
   phase: RecordingPhase;
+  recordingStage: 'capturing' | 'uploading' | 'processing';
   armedLocation: AuscultationFocus | null;
   triage: TriageResult | null;
   recordingStartedAt: number | null;
@@ -35,12 +36,14 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [recordings, setRecordings] = useState<RecordingResult[]>([]);
   const [lastResult, setLastResult] = useState<RecordingResult | null>(null);
   const [phase, setPhase] = useState<RecordingPhase>('idle');
+  const [recordingStage, setRecordingStage] = useState<'capturing' | 'uploading' | 'processing'>('capturing');
   const [armedLocation, setArmedLocation] = useState<AuscultationFocus | null>(null);
   const [triage, setTriage] = useState<TriageResult | null>(null);
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
   const [commandDelivered, setCommandDelivered] = useState(false);
   const [armedAt, setArmedAt] = useState<number | null>(null);
   const [isLiveConnected, setIsLiveConnected] = useState(false);
+  const activeRecording = useRef<string | null>(null);
   const sessionRef = useRef(currentSessionId);
   sessionRef.current = currentSessionId;
 
@@ -64,6 +67,9 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
     setLastResult(null);
     setTriage(null);
     setPhase('idle');
+    activeRecording.current = null;
+    setArmedAt(null);
+    setArmedLocation(null);
     refresh();
 
     let ws: WebSocket | null = null;
@@ -97,7 +103,10 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
             upsertAlert(msg.data);
             break;
           case 'RECORDING_ARMED':
+            activeRecording.current = null;
             setPhase('armed');
+            setRecordingStartedAt(null);
+            setLastResult(null);
             setArmedLocation(msg.data.location);
             setCommandDelivered(false);
             setArmedAt(Date.now());
@@ -106,16 +115,27 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
             setCommandDelivered(true);
             break;
           case 'RECORDING_STARTED':
+            activeRecording.current = msg.data.recording_id;
             setPhase('recording');
+            setRecordingStage('capturing');
             setCommandDelivered(true);
             setRecordingStartedAt(Date.now());
             break;
           case 'TRIAGE_UPDATE':
             setTriage(msg.data);
             break;
+          case 'RECORDING_QUEUED':
+            if (activeRecording.current === msg.data.recording_id) {
+              setPhase('processing');
+              setRecordingStage('processing');
+            }
+            refresh();
+            break;
           case 'RECORDING_RESULT':
-            setLastResult(msg.data);
-            setPhase('done');
+            if (activeRecording.current === msg.data.recording_id) {
+              setLastResult(msg.data);
+              setPhase('done');
+            }
             setRecordings((prev) => [msg.data, ...prev.filter((r) => r.recording_id !== msg.data.recording_id)]);
             refresh();  // trae también has_audio y el estado guardado
             break;
@@ -138,22 +158,62 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
     return () => clearTimeout(timer);
   }, [phase]);
 
+  // Consultar el estado guardado incluso con WebSocket: recupera eventos perdidos
+  // y distingue el envío de audio de la inferencia.
+  useEffect(() => {
+    if (phase !== 'armed' && phase !== 'recording' && phase !== 'processing') return;
+    let closed = false;
+    let pending = false;
+    const poll = async () => {
+      if (pending) return;
+      pending = true;
+      try {
+        const state = await apiService.getRecordingStatus();
+        if (closed || !armedAt || state.age_s > (Date.now() - armedAt) / 1000 + 10
+            || state.location !== armedLocation) return;
+        if (activeRecording.current && state.recording_id !== activeRecording.current) return;
+        if (state.recording_id) activeRecording.current = state.recording_id;
+        if (state.result) {
+          setLastResult(state.result);
+          setPhase('done');
+          refresh();
+        } else if (['queued', 'processing'].includes(state.stage)) {
+          setPhase('processing');
+          setRecordingStage('processing');
+          refresh();
+        } else if (['capturing', 'uploading'].includes(state.stage)) {
+          setPhase('recording');
+          setRecordingStage(state.stage as 'capturing' | 'uploading' | 'processing');
+          setRecordingStartedAt((prev) => prev ?? Date.now() - state.age_s * 1000);
+        }
+      } catch {} finally { pending = false; }
+    };
+    poll();
+    const timer = setInterval(poll, 2500);
+    return () => { closed = true; clearInterval(timer); };
+  }, [phase, armedAt, armedLocation, refresh]);
+
   // Respaldo: si el WebSocket no está disponible (p. ej. algunos túneles), se consulta periódicamente.
   useEffect(() => {
-    if (isLiveConnected) return;
     const timer = setInterval(refresh, POLL_MS);
     return () => clearInterval(timer);
   }, [isLiveConnected, refresh]);
 
   const armRecording = useCallback(async (location: AuscultationFocus, mode: AuscultationMode) => {
-    await apiService.armRecording(location, mode);
-    // Armar también vincula el ESP32 a esta sesión: empezamos a leer sus vitales del servidor.
-    if (connectedType === 'none') await connectViaServer();
+    activeRecording.current = null;
     setArmedLocation(location);
     setPhase('armed');
+    setRecordingStartedAt(null);
     setCommandDelivered(false);
     setArmedAt(Date.now());
     setLastResult(null);
+    try {
+      await apiService.armRecording(location, mode);
+      if (connectedType === 'none') await connectViaServer();
+    } catch (error) {
+      setPhase('idle');
+      throw error;
+    }
   }, [connectedType, connectViaServer]);
 
   const acknowledgeAlert = useCallback(async (id: number) => {
@@ -172,6 +232,7 @@ export const ClinicalProvider: React.FC<{ children: ReactNode }> = ({ children }
         recordings,
         lastResult,
         phase,
+        recordingStage,
         armedLocation,
         triage,
         recordingStartedAt,

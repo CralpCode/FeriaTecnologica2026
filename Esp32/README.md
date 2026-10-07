@@ -1,95 +1,151 @@
-# SpiroScan: firmware de investigación ESP32
+# ESP32S / SpiroScan — versión revisada el 6 de octubre de 2026
 
-El INMP441 captura audio para analizar en el servidor. El MAX30102 aporta señal
-óptica PPG roja e infrarroja; el pulso mostrado es una estimación experimental
-sobre esa señal. Este firmware no tiene exactitud clínica demostrada.
+Proyecto completo: abrir esta carpeta, no solo el archivo `.ino`.
+Las dos copias originales de `esp codigo` se conservan como referencia; necesitan
+archivos auxiliares que no venían con ellas y no deben compilarse juntas.
 
-## Datos que se transmiten
+## Entorno preparado en esta Mac
 
-- `source: "real"` significa origen físico, no certificación del resultado.
-- `bpm` se estima con el detector SparkFun y las muestras FIFO a 100 Hz.
-  `heartRateValid` requiere contacto, cinco segundos de estabilización, al menos
-  tres intervalos aceptados, muestras de menos de 250 ms y un latido de menos
-  de tres segundos. Los intervalos aceptados equivalen aproximadamente a
-  30–220 BPM; es el rango del detector, no un intervalo de normalidad clínica.
-- `signalQuality`: `good`, `acquiring`, `poor`, `no_contact`, `stale` o
-  `sensor_unavailable`. Son comprobaciones técnicas básicas, sin validación
-  clínica: no detectan todos los artefactos de movimiento ni la pigmentación.
-- `sampleAgeMs` es el tiempo desde la última muestra óptica. `4294967295`
-  indica que todavía no se recibió ninguna.
-- **SpO2 no disponible hasta calibración y validación del equipo**:
-  `spo2: 0`, `bloodOxygenValid: false`, `spo2Calibrated: false`.
-  Ese cero es un marcador de ausencia para clientes antiguos; nunca significa
-  una saturación medida. No se genera una onda artificial ni se limita la
-  saturación a valores aparentemente normales.
-- No se calculan presión arterial, temperatura corporal, estrés ni HRV.
-- `audio_rms` utiliza dBFS digitales (`audioUnit: "dBFS"`), no dB SPL calibrados;
-  `audio_peak` es amplitud digital. Los ceros de audio indican silencio o
-  ausencia de adquisición y no constituyen una medición de presión sonora.
+- PlatformIO en `../../.venv`, plataforma Espressif32 6.12.0 y Arduino ESP32 2.0.17.
+- Placa `nodemcu-32s`, flash 4 MB, partición de aplicación de 3 MB.
+- SparkFun MAX3010x 1.1.2 y Adafruit NeoPixel 1.15.2.
+- USB CP2102 reconocido en `/dev/cu.usbserial-0001`; consola a 115200.
+- Doble clic en `compilar_macos.command` para compilar.
+- Doble clic en `subir_macos.command` para compilar y cargar por USB.
+  Cerrar otros monitores serie antes de cargar. Si cambia el puerto, pasar su nombre al script.
 
-Las comprobaciones de contacto usan umbrales de ingeniería que deben probarse
-con la carcasa y montaje reales. La comprobación de saturación rechaza señales
-cercanas al límite del ADC de 18 bits. Retirar el dedo, perder muestras o
-interrumpir la captura elimina el pulso anterior y exige una nueva adquisición.
-Durante la grabación de audio, el pulso queda inválido.
+También se puede usar desde la raíz de `spirosan`:
+
+```sh
+.venv/bin/python -m platformio run -d FeriaTecnologica2026/Esp32
+.venv/bin/python -m platformio run -d FeriaTecnologica2026/Esp32 -t upload --upload-port /dev/cu.usbserial-0001
+```
+
+No usar `FIRMWARE_VITALSYNC.bin`: es el binario antiguo. El actualizado se genera en
+`.pio/build/nodemcu-32s/firmware.bin`; PlatformIO carga también bootloader y particiones.
+La configuración WiFi local contiene una clave y el binario compilado también:
+no publicar ninguno. `spiroscan_config.h` y `.pio` están excluidos de Git.
 
 ## Conexiones
 
-| Módulo | Señal | ESP32 |
+| Módulo | Señal | GPIO |
 | --- | --- | --- |
-| MAX30102 | SDA / SCL | GPIO 21 / 22; también se sondea 23 / 22 |
-| INMP441 | SCK / WS / SD | GPIO 14 / 15 / 32 |
-| INMP441 | VDD / GND / L-R | 3V3 / GND / GND |
-| WS2812B | DIN | GPIO 25 |
-| Botón | contacto a tierra | GPIO 17, pull-up interno |
+| MAX30102 | SDA / SCL | 18 / 19, conexión de diagnóstico confirmada por el usuario; también admite 23 / 22 |
+| INMP441 | SCK / WS / SD | 27 / 15 / 32 |
+| WS2812B | DIN | 25 |
 
-Verificar la tensión VIN admitida por la **placa concreta** del MAX30102 y por
-la tira LED; no confundir la tensión de un módulo con la del circuito integrado.
-El bus I2C del firmware usa 100 kHz.
+El micrófono estaba desconectado al inicio de la revisión; el usuario indicó
+después que lo conectó. La tensión de alimentación
+admitida por el módulo MAX30102 concreto debe verificarse antes de modificarla.
+Si no aparece en I2C, revisar alimentación, GND común y los cables SDA/SCL.
+El firmware admite también SDA18/SCL19 como prueba para descartar un fallo
+de los GPIO23/22. Cambiar únicamente SDA y SCL con el USB y cualquier otra
+alimentación desconectados; conservar VIN en 3.3 V y GND en GND.
+La configuración de ejemplo usa `SPIROSCAN_MIC_CONNECTED=0`: descarta el ruido
+del pin sin módulo y rechaza las grabaciones. En esta Mac se activó `1` en
+`spiroscan_config.h` tras la confirmación del usuario. Si se retira el módulo,
+volver a `0` y cargar de nuevo. Su presencia no se puede confirmar solo
+porque el pin produzca muestras distintas de cero.
 
-## Comunicación y uso
+## Inicio y comunicación
 
-- BLE GATT `SpiroScan-Band`, USB serie a 115200 y WiFi HTTP a 1 Hz.
-- La telemetría JSON requiere MTU BLE suficiente (el ESP32 propone 512);
-  se omite la notificación si el receptor no admite el paquete entero.
-  El servicio estándar Heart Rate sigue disponible con indicador de contacto.
-- El gateway `../gateway.py` preserva procedencia y validez; los paquetes antiguos
-  sin metadatos quedan como `unknown`. Reiniciar la entrada serie evita reenviar
-  colas acumuladas. No imprime valores clínicos ficticios para campos ausentes.
-- `REC` / pulsación larga: graba 15 s y envía audio con `source: "real"`.
-- `WAKE` / pulsación corta: activa transmisión; `SLEEP`: reposo lógico.
-  `STATUS`: estado del dispositivo. No existe modo `TEST` en el firmware físico.
-- Crear `spiroscan_config.h` a partir del ejemplo para configurar la red.
-- Compilar con `pio run` desde esta carpeta; instalar las dependencias declaradas
-  en `platformio.ini`. La compilación y carga deben hacerse para la placa real.
+La adquisición continua comienza al encender: no requiere botones. `WAKE` y
+`SCAN_CONT` vuelven a activarla; `SCAN_CARD` inicia el escaneo cardíaco;
+`STOP` o `SLEEP` pasan a reposo. `STATUS`, `DIAG`, `PPGREG` y `SPO2` dan diagnóstico.
+Los comandos USB terminan en salto de línea.
+Los botones físicos se eliminaron: GPIO16/17 no se configuran ni se leen. Las
+órdenes de grabación vienen de la app. USB queda para diagnóstico técnico.
 
-## Comprobaciones de software
+El WiFi se configura en `spiroscan_config.h`, solo local. El ESP32 utiliza WiFi de 2.4 GHz. Para descubrimiento local debe conectarse
+al mismo WiFi que la Mac. En esta revisión se configuró el enlace HTTPS existente
+porque la Mac y el ESP estaban en redes distintas. Con `SERVER_URL` vacío encuentra el servicio
+`_spiroscan._tcp` anunciado por el servidor. Este debe escuchar en la red local.
+HTTPS valida el certificado con ISRG Root X1. Se sincroniza la hora por NTP;
+PlatformIO incorpora además la hora de compilación como respaldo inicial.
+Si el equipo queda apagado mucho tiempo en una red que bloquea NTP y el servidor
+renueva el certificado, volver a compilar para actualizar esa hora.
 
-Desde la raíz del repositorio:
+Con URL fija se puede indicar `http://IP_DE_LA_MAC:8000` y volver a compilar.
+
+La telemetría sale por USB cada 100 ms y por HTTP aproximadamente una vez
+por segundo. BLE es opcional (`SPIROSCAN_ENABLE_BLE=1`); esta configuración usa
+WiFi/USB (`0`) para dejar memoria disponible para HTTPS y grabaciones. HTTP usa una tarea independiente y conserva solo el último paquete,
+para no enviar una cola de lecturas antiguas. La búsqueda mDNS también corre fuera
+de la adquisición óptica. BLE usa fragmentos de 20 bytes terminados en una línea
+JSON; la web los reconstruye. La aplicación Android ya tenía un búfer de recepción.
+Los callbacks BLE encolan los comandos y el loop los ejecuta.
+
+Los paquetes incluyen procedencia, validez, edad de muestra, calidad, unidades,
+modo y estado de alimentación. Un fallo de I2C, falta de dedo o muestras caducadas
+no equivale a una lectura normal. El controlador FIFO conserva los 31 pares
+rojo/IR disponibles y rechaza errores de bus y desbordamientos.
+Si no responde a 100 kHz, se comprueba su dirección con un sondeo directo de
+GPIO a unos 5 kHz. Si este recibe ACK, se intenta inicializar a 10 kHz con una
+frecuencia de muestreo reducida. Esto distingue la respuesta eléctrica del
+módulo de la configuración del controlador I2C.
+
+SpO2 queda no disponible porque el montaje no tiene calibración validada. El
+algoritmo de referencia solo sirve para diagnóstico técnico. Presión arterial y
+temperatura corporal quedan ausentes; `chip_temp` corresponde al propio sensor.
+El índice de estrés y PRV son experimentales y la web no los presenta como
+mediciones clínicas validadas. El audio se expresa en dBFS, no en dB SPL.
+
+Las órdenes de grabación enviadas por la web se recogen en la respuesta HTTP de
+telemetría, conservando el identificador de la orden y la sesión del servidor.
+Antes de reservar audio, se pausa telemetría y se cierra su conexión TLS. Los
+clientes del envío de audio se destruyen antes de volver a telemetría.
+Los 15 segundos se capturan primero en LittleFS, en la partición reservada por
+`huge_app.csv`; la captura escribe bloques de 8 KB y después el envío HTTPS lee
+directamente de flash en bloques de hasta 128 KB, sin reservarlos enteros en RAM.
+LittleFS se monta una sola vez por arranque. El archivo temporal
+se elimina al confirmar recepción completa. La red lenta puede prolongar el envío,
+sin recortar la captura. Se comprueban errores de escritura y desbordamientos I2S.
+El ESP comunica una interrupción mediante `/api/audio/abort`; la app consulta
+`/api/audio/status` para distinguir captura, envío e inferencia y recuperar
+resultados si se pierde un evento WebSocket. Una recepción sin actividad durante
+180 segundos termina con error. Tras el envío, el servidor confirma longitud y
+SHA-256 del PCM y guarda un trabajo en SQLite antes de responder HTTP 202. El ESP
+queda disponible para otra zona mientras se analiza el audio anterior. Los bloques
+llevan desplazamiento y se reintentan hasta tres veces sin duplicar muestras; también
+se puede repetir la confirmación final. Un audio incompleto o alterado no se analiza.
+La cola se recupera al reiniciar el servidor. Cada análisis corre en un proceso
+separado con límite de 120 segundos; un fallo queda como error y conserva el WAV.
+La app muestra los pendientes por zona y no permite que un resultado anterior
+interrumpa la captura actual.
+`SpiroScanTLSClient.h` corrige el cierre repetido de Arduino-ESP32 2.0.17:
+`stop_ssl_socket` pone el identificador del socket en 0 mediante `memset`;
+se restaura a -1 después de cada cierre para no cerrar un archivo VFS que
+reutilice el identificador 0. La prueba C++ `tests/tls_file_descriptor_test.cpp`
+reproduce el cierre incorrecto y comprueba el cierre y los destructores corregidos.
+El watchdog mantiene un límite de 30 segundos para permitir la verificación
+criptográfica y los tiempos máximos de conexión y lectura del cliente HTTPS.
+La captura estéreo del I2S se convierte en un canal mono a 16 kHz para no duplicar
+las muestras y alterar la duración del audio.
+
+## Verificar un dispositivo conectado
+
+Desde la raíz de `spirosan`, sin otro monitor serie abierto:
 
 ```sh
-clang++ -std=c++11 -Wall -Wextra -Werror Esp32/tests/ppg_quality_test.cpp -o /tmp/spiroscan-ppg-test
-/tmp/spiroscan-ppg-test
-python3 -m unittest discover -s Esp32/tests -p 'test_*.py'
+.venv/bin/python FeriaTecnologica2026/verificar_enlace.py --seconds 60
 ```
 
-Los casos de prueba son entradas sintéticas de protocolo, nunca datos de pacientes
-ni material de entrenamiento. Verifican retirada de dedo, saturación ADC,
-reacquisición, caducidad, rollover de reloj, procedencia y rechazo de metadatos
-incompletos. No miden sensibilidad, especificidad ni exactitud clínica.
+`--forward-usb` permite probar recepción por USB cuando WiFi no está disponible.
+El script solo utiliza paquetes reales del dispositivo; no fabrica mediciones.
 
-## Fundamento y trabajo pendiente para SpO2
+Pruebas de software desde `FeriaTecnologica2026`:
 
-Analog Devices explica que la calibración depende de la geometría óptica y
-que se evalúa el sistema completo. El MAX30102 no incluye una curva R universal.
-Por eso no se usan coeficientes copiados de Internet como si validaran este
-montaje. Hace falta un protocolo supervisado, referencias trazables, condiciones
-representativas y validación independiente. No provocar hipoxia para obtener
-muestras. La activación de SpO2 debe acompañarse de evidencia y control de calidad.
+```sh
+../.venv/bin/python -m unittest discover -s Backend/tests -p 'test_*.py'
+../.venv/bin/python -m unittest discover -s Esp32/tests -p 'test_*.py'
+clang++ -std=c++11 -Wall -Wextra -Werror -I Esp32/tests/stubs Esp32/tests/buffered_fifo_test.cpp -o /tmp/spiroscan-fifo-test
+/tmp/spiroscan-fifo-test
+```
 
-Fuentes oficiales consultadas el 3 de octubre de 2026:
+Referencias de instalación: [NodeMCU-32S en PlatformIO](https://docs.platformio.org/en/latest/boards/espressif32/nodemcu-32s.html)
+y [biblioteca oficial SparkFun MAX3010x](https://github.com/sparkfun/SparkFun_MAX3010x_Sensor_Library).
+El almacenamiento local usa [LittleFS de Espressif](https://github.com/espressif/arduino-esp32/blob/2.0.17/libraries/LittleFS/src/LittleFS.h).
 
-- [Analog Devices: Guidelines for SpO2 Measurement](https://www.analog.com/en/resources/technical-articles/guidelines-for-spo2-measurement--maxim-integrated.html).
-- [Analog Devices: MAX30102 datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX30102.pdf).
-- [Analog Devices: ausencia de curva R universal](https://ez.analog.com/optical_sensing/a/documents/c/max30102efd-t-faq/DO19495/does-the-max30102-have-an-r-curve-associated-with-it-to-correlate-the-ratio-r-acred-dcred-acir-dcir).
-- [SparkFun MAX3010x library y ejemplos](https://github.com/sparkfun/SparkFun_MAX3010x_Sensor_Library).
+La coexistencia WiFi/BLE mantiene `WiFi.setSleep(true)`: el ESP32 clásico aborta
+si se desactiva el ahorro del módem mientras ambas radios están activas. Esto se
+observó en la prueba USB y está documentado en el [repositorio de Espressif](https://github.com/espressif/esp-idf/issues/9595).

@@ -21,10 +21,10 @@ export const RESULT_STYLE: Record<string, { label: string; tone: Tone; icon: Rea
   calidad_insuficiente: { label: 'Calidad insuficiente: repetir', tone: 'warning', icon: 'volume-mute' },
   indeterminado: { label: 'Indeterminado', tone: 'neutral', icon: 'help-circle' },
   modelo_no_disponible: { label: 'Modelo no disponible', tone: 'neutral', icon: 'time' },
-  error: { label: 'Error al analizar', tone: 'neutral', icon: 'close-circle' },
+  error: { label: 'No se completó el análisis', tone: 'neutral', icon: 'close-circle' },
 };
 
-const STAGES = ['Grabar', 'Estetoscopio', 'Grabando', 'Analizando', 'Resultado'];
+const STAGES = ['Grabar', 'Estetoscopio', 'Grabando', 'Envío y análisis', 'Resultado'];
 
 /**
  * Grabación de un foco: etapas, orden de grabar, cuenta regresiva de 15 s y resultado.
@@ -32,7 +32,7 @@ const STAGES = ['Grabar', 'Estetoscopio', 'Grabando', 'Analizando', 'Resultado']
  * (GET /api/device/comando). La zona la pone el servidor según la orden.
  */
 export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: AuscultationFocus }> = ({ mode, focus }) => {
-  const { phase, armedLocation, lastResult, recordings, armRecording, recordingStartedAt, commandDelivered, armedAt } = useClinical();
+  const { phase, recordingStage, armedLocation, lastResult, recordings, armRecording, recordingStartedAt, commandDelivered, armedAt } = useClinical();
   const [guide, setGuide] = useState<FocusGuide | null>(null);
   const [showSteps, setShowSteps] = useState(false);
   const [showAsk, setShowAsk] = useState(false);
@@ -56,15 +56,20 @@ export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: Auscultati
     return () => clearInterval(t);
   }, [recordingHere]);
 
+  const pendingAudios = recordings.filter((r) => r.status === 'queued' || r.status === 'processing');
+  const latestHere = recordings.find((r) => r.location === focus);
+  const processingHere = latestHere?.status === 'queued' || latestHere?.status === 'processing';
+
   // Resultado de ESTE foco: el que acaba de llegar o el último guardado
   const result: RecordingResult | null =
-    lastResult && lastResult.location === focus ? lastResult
+    recordingHere || processingHere || (armedHere && phase === 'armed') ? null
       : recordings.find((r) => r.location === focus && (r.mode === 'pulmon' ? 'pulmon' : 'corazon') === mode
-          && !r.recording_id.startsWith('demo_')) || null;
+          && r.status !== 'recording' && r.status !== 'processing' && r.status !== 'queued'
+          && !r.recording_id.startsWith('demo_')) || (lastResult?.location === focus ? lastResult : null);
   const elapsed = recordingHere && recordingStartedAt ? (now - recordingStartedAt) / 1000 : 0;
   const analyzing = recordingHere && elapsed >= RECORDING_SECONDS;
   const stage = armedHere && phase === 'armed' ? 1 : recordingHere ? (analyzing ? 3 : 2) : result ? 4 : 0;
-  const retry = result?.result === 'calidad_insuficiente' || result?.details?.colocacion?.ok === false;
+  const retry = result?.result === 'error' || result?.result === 'calidad_insuficiente' || result?.details?.colocacion?.ok === false;
 
   const arm = async () => {
     setError(null); setArming(true);
@@ -93,6 +98,8 @@ export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: Auscultati
 
   return (
     <View>
+      {pendingAudios.length > 0 && <Banner tone="neutral" title={`${pendingAudios.length} audio(s) en análisis`}
+        text={pendingAudios.map((r) => `${focusName(r.location)}: ${r.status === 'queued' ? 'en cola' : 'analizando'}`).join(' · ') + '. Puedes grabar otra zona cuando termine el envío.'} />}
       <Card elevated>
         <View style={styles.headRow}>
           <View style={[styles.codeBadge, status && { backgroundColor: toneColors[status.tone].bg, borderColor: toneColors[status.tone].border }]}>
@@ -109,14 +116,15 @@ export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: Auscultati
 
         <View style={styles.stageBox}>
           {stage === 2 || stage === 3 ? (
-            <RecordingCountdown elapsed={elapsed} analyzing={analyzing} focus={FOCUS_INFO[focus].short} />
+            <RecordingCountdown elapsed={elapsed} analyzing={analyzing} processing={recordingStage === 'processing'} focus={FOCUS_INFO[focus].short} />
           ) : stage === 1 ? (
             <Armed delivered={commandDelivered} armedAt={armedAt} focus={FOCUS_INFO[focus].short} />
           ) : (
             <View style={styles.idleRow}>
               <View style={styles.idleIcon}><MaterialCommunityIcons name="stethoscope" size={26} color={color.primary} /></View>
               <Text style={styles.stageText}>
-                {retry ? 'La grabación anterior no sirvió (ruido o poco contacto). Revisa el contacto con la piel y repite.'
+                {processingHere ? 'Audio recibido y comprobado. El análisis continúa; puedes grabar otra zona.'
+                  : retry ? 'La grabación anterior no se completó o no tuvo calidad suficiente. Revisa el mensaje del resultado y repite.'
                   : result ? 'Este foco ya tiene resultado. Puedes repetirlo si dudas de la grabación.'
                   : <>Coloca el estetoscopio en <Text style={styles.strong}>{FOCUS_INFO[focus].short.toLowerCase()}</Text> y toca
                     "Grabar". El estetoscopio empieza solo; no hay que presionar nada.</>}
@@ -130,7 +138,7 @@ export const RecorderPanel: React.FC<{ mode: AuscultationMode; focus: Auscultati
             : `Grabar · ${FOCUS_INFO[focus].short}`}
           icon={retry || result ? 'refresh' : 'mic'} size="lg" full onPress={arm} loading={arming}
           variant={result && !retry && stage !== 1 ? 'secondary' : 'primary'}
-          disabled={recordingHere}
+          disabled={phase === 'recording'}
         />
         {error && <Text style={styles.error}>{error}</Text>}
 
@@ -236,7 +244,7 @@ const Armed: React.FC<{ delivered: boolean; armedAt: number | null; focus: strin
 };
 
 /** Cuenta regresiva real de la grabación y, si hay dato válido, el nivel del micrófono en vivo. */
-const RecordingCountdown: React.FC<{ elapsed: number; analyzing: boolean; focus: string }> = ({ elapsed, analyzing, focus }) => {
+const RecordingCountdown: React.FC<{ elapsed: number; analyzing: boolean; processing: boolean; focus: string }> = ({ elapsed, analyzing, processing, focus }) => {
   const { vitals } = useVitals();
   const fresh = Date.now() - Date.parse(vitals.timestamp) < 5000;
   const level = vitals.source === 'real' && vitals.audioUnit === 'dBFS' && Number.isFinite(vitals.audio_rms)
@@ -252,10 +260,10 @@ const RecordingCountdown: React.FC<{ elapsed: number; analyzing: boolean; focus:
       </ProgressRing>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[styles.stageText, styles.strong]}>
-          {analyzing ? 'Analizando la grabación…' : `Grabando ${focus.toLowerCase()}`}
+          {analyzing ? (processing ? 'Analizando la grabación…' : 'Enviando la grabación…') : `Grabando ${focus.toLowerCase()}`}
         </Text>
         <Text style={styles.stageText}>
-          {analyzing ? 'La red neuronal revisa el sonido; tarda unos segundos.' : 'No muevas el estetoscopio y pide silencio.'}
+          {analyzing ? (processing ? 'La red neuronal está revisando el audio recibido.' : 'El dispositivo está enviando el audio por WiFi; espera a que termine.') : 'No muevas el estetoscopio y pide silencio.'}
         </Text>
         {!analyzing && level !== null && (
           <View style={styles.levelRow}>
@@ -298,6 +306,15 @@ const Gauge: React.FC<{ value: number; threshold: number; tint: string }> = ({ v
 
 /** Resultado de una grabación: onda real, salida del clasificador frente a su umbral y descripción. */
 export const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) => {
+  const { refresh } = useClinical();
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  const retryAnalysis = async () => {
+    setRetrying(true); setRetryError(null);
+    try { await apiService.retryAnalysis(result.recording_id); await refresh(); }
+    catch (e: any) { setRetryError(e?.message || 'No se pudo repetir el análisis'); }
+    finally { setRetrying(false); }
+  };
   const s = RESULT_STYLE[result.result] || RESULT_STYLE.error;
   const t = toneColors[s.tone];
   const hasProb = result.probability !== null && result.probability !== undefined;
@@ -343,6 +360,9 @@ export const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) =>
         </View>
       ) : !!result.reason && <Text style={[styles.meta, { marginTop: space.sm }]}>{result.reason}</Text>}
 
+      {result.result === 'error' && playable && <Button label="Reintentar análisis del audio guardado"
+        onPress={retryAnalysis} loading={retrying} variant="secondary" />}
+      {retryError && <Text style={styles.error}>{retryError}</Text>}
       <DetailsView result={result} />
       {result.result === 'anormal' && (
         <View style={styles.suggest}>

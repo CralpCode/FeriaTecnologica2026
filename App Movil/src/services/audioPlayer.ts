@@ -9,7 +9,7 @@ import { AuscultationMode } from '../types/vitals';
  * El filtro solo cambia lo que se ESCUCHA: no toca el audio guardado ni lo que analiza la IA.
  */
 
-/** auto = según el foco: pulmón -> agudos (diafragma); corazón -> sin filtro. */
+/** auto = según el foco: pulmón -> agudos (diafragma); corazón -> la banda que analiza la IA (20-600 Hz). */
 export type ListeningFilter = 'auto' | 'none' | 'bell' | 'diaphragm' | 'ai';
 type ResolvedFilter = Exclude<ListeningFilter, 'auto'>;
 type Band = [number | null, number | null]; // [paso alto, paso bajo] en Hz
@@ -33,7 +33,7 @@ export const FILTER_LABELS: Record<ListeningFilter, string> = {
 
 export function resolveFilter(choice: ListeningFilter, mode: AuscultationMode = 'corazon'): ResolvedFilter {
   if (choice !== 'auto') return choice;
-  return mode === 'pulmon' ? 'diaphragm' : 'none';
+  return mode === 'pulmon' ? 'diaphragm' : 'ai';
 }
 
 /** Texto corto con la banda que se escucha, p. ej. "más de 100 Hz". */

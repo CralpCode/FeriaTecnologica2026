@@ -69,6 +69,38 @@ class DeviceCommandTests(unittest.TestCase):
         main._armed['at'] -= main.ARM_TTL_S + 1
         self.assertEqual(self.client.get('/api/device/comando').json(), {'accion': None})
 
+    def test_capture_abort_is_terminal_and_rejects_more_audio(self):
+        cid = self.arm()['comando_id']
+        rec = self.client.post('/api/audio/start', json={'device_id': 'x', 'sample_rate': 16000, 'comando_id': cid}).json()['recording_id']
+        self.assertEqual(self.client.post('/api/audio/abort', params={'recording_id': rec}).status_code, 200)
+        status = self.client.get('/api/audio/status', params={'session_id': 'p001'}).json()
+        self.assertEqual((status['stage'], status['result']['result']), ('error', 'error'))
+        self.assertEqual(self.client.post('/api/audio/chunk', params={'recording_id': rec}, content=b'\x00\x00').status_code, 404)
+
+    def test_second_zone_waits_for_current_capture(self):
+        cid = self.arm()['comando_id']
+        rec = self.client.post('/api/audio/start', json={'device_id': 'x', 'sample_rate': 16000, 'comando_id': cid}).json()['recording_id']
+        self.assertEqual(self.client.post('/api/audio/arm', json={'session_id': 'p001', 'location': 'PV'}).status_code, 409)
+        self.client.post('/api/audio/abort', params={'recording_id': rec})
+        self.assertEqual(self.client.post('/api/audio/arm', json={'session_id': 'p001', 'location': 'PV'}).status_code, 200)
+
+    def test_status_distinguishes_upload_from_processing(self):
+        cid = self.arm()['comando_id']
+        rec = self.client.post('/api/audio/start', json={'device_id': 'x', 'sample_rate': 16000, 'comando_id': cid}).json()['recording_id']
+        from datetime import datetime, timedelta
+        database.update_recording(rec, created_at=(datetime.now() - timedelta(seconds=20)).isoformat())
+        self.client.post('/api/audio/chunk', params={'recording_id': rec}, content=b'\x00\x00')
+        status = self.client.get('/api/audio/status', params={'session_id': 'p001'}).json()
+        self.assertEqual((status['stage'], status['bytes_received']), ('uploading', 2))
+
+    def test_abandoned_capture_does_not_wait_forever(self):
+        cid = self.arm()['comando_id']
+        rec = self.client.post('/api/audio/start', json={'device_id': 'x', 'sample_rate': 16000, 'comando_id': cid}).json()['recording_id']
+        os.utime(audio_service._pcm_path(rec), (0, 0))
+        status = self.client.get('/api/audio/status', params={'session_id': 'p001'}).json()
+        self.assertEqual(status['stage'], 'error')
+        self.assertIsNotNone(database.get_recording(rec)['finished_at'])
+
 
 if __name__ == '__main__':
     unittest.main()

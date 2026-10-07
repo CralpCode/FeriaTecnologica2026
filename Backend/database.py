@@ -95,6 +95,11 @@ def init_db():
             conn.execute("ALTER TABLE recordings ADD COLUMN details TEXT")
         if "mode" not in cols:
             conn.execute("ALTER TABLE recordings ADD COLUMN mode TEXT DEFAULT 'corazon'")
+        for name, definition in (("audio_bytes", "INTEGER DEFAULT 0"),
+                                 ("audio_sha256", "TEXT"),
+                                 ("transport_verified", "INTEGER DEFAULT 0")):
+            if name not in cols:
+                conn.execute(f"ALTER TABLE recordings ADD COLUMN {name} {definition}")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_rec_session ON recordings(session_id);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_session ON alerts(session_id);")
     conn.close()
@@ -159,7 +164,8 @@ def get_latest_reading(session_id: str = None):
         try:
             dt = datetime.fromisoformat(row["timestamp"])
             if (datetime.now() - dt).total_seconds() <= 15:
-                is_active = bool(row["heartRate"] > 0 and row["bloodOxygen"] > 0)
+                meta = json.loads(row["measurement_metadata"] or "{}")
+                is_active = meta.get("device_connected", meta.get("source") == "real") is True
                 return {
                     **json.loads(row["measurement_metadata"] or "{}"),
                     "device_connected": is_active,
@@ -268,6 +274,8 @@ def update_recording(rec_id: str, **fields):
             fields[k] = json.dumps(fields[k])
     cols = ", ".join(f"{k} = ?" for k in fields)
     conn = get_db_connection()
+    if fields.get('status') == 'queued':
+        conn.execute('PRAGMA synchronous=FULL;')  # Confirmar la cola antes del ACK al ESP.
     with conn:
         conn.execute(f"UPDATE recordings SET {cols} WHERE id = ?", (*fields.values(), rec_id))
     conn.close()
@@ -288,6 +296,28 @@ def get_recording(rec_id: str):
     row = conn.execute("SELECT * FROM recordings WHERE id = ?", (rec_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def pending_audio_jobs():
+    conn = get_db_connection()
+    rows = conn.execute("SELECT id FROM recordings WHERE status='queued' ORDER BY created_at, id").fetchall()
+    conn.close()
+    return [r["id"] for r in rows]
+
+
+def claim_audio_job(rec_id: str) -> bool:
+    conn = get_db_connection()
+    with conn:
+        changed = conn.execute("UPDATE recordings SET status='processing' WHERE id=? AND status='queued'", (rec_id,)).rowcount
+    conn.close()
+    return changed == 1
+
+
+def recover_audio_jobs():
+    conn = get_db_connection()
+    with conn:
+        conn.execute("UPDATE recordings SET status='queued' WHERE status='processing' AND wav_path IS NOT NULL")
+    conn.close()
 
 
 def list_recordings(session_id: str = None, limit: int = 50):

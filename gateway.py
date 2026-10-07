@@ -79,6 +79,14 @@ def normalizar_telemetria(packet):
     if not isinstance(packet, dict):
         raise ValueError("La telemetría debe ser un objeto JSON")
     packet = dict(packet)
+    mask = packet.get("valid")
+    if packet.get("v") == 2 and type(mask) is int and 0 <= mask <= 31:
+        packet.setdefault("source", "real")
+        packet.setdefault("heartRateValid", bool(mask & 1))
+        packet.setdefault("bloodOxygenValid", bool(mask & 2))
+        packet.setdefault("spo2Calibrated", packet.get("cal") is True)
+        packet.setdefault("audioUnit", packet.get("audio_unit"))
+        packet.setdefault("signalQuality", "good" if mask & 1 else "acquiring" if packet.get("finger") is True else "no_contact")
     source = packet.get("source", "unknown")
     if packet.get("test") is True:
         source = "simulated"
@@ -143,9 +151,15 @@ def ejecutar_gateway(puerto_com, baudrate=115200):
                 print(f"[OK] ¡Conectado exitosamente al puerto {puerto_com}!")
                 print("[*] Esperando telemetría del ESP32...\n")
                 reintentos = 0
+                pending = bytearray()
 
                 while True:
-                    linea = ser.readline().decode("latin1", errors="ignore").strip()
+                    pending.extend(ser.readline())
+                    if not pending.endswith(b'\n'):
+                        if len(pending) > 8192: pending.clear()
+                        continue
+                    linea = pending.decode("utf-8", errors="replace").strip()
+                    pending.clear()
                     if not linea:
                         continue
 

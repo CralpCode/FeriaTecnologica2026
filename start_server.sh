@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT/Backend"
 
 PORT="${PORT:-8000}"
-VENV="${VENV:-$(pwd)/.venv}"
+VENV="${VENV:-$ROOT/../.venv}"
 export LLM_MODEL="${LLM_MODEL:-spiroscan-qwen3next}"
 export PORT
 BUILD=0; TUNNEL=0

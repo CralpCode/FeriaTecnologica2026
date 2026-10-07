@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 
 MAX_AGE_S = 15
 QUALITY_FIELDS = ("source", "heartRateValid", "bloodOxygenValid", "spo2Calibrated",
-                  "signalQuality", "sampleAgeMs", "finger", "audioUnit", "validadoPor")
+                  "signalQuality", "sampleAgeMs", "finger", "audioUnit", "audioValid", "device_connected", "validadoPor")
 # Indicadores que solo envía el firmware nuevo; si no llega ninguno, el paquete es del formato original.
-NEW_FORMAT_KEYS = ("source", "heartRateValid", "heart_rate_valid", "bloodOxygenValid", "spo2_valid",
+NEW_FORMAT_KEYS = ("v", "valid", "source", "heartRateValid", "heart_rate_valid", "bloodOxygenValid", "spo2_valid",
                    "spo2Calibrated", "spo2_calibrated", "signalQuality", "signal_quality",
                    "sampleAgeMs", "sample_age_ms")
 
@@ -92,6 +92,17 @@ def clean_packet(raw: dict) -> tuple[dict, list[str]]:
     Lo que falta queda en None; lo que no se puede interpretar o está fuera de rango también,
     con un aviso. Nunca lanza excepción por el contenido del paquete.
     """
+    raw = dict(raw)
+    mask = raw.get("valid")
+    if raw.get("v") == 2 and type(mask) is int and 0 <= mask <= 31:
+        raw.setdefault("source", "simulated" if raw.get("test") is True else "real")
+        raw.setdefault("heartRateValid", bool(mask & 1))
+        raw.setdefault("bloodOxygenValid", bool(mask & 2))
+        raw.setdefault("spo2Calibrated", raw.get("cal") is True)
+        raw.setdefault("audioUnit", raw.get("audio_unit"))
+        raw.setdefault("audioValid", bool(mask & 16))
+        raw.setdefault("signalQuality", "good" if mask & 1 else "acquiring" if raw.get("finger") is True else "no_contact")
+        # Older v2 packets have no acquisition age: keep it absent, never assume freshness.
     avisos: list[str] = []
     out: dict = {}
 
@@ -121,7 +132,8 @@ def clean_packet(raw: dict) -> tuple[dict, list[str]]:
     # Indicadores de validez: solo un booleano JSON cuenta; cualquier otra cosa queda como no válido.
     for key, aliases in (("heartRateValid", ("heartRateValid", "heart_rate_valid")),
                          ("bloodOxygenValid", ("bloodOxygenValid", "spo2_valid")),
-                         ("spo2Calibrated", ("spo2Calibrated", "spo2_calibrated"))):
+                         ("spo2Calibrated", ("spo2Calibrated", "spo2_calibrated")),
+                         ("audioValid", ("audioValid", "audio_valid"))):
         value = pick(*aliases)
         if value is not None and not isinstance(value, bool):
             avisos.append(f"{key}: no es verdadero/falso")

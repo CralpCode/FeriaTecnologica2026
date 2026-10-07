@@ -27,8 +27,16 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
   const pulseUsed = used?.fc ?? null;
   const connected = connectedType !== 'none';
   const bpm = valid.heartRate ? Math.round(vitals.heartRate) : null;
-  const audioAvailable = vitals.source === 'real' && vitals.audioUnit === 'dBFS'
+  const audioAvailable = vitals.source === 'real' && vitals.audioUnit === 'dBFS' && vitals.audioValid === true
     && Number.isFinite(vitals.audio_rms) && vitals.audio_rms < 0 && now - Date.parse(vitals.timestamp) < 10000;
+
+  const pulseStatus = vitals.signalQuality === 'sensor_unavailable'
+    ? 'El MAX30102 no responde. Revisa alimentación, tierra y cables SDA/SCL.'
+    : ['no_contact', 'no_finger'].includes(vitals.signalQuality || '')
+      ? 'Coloca el dedo sobre el sensor para iniciar la lectura.'
+      : vitals.signalQuality === 'stale'
+        ? 'La señal óptica dejó de actualizarse. Revisa el sensor.'
+        : 'Esperando una lectura estable del sensor…';
 
   const connect = async () => {
     setConnecting(true);
@@ -64,7 +72,7 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
               <Text style={styles.unit}>BPM</Text>
             </View>
             <Text style={styles.status}>
-              {bpm ? 'Se interpreta con la edad y el reposo.' : 'Esperando una lectura estable del sensor…'}
+              {bpm ? 'Se interpreta con la edad y el reposo.' : pulseStatus}
             </Text>
             <View style={styles.readings} accessibilityLabel={`${readings} de 3 lecturas válidas`}>
               {[0, 1, 2].map((i) => (

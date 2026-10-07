@@ -228,11 +228,27 @@ class DeviceBridgeService {
       await customChar.startNotifications();
 
       const textDecoder = new TextDecoder('utf-8');
+      let packetBuffer = '';
       customChar.addEventListener('characteristicvaluechanged', (event: any) => {
         try {
-          const str = textDecoder.decode(event.target.value);
-          const packet: RawDevicePacket = JSON.parse(str);
-          this.handleIncomingRawData(packet);
+          packetBuffer += textDecoder.decode(event.target.value, { stream: true });
+          if (packetBuffer.length > 8192) { packetBuffer = ''; return; }
+          // New firmware terminates each message with a newline. Also support old whole JSON notifications.
+          while (packetBuffer.includes('\n')) {
+            const at = packetBuffer.indexOf('\n');
+            const line = packetBuffer.slice(0, at).trim();
+            packetBuffer = packetBuffer.slice(at + 1);
+            if (line) {
+              try { this.handleIncomingRawData(JSON.parse(line)); } catch {}
+            }
+          }
+          if (packetBuffer.trim().endsWith('}')) {
+            try {
+              const packet = JSON.parse(packetBuffer);
+              packetBuffer = '';
+              this.handleIncomingRawData(packet);
+            } catch {} // wait for the remaining fragments
+          }
         } catch (e) {
           // Ignorar paquetes parciales si ocurren
         }
@@ -332,11 +348,22 @@ class DeviceBridgeService {
   }
 
   public handleIncomingRawData(raw: RawDevicePacket) {
+    if (!raw || typeof raw.bpm !== 'number' || !Number.isFinite(raw.bpm)) return;
     // Si el usuario desconectó el dispositivo, ignorar paquetes residuales inmediatamente
     if (!this.isConnected) {
       return;
     }
 
+    if (raw.v === 2 && Number.isInteger(raw.valid) && raw.valid! >= 0 && raw.valid! <= 31) {
+      raw = { ...raw, source: raw.source || (raw.test === true ? 'simulated' : 'real'),
+        heartRateValid: raw.heartRateValid ?? !!(raw.valid! & 1),
+        bloodOxygenValid: raw.bloodOxygenValid ?? !!(raw.valid! & 2),
+        spo2Calibrated: raw.spo2Calibrated ?? raw.cal === true,
+        audioUnit: raw.audioUnit ?? raw.audio_unit,
+        audioValid: raw.audioValid ?? !!(raw.valid! & 16),
+        signalQuality: raw.signalQuality ?? (raw.finger ? ((raw.valid! & 1) ? 'good' : 'acquiring') : 'no_contact'),
+      };
+    }
     const isFingerPresent = raw.finger === true;
     // Formato original del firmware (sin indicadores de calidad): se valida aquí con la misma regla del servidor
     // y su SpO2, HRV y estrés no se muestran (el firmware original no tiene SpO2 calibrada).
@@ -366,6 +393,7 @@ class DeviceBridgeService {
       device_connected: true,
       finger: isFingerPresent,
       audioUnit: raw.audioUnit,
+      audioValid: raw.audioValid,
       source: legacy ? (raw.test === true ? 'simulated' : 'real') : raw.source || 'unknown',
       heartRateValid,
       bloodOxygenValid,
@@ -401,6 +429,7 @@ class DeviceBridgeService {
           finger: data.finger,
           test: data.test,
           audioUnit: data.audioUnit,
+          audioValid: data.audioValid,
           source: data.source,
           heartRateValid: data.heartRateValid ?? data.heart_rate_valid,
           bloodOxygenValid: data.bloodOxygenValid ?? data.spo2_valid,

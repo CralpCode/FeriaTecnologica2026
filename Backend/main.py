@@ -3,10 +3,11 @@ import time
 import uuid
 import json
 import asyncio
+import sys
 from typing import List, Optional, Union, Dict, Any, Literal
 from datetime import datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Request, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
@@ -287,8 +288,8 @@ async def receive_telemetry(request: Request):
         data_dict.update({"spo2": None, "hrv": None, "stress": None})
     elif data_dict.get("source") is None:
         data_dict["source"] = "unknown"
+    data_dict["device_connected"] = True
     saved = database.save_reading(data_dict)
-    saved["device_connected"] = True
     
     _sessions_cache[sid] = {
         "vitals": saved,
@@ -569,8 +570,12 @@ async def audio_arm(payload: AudioArmInput):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     mode = audio_service.resolve_mode(loc, payload.mode)
+    sid = _get_effective_session(payload.session_id)
+    state = audio_service.recording_status(sid)
+    if state["stage"] in ("capturing", "uploading"):
+        raise HTTPException(status_code=409, detail="Espera a que termine la grabación y el envío antes de iniciar otra zona.")
     _armed.clear()
-    _armed.update({"session_id": _get_effective_session(payload.session_id), "location": loc, "mode": mode,
+    _armed.update({"session_id": sid, "location": loc, "mode": mode,
                    "at": time.time(), "comando_id": uuid.uuid4().hex[:8], "entregado": None})
     _device_link.update({"session_id": _armed["session_id"], "at": time.time()})
     await manager.broadcast({"type": "RECORDING_ARMED", "session_id": _armed["session_id"],
@@ -590,6 +595,63 @@ async def _after_classification(result: dict):
     for alert in alerts.evaluate_recording(result):
         await _publish_alert(alert)
     await _publish_triage_if_changed(result["session_id"])
+
+
+AUDIO_WORKER_PATH = os.path.join(os.path.dirname(__file__), 'audio_worker.py')
+
+
+async def _run_audio_worker(rec_id: str, timeout_s: float = 120):
+    env = {**os.environ, 'SPIROSCAN_DB_PATH': str(database.DB_PATH),
+           'SPIROSCAN_REC_DIR': str(audio_service.REC_DIR)}
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, AUDIO_WORKER_PATH, rec_id, env=env,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    try:
+        output, _ = await asyncio.wait_for(process.communicate(), timeout_s)
+        if output:
+            print(output.decode(errors='replace')[-4000:], flush=True)
+        rec = database.get_recording(rec_id)
+        if rec['status'] not in ('done', 'error'):
+            database.update_recording(rec_id, status='error', result='error',
+                                      quality={'error': 'El proceso de análisis se interrumpió. El audio está guardado.'})
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        database.update_recording(rec_id, status='error', result='error',
+                                  quality={'error': 'El análisis excedió 120 segundos. El audio está guardado; repite el análisis.'})
+    except asyncio.CancelledError:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+        raise
+    return audio_service._stored_result(database.get_recording(rec_id))
+
+
+async def _audio_queue_loop():
+    while True:
+        for rec_id in database.pending_audio_jobs():
+            try:
+                result = await _run_audio_worker(rec_id)
+                if result:
+                    await _after_classification(result)
+            except Exception as exc:
+                print(f"[AUDIO] {rec_id}: {exc}", flush=True)
+        await asyncio.sleep(0.5)
+
+
+@app.on_event("startup")
+async def _start_audio_queue():
+    database.recover_audio_jobs()
+    audio_service.expire_stale_recordings()
+    app.state.audio_task = asyncio.create_task(_audio_queue_loop())
+
+
+@app.on_event("shutdown")
+async def _stop_audio_queue():
+    task = getattr(app.state, "audio_task", None)
+    if task:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 @app.get("/api/device/comando")
@@ -621,10 +683,10 @@ async def audio_start(payload: AudioStartInput):
 
 
 @app.post("/api/audio/chunk")
-async def audio_chunk(request: Request, recording_id: str = Query(...)):
+async def audio_chunk(request: Request, recording_id: str = Query(...), offset: Optional[int] = Query(None, ge=0)):
     data = await request.body()
     try:
-        total = audio_service.append_chunk(recording_id, data)
+        total = audio_service.append_chunk(recording_id, data, offset)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
@@ -633,15 +695,57 @@ async def audio_chunk(request: Request, recording_id: str = Query(...)):
 
 
 @app.post("/api/audio/finish")
-async def audio_finish(recording_id: str = Query(...)):
+async def audio_finish(recording_id: str = Query(...), background: bool = False,
+                       expected_bytes: Optional[int] = Query(None, ge=1, le=audio_service.MAX_BYTES),
+                       sha256: Optional[str] = Query(None, pattern="^[0-9a-fA-F]{64}$")):
     try:
+        if background:
+            if expected_bytes is None or sha256 is None:
+                raise ValueError("Se requieren longitud y SHA-256 para confirmar el envío")
+            rec = await asyncio.to_thread(audio_service.prepare_finish, recording_id, expected_bytes, sha256, True)
+            receipt = audio_service.queue_receipt(rec)
+            await manager.broadcast({"type": "RECORDING_QUEUED", "session_id": rec["session_id"],
+                                     "data": {**receipt, "location": rec["location"]}})
+            return JSONResponse(receipt, status_code=202)
         result = await asyncio.to_thread(audio_service.finish, recording_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al clasificar: {e}")
     await _after_classification(result)
     return result
+
+
+@app.post("/api/audio/abort")
+async def audio_abort(recording_id: str = Query(...)):
+    try:
+        result = audio_service.abort(recording_id, "El dispositivo interrumpió la captura o el envío. Repite la grabación.")
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if database.get_recording(recording_id)["status"] in ("done", "error"):
+        await manager.broadcast({"type": "RECORDING_RESULT", "session_id": result["session_id"], "data": result})
+    return result
+
+
+@app.get("/api/audio/status")
+def audio_status(session_id: str = Query(...)):
+    return audio_service.recording_status(session_id)
+
+
+@app.post("/api/recordings/{recording_id}/retry")
+async def retry_audio_analysis(recording_id: str):
+    try:
+        rec = await asyncio.to_thread(audio_service.retry_analysis, recording_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    receipt = audio_service.queue_receipt(rec)
+    await manager.broadcast({'type': 'RECORDING_QUEUED', 'session_id': rec['session_id'],
+                             'data': {**receipt, 'location': rec['location']}})
+    return JSONResponse(receipt, status_code=202)
 
 
 @app.post("/api/audio/upload")

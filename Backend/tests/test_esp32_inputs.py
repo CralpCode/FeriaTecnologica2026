@@ -125,6 +125,43 @@ class Esp32InputTests(unittest.TestCase):
             self.assertEqual(r.status_code, 200, body)
             self.assertEqual(r.json()['saved']['heartRate'], 0)
 
+    def test_firmware_v2_reaches_websocket_current_history_and_sqlite(self):
+        packet = {"v": 2, "valid": 1, "source": "real", "device_id": "ESP32-BIO-01",
+                  "bpm": 77, "spo2": 0, "finger": True, "heartRateValid": True,
+                  "bloodOxygenValid": False, "spo2Calibrated": False,
+                  "signalQuality": "good", "sampleAgeMs": 12, "audioUnit": "dBFS"}
+        with self.client.websocket_connect('/ws/live') as ws:
+            self.assertEqual(ws.receive_json()['type'], 'INITIAL_STATE')
+            response = self.client.post('/api/telemetry', json=packet)
+            self.assertEqual(response.status_code, 200)
+            event = ws.receive_json()
+            self.assertEqual(event['type'], 'VITALS_UPDATE')
+            self.assertEqual(event['data']['heartRate'], 77)
+            self.assertTrue(event['data']['heartRateValid'])
+        current = self.client.get('/api/vitals/current', params={'session_id': 'ESP32-BIO-01'}).json()
+        self.assertEqual(current['heartRate'], 77)
+        self.assertEqual(current['sampleAgeMs'], 12)
+        history = self.client.get('/api/vitals/history', params={'session_id': 'ESP32-BIO-01'}).json()
+        self.assertTrue(history)
+        conn = database.get_db_connection()
+        row = conn.execute('SELECT heartRate, measurement_metadata FROM vitals_log ORDER BY id DESC LIMIT 1').fetchone()
+        conn.close()
+        self.assertEqual(row['heartRate'], 77)
+        self.assertIn('"heartRateValid": true', row['measurement_metadata'])
+        # Removing contact must clear eligibility in every receiving layer.
+        packet.update(valid=0, bpm=0, finger=False, heartRateValid=False, signalQuality='no_contact')
+        saved = self.client.post('/api/telemetry', json=packet).json()['saved']
+        self.assertIsNone(measurement_quality.usable_value(saved, 'heartRate'))
+
+    def test_link_is_connected_even_without_valid_sensor_values(self):
+        self.client.post('/api/telemetry', json={"v": 2, "valid": 0, "source": "real",
+            "bpm": 0, "spo2": 0, "finger": False, "device_id": "ESP32-BIO-01",
+            "signalQuality": "sensor_unavailable", "sampleAgeMs": 86400000})
+        self.assertTrue(database.get_latest_reading('ESP32-BIO-01')['device_connected'])
+        self.assertFalse(database.get_latest_reading('ESP32-BIO-01')['heartRateValid'])
+        database.save_reading({'session_id': 'ESP32-BIO-01', 'device_connected': False})
+        self.assertFalse(database.get_latest_reading('ESP32-BIO-01')['device_connected'])
+
     def test_malformed_bodies_get_client_errors(self):
         for body in (b'', b'hola', b'[1, 2, 3]', b'"texto"', b'{"bpm": 70', b'\xff\xfe\x00'):
             r = self.client.post('/api/telemetry', content=body, headers={'Content-Type': 'application/json'})
@@ -196,3 +233,25 @@ class Esp32InputTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class CompactV2Tests(unittest.TestCase):
+    def test_compact_packet_preserves_mask_and_does_not_invent_age(self):
+        packet, warnings = measurement_quality.clean_packet({
+            'v': 2, 'valid': 0, 'bpm': 80, 'finger': True, 'cal': False, 'audio_unit': 'dBFS'})
+        self.assertFalse(packet['legacy'])
+        self.assertFalse(packet['heartRateValid'])
+        self.assertFalse(packet['spo2Calibrated'])
+        self.assertIsNone(packet['sampleAgeMs'])
+        self.assertEqual(packet['audioUnit'], 'dBFS')
+
+    def test_compact_test_packet_never_becomes_physical(self):
+        packet, _ = measurement_quality.clean_packet({'v': 2, 'valid': 1, 'test': True})
+        self.assertEqual(packet['source'], 'simulated')
+
+    def test_explicit_metadata_takes_precedence_over_mask(self):
+        packet, _ = measurement_quality.clean_packet({
+            'v': 2, 'valid': 1, 'bpm': 80, 'finger': True,
+            'heartRateValid': False, 'source': 'simulated', 'sampleAgeMs': 7})
+        self.assertFalse(packet['heartRateValid'])
+        self.assertEqual(packet['source'], 'simulated')
+        self.assertEqual(packet['sampleAgeMs'], 7)

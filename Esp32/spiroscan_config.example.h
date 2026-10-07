@@ -5,8 +5,8 @@
 #pragma once
 
 // Red WiFi (2.4 GHz) a la que están conectados la Mac (servidor) y el ESP32.
-#define WIFI_SSID      "SpiroScan-Feria"
-#define WIFI_PASSWORD  "cambia-esta-clave"
+#define WIFI_SSID      ""
+#define WIFI_PASSWORD  ""
 
 // Dirección del servidor (la Mac):
 //   ""  (vacío)  -> el ESP32 busca la Mac solo, pero SOLO si están en el MISMO WiFi.
@@ -17,3 +17,9 @@
 
 // Identificador del dispositivo (el backend lo asocia a la sesión que la app "armó").
 #define DEVICE_ID      "ESP32-BIO-01"
+
+// 0: WiFi/USB con memoria disponible para HTTPS y audio; 1: habilitar BLE.
+#define SPIROSCAN_ENABLE_BLE 0
+
+// 1 solo cuando el INMP441 este instalado; evita lecturas de un pin flotante.
+#define SPIROSCAN_MIC_CONNECTED 0

@@ -227,6 +227,15 @@ class ApiService {
     return this.request(`/api/recordings?session_id=${encodeURIComponent(sessionId)}`);
   }
 
+  getRecordingStatus(): Promise<{ recording_id?: string; stage: string; age_s: number; location: string;
+    bytes_received: number; result: RecordingResult | null }> {
+    return this.request(`/api/audio/status?session_id=${encodeURIComponent(getSessionId())}`);
+  }
+
+  retryAnalysis(recordingId: string): Promise<unknown> {
+    return this.request(`/api/recordings/${encodeURIComponent(recordingId)}/retry`, { method: 'POST' });
+  }
+
   listReports(sessionId: string): Promise<ReportItem[]> {
     return this.request(`/api/reports?session_id=${encodeURIComponent(sessionId)}`);
   }
