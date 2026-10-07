@@ -482,15 +482,22 @@ void setup_max30102() {
     int sda;
     int scl;
     const char* label;
+    bool scl_active;   // SCL manejado a 3.3V por el ESP32 (modulos con pull-ups a 1.8V)
   };
 
   // Rutas de sondeo segun conexionado fisico de la placa (NodeMCU-32S y DevKit)
   I2CPinConfig pin_options[] = {
     {23, 22, "Conexion del usuario (P23=SDA, P22=SCL)"},
     {18, 19, "Prueba alternativa (P18=SDA, P19=SCL)"},
+    {19, 18, "Alternativa invertida (P19=SDA, P18=SCL)"},
     {21, 22, "Estandar ESP32 (P21=SDA, P22=SCL)"},
     {22, 23, "NodeMCU-32S Invertido (P22=SDA, P23=SCL)"},
-    {22, 21, "Estandar Invertido (P22=SDA, P21=SCL)"}
+    {22, 21, "Estandar Invertido (P22=SDA, P21=SCL)"},
+    // Modulos MAX30102 con pull-ups a 1.8V: el ESP32 lee ese nivel como 0 y el bus parece trabado.
+    // SCL solo lo controla el ESP32 (el MAX30102 no estira el reloj), asi que puede ir activo a 3.3V
+    // (el sensor tolera hasta 6V en SCL/SDA); SDA necesita una resistencia de 3.3V a SDA.
+    {18, 19, "P18=SDA, P19=SCL activo", true},
+    {19, 18, "P19=SDA, P18=SCL activo", true}
   };
 
   sensor_hw_found = false;
@@ -499,6 +506,7 @@ void setup_max30102() {
   i2c_bus_recovery(21, 22);
   i2c_bus_recovery(23, 22);
   i2c_bus_recovery(18, 19);
+  i2c_bus_recovery(19, 18);
 
   pinMode(21, INPUT_PULLUP);
   pinMode(22, INPUT_PULLUP);
@@ -514,6 +522,7 @@ void setup_max30102() {
     Wire.end();
     delay(10);
     Wire.begin(sda, scl, 100000);
+    if (pin_options[i].scl_active) gpio_set_direction((gpio_num_t)scl, GPIO_MODE_INPUT_OUTPUT);
     Wire.setTimeOut(30);
     delay(20);
 
@@ -531,6 +540,7 @@ void setup_max30102() {
       // SparkFun begin() internamente llama Wire.begin() sin parametros (resetea a 21/22).
       // Re-aplicamos de inmediato los pines configurados por el usuario:
       Wire.begin(sda, scl, 100000);
+      if (pin_options[i].scl_active) gpio_set_direction((gpio_num_t)scl, GPIO_MODE_INPUT_OUTPUT);
 
       particleSensor.setup(0x35, 4, 2, 400, 411, 4096);
       particleSensor.setPulseAmplitudeRed(0x35);
@@ -549,7 +559,7 @@ void setup_max30102() {
   // Liberar el bus I2C al finalizar para no retener ningun pin en LOW
   Wire.end();
   const I2CPinConfig direct_options[] = {
-    {23, 22, "Original"}, {18, 19, "Alternativa"}
+    {23, 22, "Original"}, {18, 19, "Alternativa"}, {19, 18, "Alternativa invertida"}
   };
   for (const auto& pins : direct_options) {
     if (!max_soft_address_probe(pins.sda, pins.scl)) continue;
@@ -1480,6 +1490,57 @@ void run_optical_emitter_probe() {
 // ------------------------------------------------------------------------------
 // 9. PROCESADOR DE COMANDOS ENTRANTE (BLUETOOTH & SERIAL USB)
 // ------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
+// Prueba LEDTEST: enciende el LED rojo del MAX30102 escribiendo sin leer.
+// Sirve cuando el ESP32 no puede leer SDA (modulos con pull-ups a 1.8V): las dos lineas se manejan
+// a 3.3V al escribir y SDA se suelta en cada ACK (el sensor tolera hasta 6V en SDA/SCL).
+// Si el LED rojo se enciende, el sensor esta vivo y SDA es el pin indicado en el monitor serie.
+// ------------------------------------------------------------------------------
+static void bb_wait() { delayMicroseconds(25); }
+static void bb_start(int sda, int scl) {
+  pinMode(sda, OUTPUT); pinMode(scl, OUTPUT);
+  digitalWrite(sda, HIGH); digitalWrite(scl, HIGH); bb_wait();
+  digitalWrite(sda, LOW); bb_wait(); digitalWrite(scl, LOW); bb_wait();
+}
+static void bb_byte(int sda, int scl, uint8_t value) {
+  pinMode(sda, OUTPUT);
+  for (int b = 7; b >= 0; b--) {
+    digitalWrite(sda, (value >> b) & 1); bb_wait();
+    digitalWrite(scl, HIGH); bb_wait(); digitalWrite(scl, LOW); bb_wait();
+  }
+  pinMode(sda, INPUT);                       // ACK del sensor: no se lee, pero tampoco se le opone
+  bb_wait(); digitalWrite(scl, HIGH); bb_wait(); digitalWrite(scl, LOW); bb_wait();
+}
+static void bb_stop(int sda, int scl) {
+  pinMode(sda, OUTPUT); digitalWrite(sda, LOW); bb_wait();
+  digitalWrite(scl, HIGH); bb_wait(); digitalWrite(sda, HIGH); bb_wait();
+}
+static void bb_write_reg(int sda, int scl, uint8_t reg, uint8_t value) {
+  bb_start(sda, scl); bb_byte(sda, scl, 0xAE); bb_byte(sda, scl, reg); bb_byte(sda, scl, value); bb_stop(sda, scl);
+  delay(2);
+}
+static void max_led_blind_test() {
+  Wire.end();
+  const int pairs[2][2] = {{18, 19}, {19, 18}};
+  for (auto& pins : pairs) {
+    int sda = pins[0], scl = pins[1];
+    Serial.printf("[LEDTEST] SDA=IO%d SCL=IO%d: LED rojo encendido 10 s (mira el sensor)\r\n", sda, scl);
+    bb_write_reg(sda, scl, 0x09, 0x40);      // reset
+    delay(20);
+    bb_write_reg(sda, scl, 0x0A, 0x27);      // 100 muestras/s, pulso 411 us
+    bb_write_reg(sda, scl, 0x0C, 0x7F);      // LED rojo ~25 mA
+    bb_write_reg(sda, scl, 0x0D, 0x7F);      // LED infrarrojo (visible con la camara del celular)
+    bb_write_reg(sda, scl, 0x09, 0x03);      // modo SpO2: ambos LED
+    delay(10000);
+    bb_write_reg(sda, scl, 0x0C, 0x00);
+    bb_write_reg(sda, scl, 0x0D, 0x00);
+    bb_write_reg(sda, scl, 0x09, 0x80);      // apagado
+    pinMode(sda, INPUT); pinMode(scl, INPUT);
+    Serial.printf("[LEDTEST] SDA=IO%d SCL=IO%d: fin (LED apagado)\r\n", sda, scl);
+    delay(3000);
+  }
+}
+
 void handle_incoming_commands(String raw_cmd) {
   raw_cmd.trim();
   if (raw_cmd.startsWith("REC_") || raw_cmd.startsWith("rec_")) {
@@ -1513,6 +1574,10 @@ void handle_incoming_commands(String raw_cmd) {
   }
   if (ausc_busy() && cmd != "STATUS" && cmd != "INFO") {
     Serial.println(F("[AUSC] Grabacion en curso; espera el resultado antes de iniciar otro modo."));
+    return;
+  }
+  if (cmd == "LEDTEST") {
+    max_led_blind_test();
     return;
   }
   if (cmd == "OPTICAL") {

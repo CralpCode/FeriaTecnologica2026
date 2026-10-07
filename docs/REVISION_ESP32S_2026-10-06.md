@@ -227,3 +227,16 @@ audio comprimido pesa en promedio el 59 % del original; descomprimir 15 s tarda 
 Prueba física con el ESP32 a un metro del teléfono, 10 grabaciones, todas `done`, verificadas, sin
 reintentos, 54–58 % del tamaño original: envío 10–15 s por zona (antes 21–30 s).
 Con cola: 117 s para 5 zonas (23 s por zona). Sin cola: 155 s (31 s por zona).
+
+## MAX30102 nuevo: pull-ups a 1.8V y FIFO desbordado (7 de octubre)
+
+El módulo de reemplazo (verde, tres capacitores 106) jala SDA/SCL a 1.8V: el ESP32 lo lee como 0 y el bus
+parecía ocupado. Con resistencias de 2.2 kΩ de 3.3V a SDA (IO18) y SCL (IO19) se detecta normalmente.
+Diagnóstico sin multímetro: el pin 18 pasó a 1 con el cable suelto; la prueba serie `LEDTEST` (escritura
+sin lectura, SDA soltado en cada ACK) encendió el LED del sensor. Se agregaron también las orientaciones
+19/18 y SCL activo a 3.3V para módulos con una sola resistencia en SDA.
+
+`MAX30105Buffered.check()` trataba cualquier desborde del FIFO como error sin leer muestras; en este chip
+el contador de desborde solo vuelve a 0 al leer, así que quedaba trabado (miles de errores, 0 muestras).
+Ahora vacía el FIFO y descarta esas muestras. Resultado físico con el dedo: FC 97–110 BPM válidas con
+calidad "good" en el servidor; SpO2 sigue "no calibrada" (no se muestra), como estaba previsto.

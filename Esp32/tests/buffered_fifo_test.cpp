@@ -21,9 +21,21 @@ int main() {
   }
   assert(sensor.available() == 0);
   sensor.clearFIFO();
-  Wire.overflow = 1;
+  // FIFO lleno y desbordado (punteros iguales): se vacia, se descarta y el sensor se destraba.
+  Wire.fifo.clear(); Wire.offset = 0;
+  for (int i = 0; i < 32 * 6; ++i) Wire.fifo.push_back(0);
+  Wire.overflow = 31;
   assert(sensor.check() > 31);
   assert(sensor.available() == 0);
+  assert(Wire.overflow == 0);
+  sensor.clearFIFO();
+  Wire.fifo.clear(); Wire.offset = 0;
+  for (uint32_t value : {70000u, 120000u})
+    for (int shift : {16, 8, 0}) Wire.fifo.push_back((value >> shift) & 255);
+  Wire.write_pointer = 1;
+  assert(sensor.check() == 1);                // vuelve a leer con normalidad
+  assert(sensor.getFIFORed() == 70000 && sensor.getFIFOIR() == 120000);
+  sensor.nextSample();
   sensor.clearFIFO();
   Wire.write_pointer = 1; Wire.fail_fifo = true;
   assert(sensor.check() > 31);

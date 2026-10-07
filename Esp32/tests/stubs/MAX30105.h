@@ -20,6 +20,7 @@ public:
     if (selected == 7) {
       if (fail_fifo) return 0;
       for (uint8_t i = 0; i < n; ++i) response.push_back(fifo.at(offset++));
+      overflow = 0;   // como el chip real: leer muestras reinicia el contador de desborde
     } else response.push_back(selected == 4 ? write_pointer : selected == 5 ? overflow : read_pointer);
     return n;
   }
@@ -29,5 +30,6 @@ extern TwoWire Wire;
 class MAX30105 {
 public:
   bool begin(TwoWire&, uint32_t) { return true; }
-  void clearFIFO() { Wire.read_pointer = Wire.write_pointer = Wire.overflow = 0; }
+  // Como el chip real observado: escribir 0 en los punteros no reinicia el contador de desborde.
+  void clearFIFO() { Wire.read_pointer = Wire.write_pointer = 0; }
 };

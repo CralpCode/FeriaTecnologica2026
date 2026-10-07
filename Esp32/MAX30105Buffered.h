@@ -4,7 +4,7 @@
 // This driver is used only with two LEDs (red/IR) at address 0x57.
 class MAX30105Buffered : public MAX30105 {
   TwoWire* bus = &Wire;
-  uint32_t red[32] = {}, ir[32] = {};
+  uint32_t red[32] = {}, ir[32] = {};   // el FIFO del MAX30102 guarda hasta 32 muestras
   uint8_t count = 0, index = 0;
   bool reg(uint8_t address, uint8_t& value) {
     bus->beginTransmission(0x57); bus->write(address);
@@ -21,8 +21,11 @@ public:
     if (available()) return 0;
     count = index = 0;
     uint8_t read = 0, write = 0, overflow = 0;
-    if (!reg(0x04, write) || !reg(0x05, overflow) || !reg(0x06, read) || overflow) return 65535;
+    if (!reg(0x04, write) || !reg(0x05, overflow) || !reg(0x06, read)) return 65535;
     uint8_t pending = (write - read) & 31;
+    // FIFO desbordado (p. ej. al arrancar): el contador solo vuelve a 0 cuando se LEEN muestras,
+    // asi que se vacia (32 muestras con el FIFO lleno) y se informa como hueco: el llamador las descarta.
+    if (overflow && !pending) pending = 32;
     while (count < pending) {
       uint8_t batch = min((int)(pending - count), 5);
       uint8_t bytes = batch * 6;
@@ -37,6 +40,7 @@ public:
         red[count] = r & 0x3ffff; ir[count] = v & 0x3ffff; ++count;
       }
     }
+    if (overflow) { count = index = 0; return 65535; }   // muestras con un hueco antes: no se usan
     return count;
   }
   uint8_t available() { return count - index; }
