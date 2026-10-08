@@ -8,7 +8,7 @@
       "ruido": 0.925,
       "pulmon_icbhi": 0.34456521739130436
     },
-    "activo": true,
+    "activo": false,
     "equipo": {
       "umbral": 0.12,
       "n_buenas": 10,
@@ -23,7 +23,8 @@
       "nota": "Calibrado con el estetoscopio del proyecto: sin latidos claros el corazón pide repetir.",
       "inicio_s": 3.0,
       "hasta": "2026-10-08T00:59"
-    }
+    },
+    "nota_desactivado": "2026-10-08: desactivado por decisión del usuario. Con este estetoscopio la periodicidad no separa latidos de ruido (latidos reales en silencio 0,08-0,10, igual que el roce); la calibración del equipo se hizo con música y su ritmo se midió como si fueran latidos."
   },
   "pulmon": {
     "umbral": 0.11738871133742983,
