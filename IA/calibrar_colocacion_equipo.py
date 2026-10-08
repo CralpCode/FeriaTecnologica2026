@@ -48,9 +48,10 @@ def proponer_umbral(buenas: list[float], ruido: list[float], minimo: int) -> tup
     return round((lo_good + hi_noise) / 2, 4), "Grupos separados."
 
 
-def leer_grupo(conn, prefix: str) -> list[tuple[str, float]]:
+def leer_grupo(conn, prefix: str, hasta: str | None = None) -> list[tuple[str, float]]:
     rows = conn.execute("SELECT id, wav_path FROM recordings WHERE session_id LIKE ? ESCAPE '\\' AND mode = 'corazon' "
-                        "AND source = 'real' ORDER BY created_at", (prefix + "\\_%",)).fetchall()
+                        "AND source = 'real' AND created_at <= ? ORDER BY created_at",
+                        (prefix + "\\_%", hasta or "9999")).fetchall()
     out = []
     for rec_id, wav in rows:
         if not wav or not Path(wav).exists():
@@ -66,11 +67,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--minimo", type=int, default=8)
     ap.add_argument("--solo-mostrar", action="store_true")
+    ap.add_argument("--hasta", help="ignora grabaciones posteriores (fecha ISO), p. ej. pruebas hechas después")
     ap.add_argument("--umbral", type=float, help="umbral elegido por el usuario cuando los grupos se traslapan")
     args = ap.parse_args()
 
     conn = sqlite3.connect(str(DB))
-    groups = {name: leer_grupo(conn, prefix) for name, prefix in GROUPS.items()}
+    groups = {name: leer_grupo(conn, prefix, args.hasta) for name, prefix in GROUPS.items()}
     conn.close()
     for name, items in groups.items():
         print(f"{name}: {len(items)} grabaciones")

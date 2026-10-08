@@ -13,14 +13,16 @@
       "umbral": 0.12,
       "n_buenas": 10,
       "n_ruido": 8,
-      "min_buenas": 0.0779,
-      "max_ruido": 0.1168,
-      "pasan_buenas": 7,
+      "min_buenas": 0.0813,
+      "max_ruido": 0.113,
+      "pasan_buenas": 8,
       "bloquea_ruido": 8,
       "fijado_por_usuario": true,
       "traslape": true,
-      "generado": "2026-10-08T00:59:53",
-      "nota": "Calibrado con el estetoscopio del proyecto: sin latidos claros el corazón pide repetir."
+      "generado": "2026-10-08T01:07:59",
+      "nota": "Calibrado con el estetoscopio del proyecto: sin latidos claros el corazón pide repetir.",
+      "inicio_s": 3.0,
+      "hasta": "2026-10-08T00:59"
     }
   },
   "pulmon": {

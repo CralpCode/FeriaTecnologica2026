@@ -94,7 +94,10 @@ class DeviceCalibrationGateTests(unittest.TestCase):
     def configure(self, device=None):
         heart = {'activo': True, 'umbral': 0.156}
         if device is not None:
-            heart['equipo'] = {'umbral': device}
+            # Umbral entre el latido y el retumbo sintéticos: prueba la lógica del bloqueo, no un valor fijo.
+            beat, noise = placement.measure(heartbeat(), SR, 'corazon'), placement.measure(rumble(), SR, 'corazon')
+            self.assertGreater(beat, noise)
+            heart['equipo'] = {'umbral': (beat + noise) / 2}
         self.cfg.write_text(json.dumps({'corazon': heart, 'pulmon': {'activo': False, 'umbral': 0.1}}))
         placement._config = None
 
@@ -123,7 +126,7 @@ class DeviceCalibrationGateTests(unittest.TestCase):
         self.configure(device=None)
         out = classifier.classify_wav(self.wav(rumble(), 'roce.wav'), check_placement=True)
         self.assertIn(out['result'], ('normal', 'anormal'))
-        self.assertFalse(out['details']['colocacion']['ok'])
+        self.assertEqual(out['details']['colocacion']['fuente'], 'clinico')
         self.assertFalse(out['details']['colocacion']['bloquea'])
 
     def test_uploaded_files_are_not_checked(self):

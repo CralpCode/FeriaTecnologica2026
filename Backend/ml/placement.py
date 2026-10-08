@@ -23,7 +23,9 @@ CONFIG_PATH = Path(__file__).resolve().parents[1] / "models" / "colocacion.json"
 MAX_S = 15.0   # misma duración que una grabación del dispositivo
 
 PARAMS = {
-    "corazon": {"banda_hz": (25.0, 400.0), "env_sr": 50, "rango_s": (0.27, 2.0), "que": "latidos"},
+    # inicio_s: los primeros segundos del dispositivo son el estetoscopio acomodándose (la grabación empieza al
+    # llegar la orden); con las grabaciones de calibración del equipo, ignorarlos separó mejor latidos de ruido.
+    "corazon": {"banda_hz": (25.0, 400.0), "env_sr": 50, "rango_s": (0.27, 2.0), "que": "latidos", "inicio_s": 3.0},
     "pulmon": {"banda_hz": (100.0, 1000.0), "env_sr": 10, "rango_s": (1.5, 7.0), "que": "respiración"},
 }
 
@@ -76,6 +78,9 @@ def periodicity(env: np.ndarray, env_sr: int, lag_min_s: float, lag_max_s: float
 def measure(y: np.ndarray, sr: int, mode: str) -> float:
     p = PARAMS[mode]
     y = np.asarray(y, dtype=np.float32)[: int(MAX_S * sr)]
+    skip = int(p.get("inicio_s", 0.0) * sr)
+    if len(y) - skip >= 8 * sr:   # solo si quedan al menos 8 s para medir el ritmo
+        y = y[skip:]
     env = envelope(y, sr, *p["banda_hz"], p["env_sr"])
     if env is None:
         return 0.0
