@@ -154,6 +154,7 @@ bool hrv_valid = false; // PRV: RMSSD de intervalos opticos; no equivale a HRV d
 bool spo2_valid = false; // Validez del algoritmo de referencia, no calibracion clinica.
 bool audio_valid = false;
 unsigned long audio_last_data_ms = 0;
+unsigned long mic_alive_ms = 0;   // ultimo bloque I2S con datos reales (no solo ceros/unos): para detectar un microfono danado
 float chip_temp = 0;
 bool chip_temp_valid = false;
 bool chip_temp_pending = false;
@@ -668,6 +669,7 @@ void update_audio_rms() {
       audio_valid = false;
       return;
     }
+    mic_alive_ms = millis();   // aun en silencio, un microfono sano manda el ruido del ambiente
 
     // 2. Procesamiento de muestras activas
     for (int i = 0; i < total_samples - 1; i += 2) {
@@ -1195,7 +1197,7 @@ void enter_standby() {
   audio_valid = false;
 
   // 3. Mantener encendidos solo LED 0 (Power - Verde) y LED 1 (Bluetooth - Azul); LEDs 2 a 7 apagados
-  uint32_t led0_color = sensor_hw_found ? strip.Color(0, 230, 60) : strip.Color(150, 0, 200);   // morado: sin sensor (rojo = sin conexion)
+  uint32_t led0_color = sensor_hw_found ? strip.Color(0, 230, 60) : strip.Color(160, 0, 255);   // se reemplaza en el siguiente cuadro (update_led_effects)
   strip.setPixelColor(0, led0_color);
   uint32_t led1_color = ble_connected ? strip.Color(0, 120, 255) : strip.Color(0, 80, 255);
   strip.setPixelColor(1, led1_color);
@@ -1827,21 +1829,38 @@ static void led_log_state(const char* state) {
                 ausc_server_ok_ms ? (long)(millis() - ausc_server_ok_ms) : -1L, (int)WiFi.status());
 }
 
+// Al encenderse: los colores recorren la barra una vez (~2 s), antes de iniciar sensores y WiFi.
+void led_boot_pattern() {
+  const uint32_t rainbow[7] = {strip.Color(255, 0, 0), strip.Color(255, 80, 0), strip.Color(255, 150, 0),
+                               strip.Color(0, 210, 40), strip.Color(0, 170, 230), strip.Color(0, 70, 255),
+                               strip.Color(160, 0, 255)};
+  for (int shift = 0; shift < 14; shift++) {
+    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, rainbow[(i + shift) % 7]);
+    strip.show();
+    delay(150);
+  }
+}
+
 void update_led_effects() {
   // Barra WS2812 (8 LED, pin 25) = estado del aparato. Prioridad de arriba hacia abajo:
+  //   al encenderse            : todos los colores recorriendo la barra, una vez (~2 s; led_boot_pattern en setup)
   //   grabando                 : AZUL como barra de carga        (auscultacion.h)
   //   enviando el audio        : AZUL parpadeando
-  //   captura fallida          : MORADO 3 s                        (auscultacion.h)
-  //   sin conexion al servidor : ROJO de izquierda a derecha (unico uso del rojo)
-  //   al conectarse            : VERDE de izquierda a derecha dos veces y 3 parpadeos
+  //   grabacion fallida        : ROJO 4 s                          (auscultacion.h)
+  //   falla del sensor optico  : ROJO y MORADO alternando (no detectado, o sin muestras > 5 s)
+  //   falla del microfono      : ROJO y AMARILLO alternando (sin datos reales > 5 s)
+  //   sin conexion al servidor : MORADO de izquierda a derecha
+  //   al conectarse            : AMARILLO de izquierda a derecha tres veces y 3 parpadeos
   //   dedo, buscando pulso     : CELESTE tenue
-  //   dedo, midiendo           : CELESTE que se llena en 15 s de pulso valido; destello BLANCO en cada latido
+  //   dedo, midiendo           : CELESTE que se llena en 15 s y se repite mientras falte algun dato;
+  //                              destello BLANCO en cada latido
   //   dedo, lectura lista      : VERDE con destello BLANCO en cada latido
-  //   conectado y en reposo    : VERDE fijo
+  //   conectado y en reposo    : VERDE fijo (estar sin usar no es una falla)
   static unsigned long last_led_update = 0;
   static bool was_connected = false;
   static unsigned long connect_anim_start = 0;
   static unsigned long pulse_valid_since = 0;
+  static unsigned long sensors_on_since = 0;
   unsigned long now = millis();
   if (now - last_led_update < 33) return;   // ~30 cuadros por segundo
   last_led_update = now;
@@ -1850,17 +1869,38 @@ void update_led_effects() {
   if (!finger_detected) pulse_valid_since = 0;
   else if (bpm_valid && beat_avg > 0 && !pulse_valid_since) pulse_valid_since = now ? now : 1;
 
-  if (ausc_update_leds(NUM_LEDS)) { led_log_state("audio"); return; }
-
   const uint32_t red = strip.Color(255, 0, 0);
+  const uint32_t purple = strip.Color(160, 0, 255);
+  const uint32_t yellow = strip.Color(255, 150, 0);
   const uint32_t green = strip.Color(0, 210, 40);
   const uint32_t blue = strip.Color(0, 70, 255);
   const uint32_t off = strip.Color(0, 0, 0);
+
+  if (ausc_update_leds(NUM_LEDS)) { led_log_state("audio"); return; }
 
   if (ausc_sending()) {
     led_log_state("enviando");
     bool on = (now / 250) % 2 == 0;
     for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, on ? blue : off);
+    led_show();
+    return;
+  }
+
+  // Fallas de los sensores: solo cuando el aparato los esta leyendo (modo continuo, sin grabar) y
+  // despues de 5 s. Estar en espera o sin dedo no es falla: el sensor optico y el microfono mandan
+  // muestras todo el tiempo aunque nadie los use.
+  bool sensors_on = power_state == STATE_TRANSMITTING_ACTIVE && active_scan_mode == SCAN_CONTINUOUS && !ausc_busy();
+  if (!sensors_on) sensors_on_since = 0;
+  else if (!sensors_on_since) sensors_on_since = now ? now : 1;
+  const unsigned long FAULT_MS = 5000;
+  bool watching = sensors_on_since && now - sensors_on_since >= FAULT_MS;
+  bool optical_fault = !sensor_hw_found || (watching && (!ppg_last_data_ms || now - ppg_last_data_ms > FAULT_MS));
+  bool mic_fault = SPIROSCAN_MIC_CONNECTED && watching && (!mic_alive_ms || now - mic_alive_ms > FAULT_MS);
+  if (optical_fault || mic_fault) {
+    led_log_state(optical_fault ? "falla_sensor_optico" : "falla_microfono");
+    bool first = (now / 400) % 2 == 0;
+    uint32_t other = optical_fault ? purple : yellow;
+    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, first ? red : other);
     led_show();
     return;
   }
@@ -1873,22 +1913,22 @@ void update_led_effects() {
     led_log_state("sin_conexion");
     const unsigned long STEP_MS = 120;
     int step = (now / STEP_MS) % (NUM_LEDS + 3);   // se llena y queda lleno un momento antes de reiniciar
-    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, i < step ? red : off);
+    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, i < step ? purple : off);
     led_show();
     return;
   }
 
-  const unsigned long SWEEP_STEP_MS = 70, BLINK_MS = 180;
+  const unsigned long SWEEP_STEP_MS = 70, BLINK_MS = 180, SWEEPS = 3;
   const unsigned long sweep_ms = SWEEP_STEP_MS * NUM_LEDS;
   unsigned long t = connect_anim_start ? now - connect_anim_start : ULONG_MAX;
-  if (t < 2 * sweep_ms + 6 * BLINK_MS) {
+  if (t < SWEEPS * sweep_ms + 6 * BLINK_MS) {
     led_log_state("conectado");
-    if (t < 2 * sweep_ms) {
+    if (t < SWEEPS * sweep_ms) {
       int lit = (t % sweep_ms) / SWEEP_STEP_MS + 1;
-      for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, i < lit ? green : off);
+      for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, i < lit ? yellow : off);
     } else {
-      bool on = ((t - 2 * sweep_ms) / BLINK_MS) % 2 == 0;
-      for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, on ? green : off);
+      bool on = ((t - SWEEPS * sweep_ms) / BLINK_MS) % 2 == 0;
+      for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, on ? yellow : off);
     }
     led_show();
     return;
@@ -1896,11 +1936,14 @@ void update_led_effects() {
 
   if (finger_detected) {
     unsigned long measured = pulse_valid_since ? now - pulse_valid_since : 0;
-    bool ready = measured >= PULSE_CAPTURE_MS;
+    // Lista: 15 s de pulso valido y ya estan oxigeno, variabilidad y estres. Si falta algo, la barra se vuelve a llenar.
+    bool all_data = bpm_valid && spo2_valid && hrv_valid && stress_score > 0;
+    bool ready = measured >= PULSE_CAPTURE_MS && all_data;
     led_log_state(!pulse_valid_since ? "dedo_buscando" : ready ? "dedo_listo" : "dedo_midiendo");
     unsigned long since_beat = beat_flash_start ? now - beat_flash_start : ULONG_MAX;
     float flash = since_beat < 250 ? 1.0f - (float)since_beat / 250.0f : 0.0f;   // destello blanco que se apaga en 250 ms
-    int lit = pulse_valid_since ? (int)((measured * NUM_LEDS + PULSE_CAPTURE_MS - 1) / PULSE_CAPTURE_MS) : 0;
+    unsigned long cycle = measured % PULSE_CAPTURE_MS;
+    int lit = pulse_valid_since ? (int)((cycle * NUM_LEDS + PULSE_CAPTURE_MS - 1) / PULSE_CAPTURE_MS) : 0;
     for (int i = 0; i < NUM_LEDS; i++) {
       uint8_t r, g, b;
       if (ready)        { r = 0; g = 210; b = 40; }     // verde: lectura lista
@@ -1993,12 +2036,9 @@ void setup() {
 
   strip.begin();
   strip.setBrightness(30); // Nivel óptimo de visibilidad, nitidez y elegancia clínica
-  // LED 0 (Power - Verde) y LED 1 (Bluetooth - Azul) activos desde el inicio
-  strip.setPixelColor(0, strip.Color(0, 230, 60));
-  strip.setPixelColor(1, strip.Color(0, 80, 255));
-  for (int i = 2; i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, strip.Color(0, 0, 0));
-  }
+  led_boot_pattern();
+  // Mientras arrancan sensores y WiFi: MORADO (sin conexion), como en update_led_effects
+  for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, strip.Color(160, 0, 255));
   strip.show();
 
   incoming_commands = xQueueCreate(8, 128);

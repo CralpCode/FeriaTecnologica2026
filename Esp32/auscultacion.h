@@ -109,8 +109,8 @@ static volatile bool ausc_ring_overflow = false;
 static volatile size_t ausc_ring_peak = 0;
 static unsigned long ausc_result_until = 0;
 static uint32_t ausc_result_color = 0;
-// Captura fallida: MORADO. El rojo queda reservado para "sin conexion" (Esp32.ino, update_led_effects).
-#define AUSC_FAIL_COLOR strip.Color(150, 0, 200)
+// Captura fallida: ROJO durante 4 s (Esp32.ino, update_led_effects, tiene la tabla completa de colores).
+#define AUSC_FAIL_COLOR strip.Color(255, 0, 0)
 
 static void ausc_job_path(int i, char* out, size_t size) { snprintf(out, size, "/q%d.pcm", i); }
 
@@ -631,7 +631,7 @@ bool ausc_start(const String& command_id = "") {
                    ? F("[AUSC] Servidor no encontrado: revisa SERVER_URL o que la Mac este en la misma red")
                    : F("[AUSC] Sin WiFi: no se puede grabar. Revisa spiroscan_config.h"));
     ausc_result_color = AUSC_FAIL_COLOR;
-    ausc_result_until = millis() + 3000;
+    ausc_result_until = millis() + 4000;
     ausc_state = AUSC_SHOW_RESULT;
     return false;
   }
@@ -753,7 +753,7 @@ static void ausc_finish() {
   portEXIT_CRITICAL(&ausc_jobs_mux);
   ausc_capture_job = -1;
   ausc_result_color = job.failed ? AUSC_FAIL_COLOR : strip.Color(0, 80, 200);
-  ausc_result_until = millis() + (job.failed ? 3000 : 300);
+  ausc_result_until = millis() + (job.failed ? 4000 : 300);
   ausc_state = AUSC_SHOW_RESULT;
 }
 
@@ -798,7 +798,7 @@ bool ausc_busy() {
 }
 
 // ------------------------------------------------------------------------------
-// LEDs: barra de progreso azul mientras graba; azul (enviando) o morado (fallo) con el resultado.
+// LEDs: barra de progreso azul mientras graba; azul (enviando) o rojo (fallo) con el resultado.
 // Devuelve true si el modo auscultacion controla los LEDs en este momento.
 // ------------------------------------------------------------------------------
 bool ausc_update_leds(int num_leds) {
