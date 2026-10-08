@@ -89,6 +89,7 @@ test('consulta completa: paciente, datos, pulso, corazón, resultado, notas, inf
   if (await connect.isVisible()) await connect.click();
   await sendPulse(request, 4);
   await expect(page.getByText('Midiendo').first()).toBeVisible();
+  await expect(page.getByText(/Calculando… \d+ s/).first()).toBeVisible();   // fichas sin valor todavía
   await sendPulse(request, 14);   // la toma se guarda al cumplir 15 s con pulso válido
   // Se quita el dedo: la lectura guardada se queda en pantalla
   await request.post('/api/telemetry', {

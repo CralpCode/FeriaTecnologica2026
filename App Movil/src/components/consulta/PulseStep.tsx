@@ -24,6 +24,7 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
   const [connecting, setConnecting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [take, setTake] = useState<CapturedPulse | null>(null);
+  const fingerSince = useRef<number | null>(null);   // instante en que se apoyó el dedo (para "Calculando… N s")
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   useEffect(() => {
     let alive = true;
@@ -64,11 +65,18 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
     : live !== null || saved ? { label: 'Lectura guardada', tone: 'success' as const }
       : { label: 'Esperando', tone: 'neutral' as const };
 
-  // Fichas: lectura en vivo si el dedo está puesto; si no, la de la toma guardada.
-  const oxygen = valid.bloodOxygen || valid.bloodOxygenEstimated ? vitals.bloodOxygen
-    : saved?.bloodOxygen ?? null;
-  const hrv = valid.hrv ? vitals.hrv : saved?.hrv ?? null;
-  const stress = valid.stress ? vitals.stressLevel : saved?.stressLevel ?? null;
+  // Fichas: con el dedo puesto, la lectura en vivo o "Calculando…" mientras el sensor la calcula (el oxígeno
+  // tarda ~10 s y la variabilidad 10-30 s a propósito: los primeros valores salen desviados). Sin dedo, la toma guardada.
+  const fingerOn = vitals.source === 'real' && vitals.finger === true && now - Date.parse(vitals.timestamp) < 10000;
+  if (!fingerOn) fingerSince.current = null;
+  else if (fingerSince.current === null) fingerSince.current = now;
+  const calculating = `Calculando… ${fingerSince.current === null ? 0 : Math.max(0, Math.round((now - fingerSince.current) / 1000))} s`;
+  const pick = (liveOk: boolean, liveValue: number, savedValue: number | null | undefined) =>
+    liveOk ? liveValue : fingerOn ? null : savedValue ?? null;
+  const oxygen = pick(valid.bloodOxygen || valid.bloodOxygenEstimated, vitals.bloodOxygen, saved?.bloodOxygen);
+  const hrv = pick(valid.hrv, vitals.hrv, saved?.hrv);
+  const stress = pick(valid.stress, vitals.stressLevel, saved?.stressLevel);
+  const waitHint = (fallback: string) => (fingerOn ? calculating : fallback);
 
   const connect = async () => {
     setConnecting(true);
@@ -121,13 +129,13 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
       <View style={styles.grid}>
         <VitalTile icon="water-percent" tint={Colors.oxygen} label="Oxígeno (SpO2)" unit="%"
                    value={oxygen !== null ? oxygen.toFixed(0) : null}
-                   hint={oxygen === null ? 'Esperando señal estable' : 'Lectura del sensor de pulso'} />
+                   hint={oxygen === null ? waitHint('Esperando señal estable') : 'Lectura del sensor de pulso'} />
         <VitalTile icon="heart-flash" tint={Colors.pressure} label="Variabilidad (HRV)" unit="ms"
                    value={hrv !== null ? String(Math.round(hrv)) : null}
-                   hint={hrv !== null ? ESTIMATED : 'Esperando pulso estable'} />
+                   hint={hrv !== null ? ESTIMATED : waitHint('Esperando pulso estable')} />
         <VitalTile icon="brain" tint={Colors.stress} label="Índice de estrés" unit="/100"
                    value={stress !== null ? String(Math.round(stress)) : null}
-                   hint={stress !== null ? ESTIMATED : 'Esperando pulso estable'} />
+                   hint={stress !== null ? ESTIMATED : waitHint('Esperando pulso estable')} />
         <VitalTile icon="microphone" tint={Colors.audio} label="Micrófono" unit="dBFS"
                    value={audioAvailable ? vitals.audio_rms.toFixed(1) : null}
                    hint={audioAvailable ? 'Nivel digital, no presión sonora' : 'Sin lectura de audio'} />
