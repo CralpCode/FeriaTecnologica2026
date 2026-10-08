@@ -14,6 +14,7 @@ import re
 import sys
 import tempfile
 import time
+from datetime import datetime, timedelta
 
 if not os.getenv("SPIROSCAN_DB_PATH"):
     os.environ["SPIROSCAN_DB_PATH"] = os.path.join(tempfile.mkdtemp(prefix="eval_llm_"), "eval.db")
@@ -61,8 +62,17 @@ def seed_session():
     # Datos de prueba rotulados, solo en la base temporal: lecturas con todos los indicadores de calidad.
     quality = {"source": "real", "heartRateValid": True, "bloodOxygenValid": True, "spo2Calibrated": True,
                "signalQuality": "good", "sampleAgeMs": 0, "finger": True}
-    for spo2 in (96, 95, 88, 87, 89):
+    # Una toma completa (>= 15 s): una lectura cada 2 s durante 16 s.
+    values = (96, 95, 88, 87, 89, 88, 87, 89, 88)
+    for spo2 in values:
         database.save_reading({"bpm": 92, "spo2": spo2, "hrv": 40, "session_id": SID, **quality})
+    conn = database.get_db_connection()
+    with conn:
+        ids = [r["id"] for r in conn.execute("SELECT id FROM vitals_log WHERE device_id = ? ORDER BY id", (SID,))]
+        for i, row_id in enumerate(ids):
+            t = datetime.now() - timedelta(seconds=2 * (len(ids) - 1 - i))
+            conn.execute("UPDATE vitals_log SET timestamp = ? WHERE id = ?", (t.isoformat(), row_id))
+    conn.close()
     database.create_recording("rec_eval_1", SID, "MV", 16000)
     database.update_recording("rec_eval_1", status="done", result="anormal", probability=0.91, threshold=0.82,
                               source="real")

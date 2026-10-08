@@ -41,6 +41,8 @@ web-build/
 *.sqlite3
 *.db-journal
 *.db-wal
+Backend/device_link.json
+Backend/device_link.json.tmp
 *.db-shm
 
 # ==========================================

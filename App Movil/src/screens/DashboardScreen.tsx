@@ -27,8 +27,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToAI
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
 
   const valid = measurementValidity(vitals, now);
-  const audioAvailable = vitals.source === 'real' && vitals.audioUnit === 'dBFS'
-    && Number.isFinite(vitals.audio_rms) && vitals.audio_rms < 0 && now - Date.parse(vitals.timestamp) < 10000;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -57,20 +55,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToAI
               <View style={styles.grid}>
                 <VitalTile icon="heart-pulse" tint={Colors.heartRate} label="Pulso" unit="BPM"
                            value={valid.heartRate ? String(Math.round(vitals.heartRate)) : null}
-                           hint={valid.heartRate ? 'Lectura válida; interpretar con edad y reposo' : 'Sin lectura válida'} source="MAX30102" />
+                           hint={valid.heartRate ? 'Lectura válida; interpretar con edad y reposo' : 'Sin lectura válida'} />
                 <VitalTile icon="water-percent" tint={Colors.oxygen} label="Oxígeno (SpO2)" unit="%"
                            value={valid.bloodOxygen || valid.bloodOxygenEstimated ? vitals.bloodOxygen.toFixed(0) : null}
-                           hint={valid.bloodOxygen ? 'Estimación calibrada' : valid.bloodOxygenEstimated ? ESTIMATED : 'Esperando señal estable'}
-                           source="MAX30102" />
+                           hint={valid.bloodOxygen ? 'Estimación calibrada' : valid.bloodOxygenEstimated ? ESTIMATED : 'Esperando señal estable'} />
                 <VitalTile icon="heart-flash" tint={Colors.pressure} label="Variabilidad (HRV)" unit="ms"
                            value={valid.hrv ? String(Math.round(vitals.hrv)) : null}
-                           hint={valid.hrv ? ESTIMATED : 'Esperando pulso estable'} source="MAX30102" />
+                           hint={valid.hrv ? ESTIMATED : 'Esperando pulso estable'} />
                 <VitalTile icon="brain" tint={Colors.stress} label="Índice de estrés" unit="/100"
                            value={valid.stress ? String(Math.round(vitals.stressLevel)) : null}
-                           hint={valid.stress ? ESTIMATED : 'Esperando pulso estable'} source="Estimación" />
-                <VitalTile icon="microphone" tint={Colors.audio} label="Micrófono" unit="dBFS"
-                           value={audioAvailable ? vitals.audio_rms.toFixed(1) : null}
-                           hint={audioAvailable ? 'Nivel digital, no presión sonora' : 'Sin lectura de audio'} source="INMP441" />
+                           hint={valid.stress ? ESTIMATED : 'Esperando pulso estable'} />
               </View>
             </View>
           }

@@ -4,12 +4,10 @@ Rules are a research prototype. Symptoms are reported by the user; measurements
 are taken only from this session. No disease probabilities are manufactured.
 """
 from datetime import datetime, timedelta
-from statistics import median
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 import database
-from measurement_quality import usable_value
 
 RULES_VERSION = "2026-10-03.1"
 SOURCES = [
@@ -60,24 +58,14 @@ class ClinicalContext(ContextModel):
 
 
 def recent_vitals(session_id: str) -> dict:
-    rows = database.get_recent_readings(session_id, seconds=60)
-    latest = rows[-1] if rows else {}
+    """Pulso y SpO2 de la última toma completa (>= 15 s con pulso válido). Se conserva al quitar el dedo."""
+    latest = database.get_latest_reading(session_id=session_id) or {}
     out = {"heartRate": None, "bloodOxygen": None, "spo2_estimated": False, "counts": {}, "latest_metadata": {
         k: latest.get(k) for k in ("source", "signalQuality", "spo2Calibrated", "spo2Estimated")}}
-    for channel in ("heartRate", "bloodOxygen"):
-        values = [v for row in rows if (v := usable_value(row, channel, check_timestamp=False)) is not None]
-        # An invalid latest packet invalidates older good readings, too.
-        if usable_value(latest, channel) is not None and len(values) >= 3:
-            out[channel] = round(median(values), 1)
-        out["counts"][channel] = len(values)
-    if out["bloodOxygen"] is None:
-        # Sin SpO2 calibrada: la estimada (fórmula del fabricante) se usa marcada como tal.
-        values = [v for row in rows
-                  if (v := usable_value(row, "bloodOxygen", check_timestamp=False, allow_estimated=True)) is not None]
-        if usable_value(latest, "bloodOxygen", allow_estimated=True) is not None and len(values) >= 3:
-            out["bloodOxygen"] = round(median(values), 1)
-            out["spo2_estimated"] = True
-        out["counts"]["bloodOxygenEstimated"] = len(values)
+    captured = database.get_captured_pulse(session_id)["captured"]
+    if captured:
+        out.update({"heartRate": captured["heartRate"], "bloodOxygen": captured["bloodOxygen"],
+                    "spo2_estimated": captured["spo2_estimated"], "counts": captured["counts"]})
     return out
 
 
@@ -188,7 +176,7 @@ def assess(context: dict, vitals: dict, recordings: list[dict]) -> dict:
 
     hr, spo2 = vitals.get("heartRate"), vitals.get("bloodOxygen")
     if hr is None:
-        missing.append("Pulso real válido y reciente: al menos 3 lecturas y buena señal.")
+        missing.append("Pulso válido durante al menos 15 s con buena señal.")
     elif adult and ctx["at_rest"] is True and (hr < 45 or hr > 120):
         finding("pulse_outside_screening_range", "Pulso fuera de los límites de aviso del prototipo", [f"Mediana de pulso válido: {hr:g} BPM."])
         steps.append("Consultar si el pulso alterado persiste. No permite diagnosticar arritmias: para eso se requiere evaluación y ECG.")

@@ -16,8 +16,8 @@ interface DeviceConnectionModalProps {
 }
 
 const STATUS_TEXT: Record<string, { title: string; text: string }> = {
-  wokwi_wifi: { title: 'ESP32 por WiFi', text: 'Los datos del dispositivo llegan al servidor y se guardan en el paciente abierto.' },
-  direct_ble: { title: 'Bluetooth directo', text: 'Recibiendo el sensor directamente por Bluetooth.' },
+  wokwi_wifi: { title: 'Dispositivo por WiFi', text: 'Los datos del dispositivo llegan al servidor y se guardan en el paciente abierto.' },
+  direct_ble: { title: 'Bluetooth directo', text: 'Recibiendo los datos directamente por Bluetooth.' },
   demo_icbhi: { title: 'Modo demostración', text: 'Audio real de ICBHI 2017, de otra persona. Este modo no tiene pulso ni SpO2.' },
   none: { title: 'Sin conectar', text: 'Elige cómo recibir los datos del dispositivo.' },
 };
@@ -85,10 +85,10 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
                 <Ionicons name="wifi" size={22} color={color.primary} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <View style={styles.titleRow}>
-                    <Text style={styles.cardTitle}>ESP32 por WiFi</Text>
+                    <Text style={styles.cardTitle}>Dispositivo por WiFi</Text>
                     <StatusPill label="Recomendado" tone="primary" />
                   </View>
-                  <Text style={styles.text}>El ESP32 envía pulso y audio al servidor. Funciona en cualquier celular o computadora con el navegador.</Text>
+                  <Text style={styles.text}>El dispositivo envía pulso y audio al servidor. Funciona en cualquier celular o computadora con el navegador.</Text>
                 </View>
               </View>
               <Button label={connectedType === 'wokwi_wifi' ? 'Recibiendo datos' : 'Recibir datos en este paciente'} icon="wifi"

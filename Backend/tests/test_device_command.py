@@ -133,6 +133,12 @@ class DeviceCommandTests(unittest.TestCase):
         self.assertIsNone(main._linked_session())
         self.assertEqual(self.client.get('/api/device/comando').json(), {'accion': None})
 
+    def test_device_link_survives_a_server_restart(self):
+        self.client.post('/api/device/link', json={'session_id': 'p_reinicio'})
+        main._device_link.clear()                         # el reinicio borra la memoria
+        main._load_device_link()
+        self.assertEqual(main._linked_session(), 'p_reinicio')
+
     def test_elapsed_capture_time_sets_recording_start(self):
         rec = self.start(self.arm('AV')['comando_id'], elapsed_ms=6000)
         age = (datetime.now() - datetime.fromisoformat(database.get_recording(rec)['created_at'])).total_seconds()

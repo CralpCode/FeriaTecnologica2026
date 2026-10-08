@@ -22,6 +22,7 @@
 #include <soc/io_mux_reg.h>
 #include <Adafruit_NeoPixel.h>
 #include "MAX30105Buffered.h"
+#include "ppg_logic.h"
 #include "spo2_algorithm.h"
 #include "heartRate.h"
 
@@ -119,6 +120,7 @@ bool beat_detected_flash = false;
 const uint32_t PPG_SAMPLE_PERIOD_US = 10000; // 400 conversiones/s / promedio FIFO de 4 = 100 pares/s.
 const uint16_t PRV_INTERVAL_CAPACITY = 96;
 uint32_t ppg_intervals_us[PRV_INTERVAL_CAPACITY] = {};
+FingerDetector finger_detector;   // contacto con histeresis (ppg_logic.h)
 uint64_t ppg_interval_end_us[PRV_INTERVAL_CAPACITY] = {};
 uint16_t ppg_interval_count = 0;
 uint16_t ppg_interval_write = 0;
@@ -721,6 +723,7 @@ void update_audio_rms() {
 // 7. PROCESAMIENTO BIOMEDICO OPTICO REAL (MAX30102) - CERO SIMULACION
 // ------------------------------------------------------------------------------
 void reset_biometric_state(bool clear_fifo) {
+  finger_detector.reset();
   invalidate_spo2("acquiring", true);
   chip_temp_pending = false;
   finger_detected = false;
@@ -799,8 +802,8 @@ void update_biometric_signals() {
     ppg_last_data_ms = now_ms;
     bool prev_finger = finger_detected;
 
-    // 1. Detección física real de dedo (umbral óptico IR > 40000)
-    if (raw_ir < 40000) {
+    // 1. Deteccion del dedo con histeresis (ppg_logic.h): las caidas breves al apoyarlo no reinician nada.
+    if (!finger_detector.update(raw_ir, now_ms)) {
       invalidate_spo2("no_contact", true);
       if (prev_finger) {
         finger_detected = false;
@@ -853,6 +856,9 @@ void update_biometric_signals() {
         broadcast_telemetry();
       }
     }
+
+    // Dedo confirmado pero con una caida momentanea de luz: se ignora la muestra sin reiniciar nada.
+    if (raw_ir < FingerDetector::OFF_LEVEL) continue;
 
     // Descartar los primeros 400 ms tras el contacto para estabilización óptica de AGC
     if (now_us - ppg_finger_start_us < 400000ULL) {
@@ -1005,34 +1011,25 @@ void update_biometric_signals() {
             }
           }
 
-          // Calculo de PRV Real mediante RMSSD sobre el buffer de intervalos opticos
-          if (ppg_interval_count >= 4) {
-            double sum_sq_diff = 0.0;
-            int pairs = 0;
-            for (uint16_t i = 1; i < ppg_interval_count; i++) {
-              int idx_curr = (ppg_interval_write - i + PRV_INTERVAL_CAPACITY) % PRV_INTERVAL_CAPACITY;
-              int idx_prev = (ppg_interval_write - i - 1 + PRV_INTERVAL_CAPACITY) % PRV_INTERVAL_CAPACITY;
-              double diff_ms = ((double)ppg_intervals_us[idx_curr] - (double)ppg_intervals_us[idx_prev]) / 1000.0;
-              sum_sq_diff += diff_ms * diff_ms;
-              pairs++;
+          // PRV: RMSSD con rechazo de artefactos (ppg_logic.h) sobre los ultimos 30 intervalos.
+          // Los latidos falsos inflaban el valor (140-245 ms) y dejaban el estres siempre en 25.
+          {
+            uint16_t n = ppg_interval_count > 30 ? 30 : ppg_interval_count;
+            uint32_t ordered[30];
+            for (uint16_t k = 0; k < n; k++) {
+              int idx = (ppg_interval_write - n + k + PRV_INTERVAL_CAPACITY) % PRV_INTERVAL_CAPACITY;
+              ordered[k] = ppg_intervals_us[idx];
             }
-            if (pairs > 0) {
-              double rmssd = sqrt(sum_sq_diff / pairs);
-              hrv_ms = (int)round(rmssd);
-              if (hrv_ms > 0 && hrv_ms < 250) {
-                hrv_valid = true;
-                if (hrv_ms >= 45) {
-                  stress_score = 25; // Alta variabilidad (Relajado)
-                } else if (hrv_ms >= 25) {
-                  stress_score = 50; // Variabilidad moderada
-                } else {
-                  stress_score = 75; // Baja variabilidad (Estres simpatico)
-                }
-              } else {
-                hrv_valid = false;
-                hrv_ms = 0;
-                stress_score = 0;
-              }
+            int rmssd = clean_rmssd_ms(ordered, n);
+            if (rmssd >= 5 && rmssd <= 200) {
+              hrv_ms = rmssd;
+              hrv_valid = true;
+              // Indice orientativo a partir de la variabilidad (no es una medicion validada).
+              stress_score = rmssd >= 45 ? 25 : rmssd >= 25 ? 50 : 75;
+            } else {
+              hrv_valid = false;
+              hrv_ms = 0;
+              stress_score = 0;
             }
           }
 
@@ -1184,7 +1181,7 @@ void enter_standby() {
   audio_valid = false;
 
   // 3. Mantener encendidos solo LED 0 (Power - Verde) y LED 1 (Bluetooth - Azul); LEDs 2 a 7 apagados
-  uint32_t led0_color = sensor_hw_found ? strip.Color(0, 230, 60) : strip.Color(240, 90, 0);
+  uint32_t led0_color = sensor_hw_found ? strip.Color(0, 230, 60) : strip.Color(150, 0, 200);   // morado: sin sensor (rojo = sin conexion)
   strip.setPixelColor(0, led0_color);
   uint32_t led1_color = ble_connected ? strip.Color(0, 120, 255) : strip.Color(0, 80, 255);
   strip.setPixelColor(1, led1_color);
@@ -1235,9 +1232,9 @@ void start_cardiac_scan() {
   Serial.println(F("  >>> Microfono I2S completamente desactivado y aislado.              <<<"));
   Serial.println(F("=========================================================================\r\n"));
 
-  // Destello rapido Carmín/Rubí en la tira LED
+  // Destello rapido celeste en la tira LED (el rojo queda reservado para "sin conexion")
   for (int i = 0; i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, strip.Color(255, 10, 80));
+    strip.setPixelColor(i, strip.Color(0, 170, 230));
   }
   strip.show();
 }
@@ -1788,29 +1785,50 @@ void broadcast_telemetry() {
 // ------------------------------------------------------------------------------
 // 11. EFECTOS VISUALES DEL LED RGB WS2812B (IO25) - PANEL DE CONTROL CLÍNICO INDIVIDUAL
 // ------------------------------------------------------------------------------
+// Toma de pulso completa: mismo minimo que el servidor (PULSE_CAPTURE_S en Backend/database.py).
+const unsigned long PULSE_CAPTURE_MS = 15000;
+
+// Diagnostico: una linea por el monitor serie cada vez que la barra cambia de estado.
+static void led_log_state(const char* state) {
+  static const char* last = nullptr;
+  if (state == last) return;
+  last = state;
+  Serial.printf("[LED] estado=%s ultimo_ok_hace=%ld ms wifi=%d\r\n", state,
+                ausc_server_ok_ms ? (long)(millis() - ausc_server_ok_ms) : -1L, (int)WiFi.status());
+}
+
 void update_led_effects() {
-  // Barra WS2812 (8 LED, pin 25) = estado del aparato, de izquierda a derecha:
-  //   sin conexion al servidor : AMARILLO que se enciende uno por uno, en ciclo
-  //   al conectarse            : VERDE de izquierda a derecha dos veces y luego 3 parpadeos
+  // Barra WS2812 (8 LED, pin 25) = estado del aparato. Prioridad de arriba hacia abajo:
+  //   grabando                 : AZUL como barra de carga        (auscultacion.h)
+  //   enviando el audio        : AZUL parpadeando
+  //   captura fallida          : MORADO 3 s                        (auscultacion.h)
+  //   sin conexion al servidor : ROJO de izquierda a derecha (unico uso del rojo)
+  //   al conectarse            : VERDE de izquierda a derecha dos veces y 3 parpadeos
+  //   dedo, buscando pulso     : CELESTE tenue
+  //   dedo, midiendo           : CELESTE que se llena en 15 s de pulso valido; destello BLANCO en cada latido
+  //   dedo, lectura lista      : VERDE con destello BLANCO en cada latido
   //   conectado y en reposo    : VERDE fijo
-  //   grabando                 : AZUL como barra de carga (un LED por cada 1/8 de los 15 s)
-  //   enviando el audio        : AZUL parpadeando; al terminar vuelve a VERDE
-  //   captura fallida          : NARANJA 3 s
   static unsigned long last_led_update = 0;
   static bool was_connected = false;
   static unsigned long connect_anim_start = 0;
+  static unsigned long pulse_valid_since = 0;
   unsigned long now = millis();
   if (now - last_led_update < 33) return;   // ~30 cuadros por segundo
   last_led_update = now;
 
-  if (ausc_update_leds(NUM_LEDS)) return;   // grabacion (barra azul) y resultado de la captura
+  // Tiempo con pulso valido en esta toma; se reinicia solo al quitar el dedo (como en el servidor).
+  if (!finger_detected) pulse_valid_since = 0;
+  else if (bpm_valid && beat_avg > 0 && !pulse_valid_since) pulse_valid_since = now ? now : 1;
 
-  const uint32_t yellow = strip.Color(255, 150, 0);
+  if (ausc_update_leds(NUM_LEDS)) { led_log_state("audio"); return; }
+
+  const uint32_t red = strip.Color(255, 0, 0);
   const uint32_t green = strip.Color(0, 210, 40);
   const uint32_t blue = strip.Color(0, 70, 255);
   const uint32_t off = strip.Color(0, 0, 0);
 
   if (ausc_sending()) {
+    led_log_state("enviando");
     bool on = (now / 250) % 2 == 0;
     for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, on ? blue : off);
     strip.show();
@@ -1822,9 +1840,10 @@ void update_led_effects() {
   was_connected = connected;
 
   if (!connected) {
+    led_log_state("sin_conexion");
     const unsigned long STEP_MS = 120;
     int step = (now / STEP_MS) % (NUM_LEDS + 3);   // se llena y queda lleno un momento antes de reiniciar
-    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, i < step ? yellow : off);
+    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, i < step ? red : off);
     strip.show();
     return;
   }
@@ -1832,15 +1851,40 @@ void update_led_effects() {
   const unsigned long SWEEP_STEP_MS = 70, BLINK_MS = 180;
   const unsigned long sweep_ms = SWEEP_STEP_MS * NUM_LEDS;
   unsigned long t = connect_anim_start ? now - connect_anim_start : ULONG_MAX;
-  if (t < 2 * sweep_ms) {
-    int lit = (t % sweep_ms) / SWEEP_STEP_MS + 1;
-    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, i < lit ? green : off);
-  } else if (t < 2 * sweep_ms + 6 * BLINK_MS) {
-    bool on = ((t - 2 * sweep_ms) / BLINK_MS) % 2 == 0;
-    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, on ? green : off);
-  } else {
-    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, green);
+  if (t < 2 * sweep_ms + 6 * BLINK_MS) {
+    led_log_state("conectado");
+    if (t < 2 * sweep_ms) {
+      int lit = (t % sweep_ms) / SWEEP_STEP_MS + 1;
+      for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, i < lit ? green : off);
+    } else {
+      bool on = ((t - 2 * sweep_ms) / BLINK_MS) % 2 == 0;
+      for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, on ? green : off);
+    }
+    strip.show();
+    return;
   }
+
+  if (finger_detected) {
+    unsigned long measured = pulse_valid_since ? now - pulse_valid_since : 0;
+    bool ready = measured >= PULSE_CAPTURE_MS;
+    led_log_state(!pulse_valid_since ? "dedo_buscando" : ready ? "dedo_listo" : "dedo_midiendo");
+    unsigned long since_beat = beat_flash_start ? now - beat_flash_start : ULONG_MAX;
+    float flash = since_beat < 250 ? 1.0f - (float)since_beat / 250.0f : 0.0f;   // destello blanco que se apaga en 250 ms
+    int lit = pulse_valid_since ? (int)((measured * NUM_LEDS + PULSE_CAPTURE_MS - 1) / PULSE_CAPTURE_MS) : 0;
+    for (int i = 0; i < NUM_LEDS; i++) {
+      uint8_t r, g, b;
+      if (ready)        { r = 0; g = 210; b = 40; }     // verde: lectura lista
+      else if (i < lit) { r = 0; g = 170; b = 230; }    // celeste: avance de la toma
+      else              { r = 0; g = 30;  b = 40; }     // celeste tenue: buscando / por llenar
+      strip.setPixelColor(i, strip.Color(r + (uint8_t)((255 - r) * flash), g + (uint8_t)((255 - g) * flash),
+                                         b + (uint8_t)((255 - b) * flash)));
+    }
+    strip.show();
+    return;
+  }
+
+  led_log_state("reposo");
+  for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, green);
   strip.show();
 }
 

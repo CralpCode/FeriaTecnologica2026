@@ -175,6 +175,23 @@ export interface TriageResult {
   };
 }
 
+/** Última toma de pulso completa (GET /api/vitals/captured): queda guardada aunque se quite el dedo. */
+export interface CapturedPulse {
+  min_segundos: number;
+  captured: {
+    heartRate: number;
+    bloodOxygen: number | null;
+    spo2_estimated: boolean;
+    hrv: number | null;
+    stressLevel: number | null;
+    inicio: string;
+    fin: string;
+    segundos: number;
+    lecturas: number;
+  } | null;
+  en_curso: { segundos: number; lecturas: number } | null;   // toma abierta (dedo puesto ahora)
+}
+
 /** Grabación que el estetoscopio todavía no termina de enviar (GET /api/audio/status -> pending). */
 export interface DevicePendingAudio {
   recording_id: string;

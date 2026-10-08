@@ -39,7 +39,7 @@ export const ChartsScreen: React.FC = () => {
       unit: 'BPM',
       color: Colors.heartRate,
       icon: 'heart-pulse',
-      info: 'Medido en vivo por el sensor óptico MAX30102 a partir de la onda de pulso (PPG).',
+      info: 'Medido en vivo por el sensor de pulso de la banda.',
     },
     {
       id: 'bloodOxygen',
@@ -47,7 +47,7 @@ export const ChartsScreen: React.FC = () => {
       unit: '% SpO2',
       color: Colors.oxygen,
       icon: 'water-percent',
-      info: 'Saturación estimada por oximetría de pulso (luz roja e infrarroja) con la fórmula genérica del fabricante, sin calibrar con este módulo: puede desviarse varios puntos. No usar para diagnóstico.',
+      info: 'Saturación estimada por el sensor de pulso, sin calibrar: puede desviarse varios puntos. No usar para diagnóstico.',
     },
     {
       id: 'hrv',
@@ -55,7 +55,7 @@ export const ChartsScreen: React.FC = () => {
       unit: 'ms',
       color: Colors.pressure,
       icon: 'heart-flash',
-      info: 'Variación del intervalo entre latidos detectados por el sensor óptico (estimada, en reposo). No validada clínicamente.',
+      info: 'Variación del intervalo entre latidos (estimada, en reposo). No validada clínicamente.',
     },
     {
       id: 'stressLevel',
@@ -63,7 +63,7 @@ export const ChartsScreen: React.FC = () => {
       unit: '/100',
       color: Colors.stress,
       icon: 'brain',
-      info: 'Índice orientativo calculado en el firmware a partir de la variabilidad del pulso. No es una medición validada.',
+      info: 'Índice orientativo calculado a partir de la variabilidad del pulso. No es una medición validada.',
     },
   ];
 
@@ -169,7 +169,7 @@ export const ChartsScreen: React.FC = () => {
           <View style={styles.exportHeader}>
             <View style={styles.exportIcon}><MaterialCommunityIcons name="file-export-outline" size={20} color={color.primary} /></View>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.exportTitle}>Exportar telemetría</Text>
+              <Text style={styles.exportTitle}>Exportar lecturas</Text>
               <Text style={styles.exportSubtitle}>
                 Registros de {selectedRange === '24h' ? '24 horas' : selectedRange === '7d' ? '7 días' : '30 días'} en formatos estándar.
               </Text>

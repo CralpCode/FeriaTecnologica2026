@@ -441,6 +441,78 @@ def _measurement_dict(row):
     return out
 
 
+PULSE_CAPTURE_S = 15   # mismo mínimo que el firmware (PULSE_CAPTURE_MS en Esp32.ino)
+FINGER_GAP_S = 3       # un hueco mayor entre lecturas con dedo separa dos tomas
+
+
+def _median(values: list) -> float | None:
+    if not values:
+        return None
+    s = sorted(values)
+    mid = len(s) // 2
+    return float(s[mid]) if len(s) % 2 else (s[mid - 1] + s[mid]) / 2
+
+
+def _summarize_take(take: list[tuple]) -> dict:
+    """Resumen de una toma (racha con el dedo puesto): solo cuentan las lecturas de pulso válidas."""
+    valid = [(t, p, hr) for t, p in take if (hr := usable_value(p, "heartRate", check_timestamp=False)) is not None]
+    seconds = (valid[-1][0] - valid[0][0]).total_seconds() if len(valid) >= 2 else 0.0
+    out = {"lecturas": len(valid), "segundos": round(seconds)}
+    if not valid:
+        return out
+    rows = [p for _, p, _ in valid]
+    spo2 = [v for p in rows if (v := usable_value(p, "bloodOxygen", check_timestamp=False)) is not None]
+    spo2_est = [v for p in rows
+                if (v := usable_value(p, "bloodOxygen", check_timestamp=False, allow_estimated=True)) is not None]
+    hrv = [p["hrv"] for p in rows if (p.get("hrv") or 0) > 0]
+    stress = [p["stressLevel"] for p in rows if (p.get("stressLevel") or 0) > 0]
+    oxygen = spo2 if len(spo2) >= 3 else spo2_est if len(spo2_est) >= 3 else []
+    out.update({
+        "heartRate": round(_median([hr for _, _, hr in valid]), 1),
+        "bloodOxygen": round(_median(oxygen), 1) if oxygen else None,
+        "spo2_estimated": bool(oxygen) and oxygen is spo2_est,
+        "hrv": round(_median(hrv)) if hrv else None,
+        "stressLevel": round(_median(stress)) if stress else None,
+        "inicio": valid[0][0].isoformat(), "fin": valid[-1][0].isoformat(),
+        "counts": {"heartRate": len(valid), "bloodOxygen": len(spo2), "bloodOxygenEstimated": len(spo2_est)},
+    })
+    return out
+
+
+def get_captured_pulse(session_id: str, min_seconds: int = PULSE_CAPTURE_S) -> dict:
+    """Última toma de pulso completa de la sesión: al menos `min_seconds` con pulso válido (y 3 lecturas).
+    Queda guardada aunque se quite el dedo; una toma posterior más corta no la reemplaza.
+    `en_curso` es la toma abierta (dedo puesto ahora), para mostrar el avance."""
+    conn = get_db_connection()
+    rows = conn.execute("SELECT * FROM vitals_log WHERE device_id = ? ORDER BY id", (session_id,)).fetchall()
+    conn.close()
+    takes, take, last_t = [], [], None
+    for p in map(_measurement_dict, rows):
+        try:
+            t = datetime.fromisoformat(p["timestamp"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        finger = p.get("finger") is True
+        if take and (not finger or (t - last_t).total_seconds() > FINGER_GAP_S):
+            takes.append(take)
+            take = []
+        if finger:
+            take.append((t, p))
+            last_t = t
+    open_take = take if take and (datetime.now() - last_t).total_seconds() <= FINGER_GAP_S + 2 else None
+    if take:
+        takes.append(take)
+    captured = None
+    for candidate in reversed(takes):
+        summary = _summarize_take(candidate)
+        if summary["lecturas"] >= 3 and summary["segundos"] >= min_seconds:
+            captured = summary
+            break
+    current = _summarize_take(open_take) if open_take else None
+    return {"min_segundos": min_seconds, "captured": captured,
+            "en_curso": {"lecturas": current["lecturas"], "segundos": current["segundos"]} if current else None}
+
+
 def get_recent_readings(session_id: str, seconds: int = 60) -> list[dict]:
     since = (datetime.now() - timedelta(seconds=seconds)).isoformat()
     conn = get_db_connection()

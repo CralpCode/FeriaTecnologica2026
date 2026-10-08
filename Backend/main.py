@@ -97,6 +97,33 @@ def backup_status():
 _device_link: dict = {}
 
 
+def _device_link_path() -> str:
+    # Junto a la base de datos (las pruebas usan una base temporal, así que tampoco tocan la real).
+    return os.path.join(os.path.dirname(os.path.abspath(database.DB_PATH)), "device_link.json")
+
+
+def _save_device_link():
+    """Guarda el vínculo en disco: un reinicio del servidor no debe dejar a la web sin datos."""
+    path = _device_link_path()
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_device_link, f)
+        os.replace(tmp, path)
+    except OSError as exc:
+        print(f"[VINCULO] No se pudo guardar el vínculo del dispositivo: {exc}", flush=True)
+
+
+def _load_device_link():
+    try:
+        with open(_device_link_path(), encoding="utf-8") as f:
+            saved = json.load(f)
+    except (OSError, ValueError):
+        return
+    if isinstance(saved, dict) and isinstance(saved.get("session_id"), str):
+        _device_link.update(saved)
+
+
 def _linked_session() -> Optional[str]:
     return _device_link.get("session_id")
 
@@ -347,6 +374,11 @@ def get_current_vitals(session_id: Optional[str] = Query(None)):
         return cached["vitals"]
     return database.get_latest_reading(session_id=sid if session_id else None)
 
+@app.get("/api/vitals/captured")
+def get_captured_pulse(session_id: Optional[str] = Query(None)):
+    """Última toma de pulso completa (se conserva al quitar el dedo) y el avance de la toma abierta."""
+    return database.get_captured_pulse(_get_effective_session(session_id))
+
 @app.get("/api/vitals/history")
 def get_vitals_history(range: str = Query("24h"), session_id: Optional[str] = Query(None)):
     return database.get_history_points(time_range=range, limit=100, session_id=session_id)
@@ -561,6 +593,7 @@ async def link_device(payload: DeviceLinkInput):
     if _armed and _armed.get("session_id") != sid:
         _armed.clear()  # la preparación era de otro paciente
     _device_link.update({"session_id": sid, "at": time.time()})
+    _save_device_link()
     await manager.broadcast({"type": "DEVICE_LINKED", "session_id": sid})
     return {"status": "linked", "session_id": sid}
 
@@ -584,6 +617,7 @@ async def audio_arm(payload: AudioArmInput):
     _armed.update({"session_id": sid, "location": loc, "mode": mode,
                    "at": time.time(), "comando_id": uuid.uuid4().hex[:8], "entregado": None})
     _device_link.update({"session_id": _armed["session_id"], "at": time.time()})
+    _save_device_link()
     await manager.broadcast({"type": "RECORDING_ARMED", "session_id": _armed["session_id"],
                              "data": {"location": loc, "mode": mode}})
     return {"status": "armed", **_armed}
@@ -647,6 +681,7 @@ async def _audio_queue_loop():
 
 @app.on_event("startup")
 async def _start_audio_queue():
+    _load_device_link()
     database.recover_audio_jobs()
     audio_service.expire_stale_recordings()
     app.state.audio_task = asyncio.create_task(_audio_queue_loop())
@@ -852,6 +887,7 @@ def archive_session(session_id: str):
     # Un paciente archivado no debe seguir recibiendo los datos del estetoscopio y la banda.
     if _device_link.get("session_id") == sid:
         _device_link.clear()
+        _save_device_link()
     if _armed.get("session_id") == sid:
         _armed.clear()
     return {"session_id": sid, "archived": True}

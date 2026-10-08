@@ -2,7 +2,7 @@ import { API_CONFIG, getSessionId } from '../config/api';
 import {
   VitalSigns, VitalsHistoryPoint, AIAnalysisReport, DeviceInfo, TimeRange, AcousticAnalysisResult,
   AuscultationFocus, AuscultationMode, RecordingResult, DevicePendingAudio, ClinicalAlert, FocusGuide, HeartModelInfo,
-  SessionReport, TriageResult, PatientContext, ClinicalAssessment, SessionOverview, ReportItem, LungModelsInfo,
+  SessionReport, TriageResult, CapturedPulse, PatientContext, ClinicalAssessment, SessionOverview, ReportItem, LungModelsInfo,
 } from '../types/vitals';
 
 const ZERO_VITALS: VitalSigns = {
@@ -250,6 +250,10 @@ class ApiService {
 
   createReportFor(sessionId: string): Promise<SessionReport> {
     return this.request(`/api/reports/session/${encodeURIComponent(sessionId)}`, { method: 'POST' });
+  }
+
+  getCapturedPulse(): Promise<CapturedPulse> {
+    return this.request(`/api/vitals/captured?session_id=${encodeURIComponent(getSessionId())}`);
   }
 
   getTriage(): Promise<TriageResult> {

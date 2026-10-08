@@ -324,7 +324,7 @@ export const HospitalEcgMonitor: React.FC<HospitalEcgMonitorProps> = ({
       {/* Cabecera Técnica */}
       <View style={styles.monitorHeader}>
         <View style={styles.headerLeft}>
-          <Text style={[styles.leadText, { color: ecgColor }]}>PULSO (MAX30102)</Text>
+          <Text style={[styles.leadText, { color: ecgColor }]}>PULSO</Text>
           <Text style={styles.specText}>Animación ilustrativa al ritmo medido • no es un ECG</Text>
         </View>
 
@@ -437,7 +437,7 @@ export const HospitalEcgMonitor: React.FC<HospitalEcgMonitorProps> = ({
 
       {/* Pie del Monitor */}
       <View style={styles.monitorFooter}>
-        <Text style={styles.footerInfo}>SENSOR ÓPTICO • MAX30102</Text>
+        <Text style={styles.footerInfo}>SENSOR DE PULSO</Text>
         <Text style={[styles.footerRhythm, { color: isLive ? (isAlert ? '#DC2626' : '#059669') : '#64748B' }]}>
           {isLive ? (isAlert ? '⚠ PULSO FUERA DE RANGO' : '✓ PULSO DETECTADO') : 'STANDBY • EN ESPERA'}
         </Text>

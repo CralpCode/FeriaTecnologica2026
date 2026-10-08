@@ -117,7 +117,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       {
         id: `init-${newId}`,
         sender: 'ai',
-        text: `¡Hola! Sesión independiente iniciada [${newId}]. Monitoreando telemetría del ESP32.`,
+        text: `¡Hola! Sesión independiente iniciada [${newId}]. Recibiendo los datos del dispositivo.`,
         timestamp: 'Ahora',
       },
     ]);
@@ -138,7 +138,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       {
         id: `init-${sessionId}`,
         sender: 'ai',
-        text: `Cambiado a sesión [${sessionId}]. Cargando telemetría...`,
+        text: `Cambiado a sesión [${sessionId}]. Cargando datos...`,
         timestamp: 'Ahora',
       },
     ]);
@@ -357,7 +357,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       await apiService.linkDevice();
       userManualDisconnectRef.current = false;
       setConnectedType('wokwi_wifi');
-      return { success: true, message: 'Recibiendo datos del ESP32 a través del servidor.' };
+      return { success: true, message: 'Recibiendo datos del dispositivo a través del servidor.' };
     } catch (e: any) {
       return { success: false, message: `No se pudo contactar al servidor: ${e?.message || e}` };
     }

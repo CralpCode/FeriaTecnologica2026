@@ -23,6 +23,16 @@ import audio_service
 import reports
 
 
+def spread_last(n, seconds, end_ago=0):
+    """Reparte en el tiempo las últimas n lecturas guardadas (save_reading usa la hora actual)."""
+    end = datetime.now() - timedelta(seconds=end_ago)
+    with database.get_db_connection() as conn:
+        ids = [r['id'] for r in conn.execute('SELECT id FROM vitals_log ORDER BY id DESC LIMIT ?', (n,))][::-1]
+        for i, row_id in enumerate(ids):
+            t = end - timedelta(seconds=seconds * (len(ids) - 1 - i) / max(1, len(ids) - 1))
+            conn.execute('UPDATE vitals_log SET timestamp=? WHERE id=?', (t.isoformat(), row_id))
+
+
 class ClinicalFlowTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -51,9 +61,12 @@ class ClinicalFlowTests(unittest.TestCase):
         packet.update(changes)
         return packet
 
-    def readings(self, **changes):
-        for _ in range(3):
+    def readings(self, seconds=16, end_ago=0, **changes):
+        """Una toma con el dedo puesto: una lectura cada 2 s durante `seconds` (la toma completa pide 15 s)."""
+        n = seconds // 2 + 1
+        for _ in range(n):
             database.save_reading(self.packet(**changes))
+        spread_last(n, seconds, end_ago)
 
     def test_missing_data_never_means_normal(self):
         result = self.client.get('/api/clinical/assessment/empty').json()
@@ -101,16 +114,35 @@ class ClinicalFlowTests(unittest.TestCase):
         self.assertEqual(current['source'], 'real')
         self.assertEqual(database.get_vitals_summary('person_a')['n_spo2'], 0)
 
-    def test_invalid_latest_supersedes_good_readings(self):
-        self.readings()
-        database.save_reading(self.packet(finger=False))
-        self.assertIsNone(clinical.recent_vitals('person_a')['heartRate'])
+    def test_completed_take_survives_removing_the_finger(self):
+        self.readings(seconds=20, end_ago=5)
+        database.save_reading(self.packet(finger=False, bpm=0, heartRateValid=False))
+        v = clinical.recent_vitals('person_a')
+        self.assertEqual(v['heartRate'], 75)
+        cap = self.client.get('/api/vitals/captured', params={'session_id': 'person_a'}).json()
+        self.assertEqual(cap['captured']['heartRate'], 75)
+        self.assertGreaterEqual(cap['captured']['segundos'], 15)
+        self.assertIsNone(cap['en_curso'])
 
-    def test_stale_database_readings_not_current(self):
-        self.readings()
-        with database.get_db_connection() as conn:
-            conn.execute('UPDATE vitals_log SET timestamp=?', ((datetime.now() - timedelta(seconds=20)).isoformat(),))
+    def test_take_shorter_than_minimum_is_not_kept(self):
+        self.readings(seconds=8)
         self.assertIsNone(clinical.recent_vitals('person_a')['heartRate'])
+        cap = database.get_captured_pulse('person_a')
+        self.assertIsNone(cap['captured'])
+        self.assertEqual(cap['en_curso']['segundos'], 8)
+
+    def test_newer_complete_take_replaces_and_short_one_does_not(self):
+        self.readings(seconds=16, end_ago=120, bpm=70)
+        database.save_reading(self.packet(finger=False, bpm=0, heartRateValid=False))
+        self.readings(seconds=16, end_ago=60, bpm=90)
+        database.save_reading(self.packet(finger=False, bpm=0, heartRateValid=False))
+        self.readings(seconds=6, bpm=110)
+        self.assertEqual(clinical.recent_vitals('person_a')['heartRate'], 90)
+
+    def test_gap_without_readings_splits_takes(self):
+        self.readings(seconds=8, end_ago=30)
+        self.readings(seconds=8)
+        self.assertIsNone(database.get_captured_pulse('person_a')['captured'])
 
     def test_telemetry_api_preserves_quality_and_rejects_impossible_values(self):
         r = self.client.post('/api/telemetry', json=self.packet())

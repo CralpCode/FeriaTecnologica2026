@@ -109,6 +109,8 @@ static volatile bool ausc_ring_overflow = false;
 static volatile size_t ausc_ring_peak = 0;
 static unsigned long ausc_result_until = 0;
 static uint32_t ausc_result_color = 0;
+// Captura fallida: MORADO. El rojo queda reservado para "sin conexion" (Esp32.ino, update_led_effects).
+#define AUSC_FAIL_COLOR strip.Color(150, 0, 200)
 
 static void ausc_job_path(int i, char* out, size_t size) { snprintf(out, size, "/q%d.pcm", i); }
 
@@ -452,8 +454,29 @@ static void ausc_telemetry_task(void*) {
   HTTPClient http;
   http.setReuse(true);
   char json[sizeof(ausc_telem_json)];
+  const unsigned long task_start_ms = millis();
+  unsigned long last_wifi_kick_ms = 0;
   while (true) {
     vTaskDelay(pdMS_TO_TICKS(ausc_jobs_active() ? 20 : 1000));
+    // Autorrecuperacion: el hotspot a veces deja el DNS/TLS sin responder varios minutos.
+    {
+      unsigned long reference = ausc_server_ok_ms ? ausc_server_ok_ms : task_start_ms;
+      unsigned long silent = millis() - reference;
+      if (silent > 300000UL && !ausc_jobs_active() && !ausc_busy()) {
+        Serial.println(F("[NET] 5 min sin respuesta del servidor y sin audio pendiente: reiniciando el ESP32."));
+        delay(100);
+        ESP.restart();
+      }
+      if (silent > 60000UL && millis() - last_wifi_kick_ms > 60000UL && WiFi.status() == WL_CONNECTED) {
+        Serial.println(F("[NET] 60 s sin respuesta del servidor: reconectando el WiFi."));
+        ausc_net_reset(http, tls, plain);
+        WiFi.disconnect(false);
+        delay(200);
+        WiFi.reconnect();
+        last_wifi_kick_ms = millis();
+        continue;
+      }
+    }
     static unsigned long last_discovery = 0;
     if (ausc_wifi_ready() && !ausc_server_known() && millis() - last_discovery >= 8000) {
       last_discovery = millis(); ausc_discover_server();
@@ -607,7 +630,7 @@ bool ausc_start(const String& command_id = "") {
     Serial.println(ausc_wifi_ready()
                    ? F("[AUSC] Servidor no encontrado: revisa SERVER_URL o que la Mac este en la misma red")
                    : F("[AUSC] Sin WiFi: no se puede grabar. Revisa spiroscan_config.h"));
-    ausc_result_color = strip.Color(255, 120, 0);
+    ausc_result_color = AUSC_FAIL_COLOR;
     ausc_result_until = millis() + 3000;
     ausc_state = AUSC_SHOW_RESULT;
     return false;
@@ -729,7 +752,7 @@ static void ausc_finish() {
   job.state = JOB_READY;
   portEXIT_CRITICAL(&ausc_jobs_mux);
   ausc_capture_job = -1;
-  ausc_result_color = job.failed ? strip.Color(255, 120, 0) : strip.Color(0, 80, 200);
+  ausc_result_color = job.failed ? AUSC_FAIL_COLOR : strip.Color(0, 80, 200);
   ausc_result_until = millis() + (job.failed ? 3000 : 300);
   ausc_state = AUSC_SHOW_RESULT;
 }
@@ -775,7 +798,7 @@ bool ausc_busy() {
 }
 
 // ------------------------------------------------------------------------------
-// LEDs: barra de progreso azul mientras graba; verde/rojo/naranja con el resultado.
+// LEDs: barra de progreso azul mientras graba; azul (enviando) o morado (fallo) con el resultado.
 // Devuelve true si el modo auscultacion controla los LEDs en este momento.
 // ------------------------------------------------------------------------------
 bool ausc_update_leds(int num_leds) {

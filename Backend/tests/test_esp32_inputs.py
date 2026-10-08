@@ -24,6 +24,16 @@ from fastapi.testclient import TestClient
 import main
 import audio_service
 import reports
+from datetime import datetime, timedelta
+
+
+def spread_last(n, seconds):
+    """Reparte en el tiempo las últimas n lecturas guardadas (save_reading usa la hora actual)."""
+    with database.get_db_connection() as conn:
+        ids = [r['id'] for r in conn.execute('SELECT id FROM vitals_log ORDER BY id DESC LIMIT ?', (n,))][::-1]
+        for i, row_id in enumerate(ids):
+            t = datetime.now() - timedelta(seconds=seconds * (len(ids) - 1 - i) / max(1, len(ids) - 1))
+            conn.execute('UPDATE vitals_log SET timestamp=? WHERE id=?', (t.isoformat(), row_id))
 
 # Formato que envía el firmware original (Esp32.ino en e45fde1): sin indicadores de calidad.
 LEGACY = {"bpm": 72, "spo2": 98.2, "stress": 40, "hrv": 50, "audio_rms": 12.5, "audio_peak": 30.1,
@@ -69,12 +79,13 @@ class Esp32InputTests(unittest.TestCase):
         self.assertTrue(saved['heartRateValid'])
         self.assertEqual(saved['source'], 'real')
         self.assertEqual(saved['validadoPor'], 'servidor')
-        # La valoración además exige 3 lecturas válidas: con el formato original, desde el 5.º paquete.
+        # La valoración además exige una toma de 15 s con pulso válido (3 lecturas como mínimo).
         self.assertIsNone(clinical.recent_vitals('ESP32-BIO-01')['heartRate'])
-        self.send(bpm=76)
-        self.send(bpm=73)
+        for bpm in (76, 73, 75, 74, 72, 75):
+            self.send(bpm=bpm)
+        spread_last(9, 22)   # una lectura cada 2,75 s: las válidas (3.ª a 9.ª) cubren 16,5 s
         v = clinical.recent_vitals('ESP32-BIO-01')
-        self.assertEqual(v['heartRate'], 74)
+        self.assertEqual(v['heartRate'], 74)  # mediana de las 7 válidas
         self.assertIsNone(v['bloodOxygen'])
 
     def test_legacy_spo2_hrv_and_stress_are_never_stored(self):

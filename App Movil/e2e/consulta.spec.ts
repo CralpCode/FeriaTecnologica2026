@@ -85,10 +85,18 @@ test('consulta completa: paciente, datos, pulso, corazón, resultado, notas, inf
 
   // 3. Pulso (paquetes válidos del "ESP32")
   await expect(page.getByText('Dedo índice sobre el sensor', { exact: false })).toBeVisible();
-  const connect = page.getByRole('button', { name: 'Conectar ESP32' });
+  const connect = page.getByRole('button', { name: 'Conectar dispositivo' }).filter({ hasText: 'Conectar dispositivo' });
   if (await connect.isVisible()) await connect.click();
-  await sendPulse(request);
-  await expect(page.getByText('Lectura válida').first()).toBeVisible();
+  await sendPulse(request, 4);
+  await expect(page.getByText('Midiendo').first()).toBeVisible();
+  await sendPulse(request, 14);   // la toma se guarda al cumplir 15 s con pulso válido
+  // Se quita el dedo: la lectura guardada se queda en pantalla
+  await request.post('/api/telemetry', {
+    data: { bpm: 0, source: 'real', heartRateValid: false, bloodOxygenValid: false, spo2Calibrated: false,
+            signalQuality: 'no_contact', sampleAgeMs: 0, finger: false },
+  });
+  await expect(page.getByText(/Lectura guardada a las/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('En uso para la valoración', { exact: false })).toBeVisible();
   await button(page, 'Continuar a corazón').click();
 
   // 4. Corazón: foco aórtico, preparar y grabación simulada

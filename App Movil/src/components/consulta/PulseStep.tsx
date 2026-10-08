@@ -10,33 +10,64 @@ import { Colors } from '../../theme/colors';
 import { color, font, radius, space, tabular, weight } from '../../theme/tokens';
 import { Banner, Button, Card, SectionHeader, StatusPill, useReducedMotion, VitalTile } from '../ui';
 import { useStepAction } from './stepAction';
+import { apiService } from '../../services/api';
+import { CapturedPulse } from '../../types/vitals';
 
-/** Paso 3: pulso validado y el resto de lecturas del dispositivo (con su estado real, sin rellenar). */
+/**
+ * Paso 3: pulso. Una toma de al menos 15 s con pulso válido queda guardada en el servidor y se sigue
+ * mostrando al quitar el dedo; mientras el dedo está puesto se ve la lectura en vivo y el avance.
+ */
 export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
-  const { vitals, connectedType, connectViaServer, isBackendOnline } = useVitals();
+  const { vitals, connectedType, connectViaServer, isBackendOnline, currentSessionId } = useVitals();
   const { triage } = useClinical();
   const [now, setNow] = useState(Date.now());
   const [connecting, setConnecting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [take, setTake] = useState<CapturedPulse | null>(null);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    let alive = true;
+    setTake(null);
+    const load = () => apiService.getCapturedPulse().then((c) => alive && setTake(c)).catch(() => {});
+    load();
+    const t = setInterval(load, 2000);
+    return () => { alive = false; clearInterval(t); };
+  }, [currentSessionId]);
   useStepAction({ label: 'Continuar a corazón', icon: 'arrow-forward', onPress: onNext });
 
   const valid = measurementValidity(vitals, now);
-  const used = triage?.datos_usados?.vitales_ultimo_minuto;
-  const readings = Math.min(3, used?.lecturas ?? 0);
-  const pulseUsed = used?.fc ?? null;
+  const pulseUsed = triage?.datos_usados?.vitales_ultimo_minuto?.fc ?? null;
   const connected = connectedType !== 'none';
-  const bpm = valid.heartRate ? Math.round(vitals.heartRate) : null;
-  const audioAvailable = vitals.source === 'real' && vitals.audioUnit === 'dBFS' && vitals.audioValid === true
-    && Number.isFinite(vitals.audio_rms) && vitals.audio_rms < 0 && now - Date.parse(vitals.timestamp) < 10000;
+  const live = valid.heartRate ? Math.round(vitals.heartRate) : null;
+  const saved = take?.captured ?? null;
+  const minSeconds = take?.min_segundos ?? 15;
+  const progress = live !== null ? Math.min(take?.en_curso?.segundos ?? 0, minSeconds) : 0;
+  const measuring = live !== null && progress < minSeconds;
+  const bpm = live ?? (saved ? Math.round(saved.heartRate) : null);
+  const savedTime = saved ? new Date(saved.fin).toLocaleTimeString('es-GT', { hour: '2-digit', minute: '2-digit' }) : '';
 
-  const pulseStatus = vitals.signalQuality === 'sensor_unavailable'
-    ? 'El MAX30102 no responde. Revisa alimentación, tierra y cables SDA/SCL.'
+  const waitingText = vitals.signalQuality === 'sensor_unavailable'
+    ? 'El sensor de pulso no responde. Revisa la banda.'
     : ['no_contact', 'no_finger'].includes(vitals.signalQuality || '')
-      ? 'Coloca el dedo sobre el sensor para iniciar la lectura.'
-      : vitals.signalQuality === 'stale'
-        ? 'La señal óptica dejó de actualizarse. Revisa el sensor.'
-        : 'Esperando una lectura estable del sensor…';
+      ? `Coloca el dedo sobre el sensor y mantenlo al menos ${minSeconds} s.`
+      : 'Esperando una lectura estable…';
+  const status = measuring
+    ? `Mantén el dedo quieto: ${progress} de ${minSeconds} s.`
+    : live !== null
+      ? 'Lectura guardada. Puedes retirar el dedo o dejarlo durante la consulta.'
+      : saved
+        ? `Lectura guardada a las ${savedTime} (${saved.segundos} s con el dedo). Se interpreta con la edad y el reposo.`
+        : waitingText;
+  const pill = measuring ? { label: 'Midiendo', tone: 'info' as const }
+    : live !== null || saved ? { label: 'Lectura guardada', tone: 'success' as const }
+      : { label: 'Esperando', tone: 'neutral' as const };
+
+  // Fichas: lectura en vivo si el dedo está puesto; si no, la de la toma guardada.
+  const oxygen = valid.bloodOxygen || valid.bloodOxygenEstimated ? vitals.bloodOxygen
+    : saved?.bloodOxygen ?? null;
+  const oxygenEstimated = valid.bloodOxygen ? false : valid.bloodOxygenEstimated || (saved?.spo2_estimated ?? true);
+  const hrv = valid.hrv ? vitals.hrv : saved?.hrv ?? null;
+  const stress = valid.stress ? vitals.stressLevel : saved?.stressLevel ?? null;
 
   const connect = async () => {
     setConnecting(true);
@@ -54,7 +85,7 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
         <Text style={styles.deviceText}>
           {connected ? 'Dispositivo conectado: los datos llegan a este paciente.' : 'El dispositivo no está conectado en esta pantalla.'}
         </Text>
-        {!connected && <Button label="Conectar ESP32" icon="wifi" size="sm" onPress={connect} loading={connecting} />}
+        {!connected && <Button label="Conectar dispositivo" icon="wifi" size="sm" onPress={connect} loading={connecting} />}
       </View>
       {!isBackendOnline && <Banner tone="danger" text="Sin conexión con el servidor." />}
       {message && <Banner tone="danger" text={message} />}
@@ -63,48 +94,39 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
         <View style={styles.heroMain}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <View style={styles.heroHead}>
-              <Text style={styles.kicker}>Pulso · MAX30102</Text>
-              <StatusPill label={bpm ? 'Lectura válida' : 'Esperando'} tone={bpm ? 'success' : 'neutral'} dot />
+              <Text style={styles.kicker}>Pulso</Text>
+              <StatusPill label={pill.label} tone={pill.tone} dot />
             </View>
             <View style={styles.bpmRow}>
-              <Beat bpm={bpm} />
+              <Beat bpm={live} />
               <Text style={[styles.bpm, tabular, !bpm && { color: color.textMuted }]}>{bpm ?? '--'}</Text>
               <Text style={styles.unit}>BPM</Text>
             </View>
-            <Text style={styles.status}>
-              {bpm ? 'Se interpreta con la edad y el reposo.' : pulseStatus}
-            </Text>
-            <View style={styles.readings} accessibilityLabel={`${readings} de 3 lecturas válidas`}>
-              {[0, 1, 2].map((i) => (
-                <View key={i} style={[styles.readingDot, i < readings && styles.readingDotOn]}>
-                  {i < readings && <Ionicons name="checkmark" size={12} color="#FFFFFF" />}
-                </View>
-              ))}
-              <Text style={styles.readingsText}>{readings}/3 lecturas válidas en el último minuto</Text>
-            </View>
+            <Text style={styles.status}>{status}</Text>
+            {measuring && (
+              <View style={styles.progress} accessibilityLabel={`${progress} de ${minSeconds} segundos`}>
+                <View style={[styles.progressFill, { width: `${(progress / minSeconds) * 100}%` }]} />
+              </View>
+            )}
             {pulseUsed !== null && (
-              <Text style={styles.used}>En uso para la valoración: {pulseUsed} BPM (mediana del último minuto)</Text>
+              <Text style={styles.used}>En uso para la valoración: {pulseUsed} BPM (mediana de la toma guardada)</Text>
             )}
           </View>
           <FingerGuide />
         </View>
       </Card>
 
-      <Text style={styles.sectionTitle}>Otras lecturas del dispositivo</Text>
+      <Text style={styles.sectionTitle}>Otras lecturas</Text>
       <View style={styles.grid}>
         <VitalTile icon="water-percent" tint={Colors.oxygen} label="Oxígeno (SpO2)" unit="%"
-                   value={valid.bloodOxygen || valid.bloodOxygenEstimated ? vitals.bloodOxygen.toFixed(0) : null}
-                   hint={valid.bloodOxygen ? 'Estimación calibrada' : valid.bloodOxygenEstimated ? ESTIMATED : 'Esperando señal estable'}
-                   source="MAX30102" />
+                   value={oxygen !== null ? oxygen.toFixed(0) : null}
+                   hint={oxygen === null ? 'Esperando señal estable' : oxygenEstimated ? ESTIMATED : 'Estimación calibrada'} />
         <VitalTile icon="heart-flash" tint={Colors.pressure} label="Variabilidad (HRV)" unit="ms"
-                   value={valid.hrv ? String(Math.round(vitals.hrv)) : null}
-                   hint={valid.hrv ? ESTIMATED : 'Esperando pulso estable'} source="MAX30102" />
+                   value={hrv !== null ? String(Math.round(hrv)) : null}
+                   hint={hrv !== null ? ESTIMATED : 'Esperando pulso estable'} />
         <VitalTile icon="brain" tint={Colors.stress} label="Índice de estrés" unit="/100"
-                   value={valid.stress ? String(Math.round(vitals.stressLevel)) : null}
-                   hint={valid.stress ? ESTIMATED : 'Esperando pulso estable'} source="Estimación" />
-        <VitalTile icon="microphone" tint={Colors.audio} label="Micrófono" unit="dBFS"
-                   value={audioAvailable ? vitals.audio_rms.toFixed(1) : null}
-                   hint={audioAvailable ? 'Nivel digital, no presión sonora' : 'Sin lectura de audio'} source="INMP441" />
+                   value={stress !== null ? String(Math.round(stress)) : null}
+                   hint={stress !== null ? ESTIMATED : 'Esperando pulso estable'} />
       </View>
 
       {pulseUsed === null && (
@@ -176,13 +198,8 @@ const styles = StyleSheet.create({
   bpm: { fontSize: 64, lineHeight: 68, fontWeight: weight.heavy, color: color.text, letterSpacing: -2 },
   unit: { fontSize: font.lg, color: color.textSecondary, fontWeight: weight.bold, alignSelf: 'flex-end', marginBottom: 10 },
   status: { fontSize: font.sm, color: color.textSecondary, marginTop: space.xs },
-  readings: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.lg, flexWrap: 'wrap' },
-  readingDot: {
-    width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: color.borderStrong, backgroundColor: color.surface,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  readingDotOn: { backgroundColor: color.success, borderColor: color.success },
-  readingsText: { fontSize: font.xs, color: color.textSecondary, fontWeight: weight.bold, marginLeft: space.xs },
+  progress: { height: 8, borderRadius: 4, backgroundColor: color.surfaceMuted, marginTop: space.md, overflow: 'hidden' },
+  progressFill: { height: 8, borderRadius: 4, backgroundColor: color.info },
   used: { fontSize: font.sm, color: color.success, fontWeight: weight.bold, marginTop: space.md },
   finger: { alignItems: 'center', gap: space.xs, marginHorizontal: 'auto' as any },
   fingerText: { fontSize: font.xs, color: color.textMuted, fontWeight: weight.medium },
