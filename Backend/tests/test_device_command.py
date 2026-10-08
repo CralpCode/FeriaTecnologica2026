@@ -125,6 +125,14 @@ class DeviceCommandTests(unittest.TestCase):
         self.start(cid)                                                       # registrada: la regla normal decide
         self.assertEqual(self.client.post('/api/audio/arm', json={'session_id': 'p001', 'location': 'PV'}).status_code, 409)
 
+    def test_archiving_the_linked_session_unlinks_the_device(self):
+        self.start(self.arm('AV', sid='p_prueba')['comando_id'])   # armar vincula el dispositivo a esa sesión
+        self.arm('PV', sid='p_prueba')
+        self.assertEqual(main._linked_session(), 'p_prueba')
+        self.assertEqual(self.client.post('/api/sessions/p_prueba/archive').status_code, 200)
+        self.assertIsNone(main._linked_session())
+        self.assertEqual(self.client.get('/api/device/comando').json(), {'accion': None})
+
     def test_elapsed_capture_time_sets_recording_start(self):
         rec = self.start(self.arm('AV')['comando_id'], elapsed_ms=6000)
         age = (datetime.now() - datetime.fromisoformat(database.get_recording(rec)['created_at'])).total_seconds()

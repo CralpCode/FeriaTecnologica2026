@@ -849,6 +849,11 @@ def archive_session(session_id: str):
     if not database.session_exists(sid):
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     database.archive_session(sid)
+    # Un paciente archivado no debe seguir recibiendo los datos del estetoscopio y la banda.
+    if _device_link.get("session_id") == sid:
+        _device_link.clear()
+    if _armed.get("session_id") == sid:
+        _armed.clear()
     return {"session_id": sid, "archived": True}
 
 
