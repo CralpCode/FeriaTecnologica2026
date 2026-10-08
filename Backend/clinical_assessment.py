@@ -41,6 +41,15 @@ class Symptoms(ContextModel):
     edema: StrictBool | None = None
 
 
+# Nombres en español para el informe y el asistente
+SYMPTOM_NAMES = {
+    "dyspnea": "falta de aire", "chest_pain": "dolor en el pecho", "syncope": "desmayo",
+    "cyanosis": "labios o piel azulados", "confusion": "confusión", "severe_breathlessness": "dificultad intensa para respirar",
+    "cough": "tos", "fever": "fiebre", "wheeze": "silbido al respirar", "orthopnea": "falta de aire al acostarse",
+    "edema": "hinchazón de piernas",
+}
+
+
 class History(ContextModel):
     asthma: StrictBool | None = None
     copd: StrictBool | None = None
@@ -181,12 +190,9 @@ def assess(context: dict, vitals: dict, recordings: list[dict]) -> dict:
         finding("pulse_outside_screening_range", "Pulso fuera de los límites de aviso del prototipo", [f"Mediana de pulso válido: {hr:g} BPM."])
         steps.append("Consultar si el pulso alterado persiste. No permite diagnosticar arritmias: para eso se requiere evaluación y ECG.")
     spo2_estimated = vitals.get("spo2_estimated") is True
-    # Decisión del usuario (2026-10-08): la SpO2 sin calibrar (o ausente) no cambia el semáforo: ni genera hallazgo
-    # ni cuenta como dato faltante (antes impedía llegar a verde). Queda solo como limitación declarada.
-    if spo2 is None or spo2_estimated:
-        limitations.append("Sin SpO2 calibrada: la del MAX30102 es una estimación sin calibrar con este módulo y no confirma "
-                           "ni descarta hipoxemia; no se usa en el semáforo.")
-    elif spo2 < 94:
+    # Decisión del usuario (2026-10-08): la SpO2 del sensor (fórmula estándar, sin calibrar) se muestra como dato,
+    # pero no cambia el semáforo, no genera hallazgos ni alertas y no se agrega ningún mensaje sobre calibración.
+    if spo2 is not None and not spo2_estimated and spo2 < 94:   # solo una SpO2 calibrada (equipo clínico) cuenta
         finding("low_oxygen", "SpO2 reducida: confirmar con equipo clínico", [f"Mediana válida: {spo2:g} %; considerar altitud y valor habitual."])
         if spo2 < 90:
             urgent = True

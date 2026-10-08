@@ -59,7 +59,7 @@ class EstimatedSpo2AssessmentTests(unittest.TestCase):
                                                    "spo2_estimated": estimated, "counts": {}}, recs)
             self.assertEqual(out["status"], "no_specific_findings", out["missing_data"])
             self.assertFalse(any("SpO2" in m for m in out["missing_data"]))
-            self.assertTrue(any("SpO2 calibrada" in m for m in out["limitations"]))
+            self.assertFalse(any("calibr" in m.lower() for m in out["missing_data"] + out["limitations"] + out["next_steps"]))
 
 
 if __name__ == "__main__":

@@ -60,7 +60,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToAI
                            hint={valid.heartRate ? 'Lectura válida; interpretar con edad y reposo' : 'Sin lectura válida'} />
                 <VitalTile icon="water-percent" tint={Colors.oxygen} label="Oxígeno (SpO2)" unit="%"
                            value={valid.bloodOxygen || valid.bloodOxygenEstimated ? vitals.bloodOxygen.toFixed(0) : null}
-                           hint={valid.bloodOxygen ? 'Estimación calibrada' : valid.bloodOxygenEstimated ? ESTIMATED : 'Esperando señal estable'} />
+                           hint={valid.bloodOxygen || valid.bloodOxygenEstimated ? 'Lectura del sensor de pulso' : 'Esperando señal estable'} />
                 <VitalTile icon="heart-flash" tint={Colors.pressure} label="Variabilidad (HRV)" unit="ms"
                            value={valid.hrv ? String(Math.round(vitals.hrv)) : null}
                            hint={valid.hrv ? ESTIMATED : 'Esperando pulso estable'} />

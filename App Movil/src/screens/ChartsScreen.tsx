@@ -47,7 +47,7 @@ export const ChartsScreen: React.FC = () => {
       unit: '% SpO2',
       color: Colors.oxygen,
       icon: 'water-percent',
-      info: 'Saturación estimada por el sensor de pulso, sin calibrar: puede desviarse varios puntos. No usar para diagnóstico.',
+      info: 'Saturación de oxígeno medida por el sensor de pulso de la banda.',
     },
     {
       id: 'hrv',

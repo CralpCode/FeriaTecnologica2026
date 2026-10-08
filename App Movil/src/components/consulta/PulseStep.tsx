@@ -67,7 +67,6 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
   // Fichas: lectura en vivo si el dedo está puesto; si no, la de la toma guardada.
   const oxygen = valid.bloodOxygen || valid.bloodOxygenEstimated ? vitals.bloodOxygen
     : saved?.bloodOxygen ?? null;
-  const oxygenEstimated = valid.bloodOxygen ? false : valid.bloodOxygenEstimated || (saved?.spo2_estimated ?? true);
   const hrv = valid.hrv ? vitals.hrv : saved?.hrv ?? null;
   const stress = valid.stress ? vitals.stressLevel : saved?.stressLevel ?? null;
 
@@ -122,7 +121,7 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
       <View style={styles.grid}>
         <VitalTile icon="water-percent" tint={Colors.oxygen} label="Oxígeno (SpO2)" unit="%"
                    value={oxygen !== null ? oxygen.toFixed(0) : null}
-                   hint={oxygen === null ? 'Esperando señal estable' : oxygenEstimated ? ESTIMATED : 'Estimación calibrada'} />
+                   hint={oxygen === null ? 'Esperando señal estable' : 'Lectura del sensor de pulso'} />
         <VitalTile icon="heart-flash" tint={Colors.pressure} label="Variabilidad (HRV)" unit="ms"
                    value={hrv !== null ? String(Math.round(hrv)) : null}
                    hint={hrv !== null ? ESTIMATED : 'Esperando pulso estable'} />

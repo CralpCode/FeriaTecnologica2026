@@ -29,6 +29,8 @@ BASE_RULES = (
     "8. Nunca inventes cifras, umbrales ni porcentajes: si mencionas un número, debe aparecer tal cual en los datos.\n"
     "9. Nunca digas que un valor es normal, estable, sano o 'dentro del rango': el prototipo no puede concluir "
     "normalidad. Tampoco supongas reposo, edad ni ausencia de síntomas si no están en los datos.\n"
+    "10. El oxígeno (SpO2) del sensor se informa solo como dato, tal cual: no hables de calibración, no digas si es "
+    "bajo o alto ni que requiere atención; no genera alertas ni cambia el semáforo.\n"
 )
 
 KNOWLEDGE_PATH = Path(__file__).resolve().parent / "knowledge" / "proyecto.md"
@@ -95,8 +97,32 @@ def _session_context(session_id: str) -> dict:
              "titulo": a["title"], "hora": a["created_at"]}
             for a in database.list_alerts(session_id, limit=10)
         ],
+        "toma_de_pulso_guardada": database.get_captured_pulse(session_id).get("captured"),
         "valoracion": clinical_assessment.evaluate_session(session_id),
         "triaje": {k: v for k, v in triage.evaluate(session_id).items() if k in ("nivel", "titulo", "motivos")},
+    }
+
+
+def report_facts(session_id: str) -> dict:
+    """Lo mismo que muestra el informe (reports.py): semáforo, resultado por foco/zona, toma de pulso guardada,
+    síntomas y recomendación. El resumen del LLM se escribe solo con esto para que no contradiga al informe."""
+    recs = [r for r in clinical_assessment.recent_recordings(session_id) if not clinical_assessment.is_demo(r)]
+    zone = lambda r: LOCATION_NAMES.get(r["location"], r["location"] or "sin especificar")
+    pulse = database.get_captured_pulse(session_id).get("captured") or {}
+    context = database.get_clinical_context(session_id) or {}
+    assessment = clinical_assessment.evaluate_session(session_id)
+    lung_sounds = lambda r: [k for k, v in ((r.get("details") or {}).get("ruidos") or {}).items() if v.get("presente")]
+    return {
+        "semaforo": triage.evaluate(session_id)["nivel"],
+        "corazon": {zone(r): ("posible sonido anormal" if r["result"] == "anormal" else "sin hallazgos")
+                    for r in recs if (r.get("mode") or "corazon") == "corazon"},
+        "pulmon": {zone(r): (", ".join(lung_sounds(r)) or "posible sonido anormal" if r["result"] == "anormal"
+                             else "sin ruidos anormales") for r in recs if r.get("mode") == "pulmon"},
+        "pulso": {k: pulse.get(k) for k in ("heartRate", "bloodOxygen", "hrv", "stressLevel", "segundos")} if pulse else None,
+        "sintomas": [clinical_assessment.SYMPTOM_NAMES.get(k, k)
+                     for k, v in (context.get("symptoms") or {}).items() if v is True],
+        "recomendacion": assessment["next_steps"][:2],
+        "demo": assessment.get("demo", False),
     }
 
 
@@ -106,7 +132,7 @@ def _clean_vitals(v: dict) -> dict:
            "timestamp": v.get("timestamp"), "source": v.get("source")}
     if out["bloodOxygen"] is None:
         # Solo con la etiqueta: la IA no debe presentarla como una saturación medida.
-        out["SpO2_estimada_sin_calibrar"] = usable_value(v, "bloodOxygen", allow_estimated=True)
+        out["SpO2_sensor"] = usable_value(v, "bloodOxygen", allow_estimated=True)
     return out
 
 
@@ -176,18 +202,20 @@ def session_report(session_id: str) -> tuple[dict, bool]:
     }
     # Las secciones clínicas son fijas (reglas). El LLM solo agrega un resumen en lenguaje sencillo,
     # que se descarta si menciona una cifra que no está en los datos.
-    summary = _llm_summary(ctx)
+    summary = _llm_summary(report_facts(session_id))
     if summary:
         content["resumen_llm"] = summary
     return content, bool(summary)
 
 
-def _llm_summary(ctx: dict) -> str | None:
-    data = json.dumps(ctx, ensure_ascii=False, default=str)
+def _llm_summary(facts: dict) -> str | None:
+    data = json.dumps(facts, ensure_ascii=False, default=str)
     prompt = (
-        "Resume en lenguaje sencillo esta sesión de tamizaje para la persona y su familia, en 3 o 4 oraciones.\n"
-        "Básate en la 'valoracion' (motor de reglas): no agregues enfermedades, probabilidades ni recomendaciones "
-        "que no estén ahí. Si faltan datos, dilo.\n"
+        "Resume en lenguaje sencillo esta evaluación de tamizaje para la persona y su familia, en 2 o 3 oraciones.\n"
+        "Usa SOLO estos datos (son los mismos del informe): qué se encontró en corazón, pulmón y pulso, y la "
+        "recomendación. No agregues enfermedades, probabilidades, promedios ni datos que no estén aquí.\n"
+        "El oxígeno, la variabilidad y el estrés se mencionan solo como dato: no digas si son bajos, altos o "
+        "normales ni que requieren atención; no cambian el semáforo.\n"
         f"DATOS DE LA SESIÓN:\n{data}\n"
         'Responde JSON: {"resumen": "..."}'
     )
@@ -201,7 +229,7 @@ def _llm_summary(ctx: dict) -> str | None:
     if not text or not numbers_ok(text, data):
         print("[LLM informe] resumen descartado: vacío o con cifras que no están en los datos")
         return None
-    if ctx["valoracion"].get("demo") and "demostraci" not in text.lower():
+    if facts.get("demo") and "demostraci" not in text.lower():
         text = clinical_assessment.DEMO_NOTICE + " " + text
     return text
 

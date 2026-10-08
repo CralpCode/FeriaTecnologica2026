@@ -9,7 +9,7 @@ Prototipo de tamizaje cardiorrespiratorio con ESP32, MAX30102 e INMP441. El PDF 
 ## Datos disponibles
 
 - El firmware actualizado obtiene señales roja e infrarroja del MAX30102 y estima pulso, con controles de contacto, calidad, estabilización y caducidad. El ESP32 de la feria puede tener todavía el firmware original, sin esos controles: en ese caso el servidor da el pulso por válido solo con el dedo puesto, entre 30 y 220 BPM y estable en 3 lecturas seguidas, y descarta la SpO2, la HRV y el estrés de ese firmware.
-- La SpO2 queda **no disponible**: el cálculo anterior incluía valores inventados y recortes. Se requiere implementar y validar un algoritmo calibrado para el sistema óptico completo. No se debe activar un indicador de calibración para saltar este requisito.
+- La SpO2 se calcula con la fórmula estándar del sensor (algoritmo de referencia Maxim/SparkFun, mediana de varias ventanas con el dedo quieto) y se muestra como dato. No genera alertas ni cambia el semáforo.
 - HRV, estrés, presión arterial, temperatura corporal y ECG no se presentan como mediciones válidas.
 - El INMP441 graba sonido. El nivel digital en dBFS no es presión sonora en dB SPL.
 - La edad, síntomas, reposo, altitud y antecedentes provienen de respuestas explícitas del usuario. Un dato no contestado permanece desconocido.
@@ -44,7 +44,7 @@ Se combinan resultados acústicos, mediciones válidas y síntomas mediante regl
 
 La API, el semáforo, los informes y el chat comparten este motor. Las secciones clínicas del informe son fijas (reglas). El modelo de lenguaje local (Qwen3-Next) redacta el chat, un resumen en lenguaje sencillo del informe y el texto de las alertas a partir de estos datos; no decide hallazgos ni enfermedades, y un texto con cifras que no están en los datos se descarta.
 
-Semáforo: ROJO si hay un síntoma de alarma o SpO2 calibrada menor de 90 %. AMARILLO si hay hallazgos (SpO2 calibrada menor de 94 %, pulso fuera de 45 a 120 BPM en un adulto en reposo, sonido cardíaco o pulmonar anormal) o síntomas comunicados. GRIS si faltan datos. VERDE solo sin hallazgos ni datos faltantes; hoy no se alcanza porque no hay SpO2 calibrada.
+Semáforo: ROJO si hay un síntoma de alarma. AMARILLO si hay hallazgos (pulso fuera de 45 a 120 BPM en un adulto en reposo, sonido cardíaco o pulmonar anormal) o síntomas comunicados. GRIS si faltan datos. VERDE sin hallazgos ni datos faltantes. El oxígeno del sensor no cambia el semáforo.
 
 ## Uso
 
