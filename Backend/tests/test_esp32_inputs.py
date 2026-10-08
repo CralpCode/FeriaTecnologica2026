@@ -79,13 +79,13 @@ class Esp32InputTests(unittest.TestCase):
         self.assertTrue(saved['heartRateValid'])
         self.assertEqual(saved['source'], 'real')
         self.assertEqual(saved['validadoPor'], 'servidor')
-        # La valoración además exige una toma de 15 s con pulso válido (3 lecturas como mínimo).
+        # La valoración además exige una toma de 20 s con pulso válido (3 lecturas como mínimo).
         self.assertIsNone(clinical.recent_vitals('ESP32-BIO-01')['heartRate'])
-        for bpm in (76, 73, 75, 74, 72, 75):
+        for bpm in (76, 73, 75, 74, 72, 75, 73, 74):
             self.send(bpm=bpm)
-        spread_last(9, 22)   # una lectura cada 2,75 s: las válidas (3.ª a 9.ª) cubren 16,5 s
+        spread_last(11, 27.5)   # una lectura cada 2,75 s: las válidas (3.ª a 11.ª) cubren 22 s
         v = clinical.recent_vitals('ESP32-BIO-01')
-        self.assertEqual(v['heartRate'], 74)  # mediana de las 7 válidas
+        self.assertEqual(v['heartRate'], 74)  # mediana de las 9 válidas
         self.assertIsNone(v['bloodOxygen'])
 
     def test_legacy_spo2_hrv_and_stress_are_never_stored(self):

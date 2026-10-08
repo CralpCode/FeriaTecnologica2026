@@ -67,7 +67,7 @@ class ClinicalContext(ContextModel):
 
 
 def recent_vitals(session_id: str) -> dict:
-    """Pulso y SpO2 de la última toma completa (>= 15 s con pulso válido). Se conserva al quitar el dedo."""
+    """Pulso y SpO2 de la última toma completa (>= 20 s con pulso válido). Se conserva al quitar el dedo."""
     latest = database.get_latest_reading(session_id=session_id) or {}
     out = {"heartRate": None, "bloodOxygen": None, "spo2_estimated": False, "counts": {}, "latest_metadata": {
         k: latest.get(k) for k in ("source", "signalQuality", "spo2Calibrated", "spo2Estimated")}}
@@ -185,7 +185,7 @@ def assess(context: dict, vitals: dict, recordings: list[dict]) -> dict:
 
     hr, spo2 = vitals.get("heartRate"), vitals.get("bloodOxygen")
     if hr is None:
-        missing.append("Pulso válido durante al menos 15 s con buena señal.")
+        missing.append("Pulso válido durante al menos 20 s con buena señal.")
     elif adult and ctx["at_rest"] is True and (hr < 45 or hr > 120):
         finding("pulse_outside_screening_range", "Pulso fuera de los límites de aviso del prototipo", [f"Mediana de pulso válido: {hr:g} BPM."])
         steps.append("Consultar si el pulso alterado persiste. No permite diagnosticar arritmias: para eso se requiere evaluación y ECG.")

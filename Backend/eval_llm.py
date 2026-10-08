@@ -62,8 +62,8 @@ def seed_session():
     # Datos de prueba rotulados, solo en la base temporal: lecturas con todos los indicadores de calidad.
     quality = {"source": "real", "heartRateValid": True, "bloodOxygenValid": True, "spo2Calibrated": True,
                "signalQuality": "good", "sampleAgeMs": 0, "finger": True}
-    # Una toma completa (>= 15 s): una lectura cada 2 s durante 16 s.
-    values = (96, 95, 88, 87, 89, 88, 87, 89, 88)
+    # Una toma completa (>= 20 s): una lectura cada 2 s durante 22 s.
+    values = (96, 95, 88, 87, 89, 88, 87, 89, 88, 87, 89, 88)
     for spo2 in values:
         database.save_reading({"bpm": 92, "spo2": spo2, "hrv": 40, "session_id": SID, **quality})
     conn = database.get_db_connection()

@@ -441,7 +441,7 @@ def _measurement_dict(row):
     return out
 
 
-PULSE_CAPTURE_S = 15   # mismo mínimo que el firmware (PULSE_CAPTURE_MS en Esp32.ino)
+PULSE_CAPTURE_S = 20   # mismo mínimo que el firmware (PULSE_CAPTURE_MS en Esp32.ino)
 FINGER_GAP_S = 3       # un hueco mayor entre lecturas con dedo separa dos tomas
 
 

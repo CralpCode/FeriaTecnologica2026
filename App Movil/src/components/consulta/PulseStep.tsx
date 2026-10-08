@@ -14,7 +14,7 @@ import { apiService } from '../../services/api';
 import { CapturedPulse } from '../../types/vitals';
 
 /**
- * Paso 3: pulso. Una toma de al menos 15 s con pulso válido queda guardada en el servidor y se sigue
+ * Paso 3: pulso. Una toma de al menos 20 s con pulso válido queda guardada en el servidor y se sigue
  * mostrando al quitar el dedo; mientras el dedo está puesto se ve la lectura en vivo y el avance.
  */
 export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
@@ -43,7 +43,7 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
   const connected = connectedType !== 'none';
   const live = valid.heartRate ? Math.round(vitals.heartRate) : null;
   const saved = take?.captured ?? null;
-  const minSeconds = take?.min_segundos ?? 15;
+  const minSeconds = take?.min_segundos ?? 20;
   const progress = live !== null ? Math.min(take?.en_curso?.segundos ?? 0, minSeconds) : 0;
   const measuring = live !== null && progress < minSeconds;
   const bpm = live ?? (saved ? Math.round(saved.heartRate) : null);

@@ -61,8 +61,8 @@ class ClinicalFlowTests(unittest.TestCase):
         packet.update(changes)
         return packet
 
-    def readings(self, seconds=16, end_ago=0, **changes):
-        """Una toma con el dedo puesto: una lectura cada 2 s durante `seconds` (la toma completa pide 15 s)."""
+    def readings(self, seconds=21, end_ago=0, **changes):
+        """Una toma con el dedo puesto: una lectura cada 2 s durante `seconds` (la toma completa pide 20 s)."""
         n = seconds // 2 + 1
         for _ in range(n):
             database.save_reading(self.packet(**changes))
@@ -115,13 +115,13 @@ class ClinicalFlowTests(unittest.TestCase):
         self.assertEqual(database.get_vitals_summary('person_a')['n_spo2'], 0)
 
     def test_completed_take_survives_removing_the_finger(self):
-        self.readings(seconds=20, end_ago=5)
+        self.readings(seconds=24, end_ago=5)
         database.save_reading(self.packet(finger=False, bpm=0, heartRateValid=False))
         v = clinical.recent_vitals('person_a')
         self.assertEqual(v['heartRate'], 75)
         cap = self.client.get('/api/vitals/captured', params={'session_id': 'person_a'}).json()
         self.assertEqual(cap['captured']['heartRate'], 75)
-        self.assertGreaterEqual(cap['captured']['segundos'], 15)
+        self.assertGreaterEqual(cap['captured']['segundos'], 20)
         self.assertIsNone(cap['en_curso'])
 
     def test_take_shorter_than_minimum_is_not_kept(self):
@@ -132,9 +132,9 @@ class ClinicalFlowTests(unittest.TestCase):
         self.assertEqual(cap['en_curso']['segundos'], 8)
 
     def test_newer_complete_take_replaces_and_short_one_does_not(self):
-        self.readings(seconds=16, end_ago=120, bpm=70)
+        self.readings(seconds=21, end_ago=120, bpm=70)
         database.save_reading(self.packet(finger=False, bpm=0, heartRateValid=False))
-        self.readings(seconds=16, end_ago=60, bpm=90)
+        self.readings(seconds=21, end_ago=60, bpm=90)
         database.save_reading(self.packet(finger=False, bpm=0, heartRateValid=False))
         self.readings(seconds=6, bpm=110)
         self.assertEqual(clinical.recent_vitals('person_a')['heartRate'], 90)

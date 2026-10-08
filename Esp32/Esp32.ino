@@ -1818,7 +1818,7 @@ void broadcast_telemetry() {
 // 11. EFECTOS VISUALES DEL LED RGB WS2812B (IO25) - PANEL DE CONTROL CLÍNICO INDIVIDUAL
 // ------------------------------------------------------------------------------
 // Toma de pulso completa: mismo minimo que el servidor (PULSE_CAPTURE_S en Backend/database.py).
-const unsigned long PULSE_CAPTURE_MS = 15000;
+const unsigned long PULSE_CAPTURE_MS = 20000;
 
 // Diagnostico: una linea por el monitor serie cada vez que la barra cambia de estado.
 static void led_log_state(const char* state) {
@@ -1852,7 +1852,7 @@ void update_led_effects() {
   //   sin conexion al servidor : MORADO de izquierda a derecha
   //   al conectarse            : AMARILLO de izquierda a derecha tres veces y 3 parpadeos
   //   dedo, buscando pulso     : CELESTE tenue
-  //   dedo, midiendo           : CELESTE que se llena en 15 s y se repite mientras falte algun dato;
+  //   dedo, midiendo           : CELESTE que se llena en 20 s y se repite mientras falte algun dato;
   //                              destello BLANCO en cada latido
   //   dedo, lectura lista      : VERDE con destello BLANCO en cada latido
   //   conectado y en reposo    : VERDE fijo (estar sin usar no es una falla)
@@ -1936,7 +1936,7 @@ void update_led_effects() {
 
   if (finger_detected) {
     unsigned long measured = pulse_valid_since ? now - pulse_valid_since : 0;
-    // Lista: 15 s de pulso valido y ya estan oxigeno, variabilidad y estres. Si falta algo, la barra se vuelve a llenar.
+    // Lista: 20 s de pulso valido y ya estan oxigeno, variabilidad y estres. Si falta algo, la barra se vuelve a llenar.
     bool all_data = bpm_valid && spo2_valid && hrv_valid && stress_score > 0;
     bool ready = measured >= PULSE_CAPTURE_MS && all_data;
     led_log_state(!pulse_valid_since ? "dedo_buscando" : ready ? "dedo_listo" : "dedo_midiendo");
