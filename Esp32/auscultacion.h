@@ -820,7 +820,7 @@ bool ausc_update_leds(int num_leds) {
     }
     for (int i = 0; i < num_leds; i++) strip.setPixelColor(i, ausc_result_color);
   }
-  strip.show();
+  led_show();
   return true;
 }
 

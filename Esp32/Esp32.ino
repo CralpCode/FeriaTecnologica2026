@@ -82,6 +82,20 @@ bool cardiac_locked = false;                  // True tras detectar intervalos d
 unsigned long cardiac_wait_start_ms = 0;      // Tiempo de espera para colocar el dedo
 
 Adafruit_NeoPixel strip(NUM_LEDS, WS2812_PIN, NEO_GRB + NEO_KHZ800);
+// La barra se reenvia solo cuando cambia el cuadro (o cada 2 s para corregirse sola): cada envio es una
+// oportunidad de que una interferencia en el cable de datos (IO25, 3,3 V) muestre un color equivocado.
+static void led_show() {
+  static uint32_t last_sum = 0;
+  static unsigned long last_ms = 0;
+  const uint8_t* px = strip.getPixels();
+  uint32_t sum = 2166136261u;
+  for (int i = 0; i < NUM_LEDS * 3; i++) sum = (sum ^ px[i]) * 16777619u;
+  unsigned long now = millis();
+  if (sum == last_sum && now - last_ms < 2000) return;
+  last_sum = sum;
+  last_ms = now;
+  strip.show();
+}
 #include "auscultacion.h"
 #ifndef SPIROSCAN_ENABLE_BLE
 #define SPIROSCAN_ENABLE_BLE 1
@@ -1605,6 +1619,22 @@ void handle_incoming_commands(String raw_cmd) {
     Serial.println(F("[LEDCOLOR] fin"));
     return;
   }
+  // Prueba BARRA: enciende la barra WS2812 en rojo, verde, azul y blanco (1,5 s cada uno) con mas brillo.
+  // Si la barra no prende con esto, el problema es de alimentacion, tierra o del cable de datos (IO25).
+  if (cmd == "BARRA") {
+    const char* names[] = {"ROJO", "VERDE", "AZUL", "BLANCO"};
+    const uint32_t colors[] = {strip.Color(255, 0, 0), strip.Color(0, 255, 0), strip.Color(0, 0, 255), strip.Color(255, 255, 255)};
+    strip.setBrightness(120);
+    for (int c = 0; c < 4; c++) {
+      Serial.printf("[BARRA] pin IO%d, %d LED: %s\r\n", WS2812_PIN, NUM_LEDS, names[c]);
+      for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, colors[c]);
+      strip.show();
+      delay(1500);
+    }
+    strip.setBrightness(30);
+    Serial.println(F("[BARRA] fin"));
+    return;
+  }
   if (cmd == "LEDTEST") {
     max_led_blind_test();
     return;
@@ -1831,7 +1861,7 @@ void update_led_effects() {
     led_log_state("enviando");
     bool on = (now / 250) % 2 == 0;
     for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, on ? blue : off);
-    strip.show();
+    led_show();
     return;
   }
 
@@ -1844,7 +1874,7 @@ void update_led_effects() {
     const unsigned long STEP_MS = 120;
     int step = (now / STEP_MS) % (NUM_LEDS + 3);   // se llena y queda lleno un momento antes de reiniciar
     for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, i < step ? red : off);
-    strip.show();
+    led_show();
     return;
   }
 
@@ -1860,7 +1890,7 @@ void update_led_effects() {
       bool on = ((t - 2 * sweep_ms) / BLINK_MS) % 2 == 0;
       for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, on ? green : off);
     }
-    strip.show();
+    led_show();
     return;
   }
 
@@ -1879,13 +1909,13 @@ void update_led_effects() {
       strip.setPixelColor(i, strip.Color(r + (uint8_t)((255 - r) * flash), g + (uint8_t)((255 - g) * flash),
                                          b + (uint8_t)((255 - b) * flash)));
     }
-    strip.show();
+    led_show();
     return;
   }
 
   led_log_state("reposo");
   for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, green);
-  strip.show();
+  led_show();
 }
 
 
