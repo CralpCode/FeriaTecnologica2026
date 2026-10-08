@@ -159,15 +159,20 @@ El backend incluye el modelo clínico entrenado con la base de datos internacion
 
 ---
 
-## 🌐 5. Despliegue en la Nube y Túneles Remotos
+## 🌐 5. Despliegue Permanente y Enlace Remoto (Mac Studio)
 
-Para conectar la app móvil desde cualquier lugar durante la feria:
-1. **Render / Cloud Hosting:** El archivo `Backend/render.yaml` permite el despliegue automático del backend conectando el repositorio en Render.
-2. **Túnel Seguro (Cloudflare Tunnel o ngrok):**
-   ```bash
-   # En la máquina host con el Backend encendido:
-   ngrok http 8000
-   # o bien:
-   cloudflared tunnel --url http://localhost:8000
-   ```
-   Copia la URL `https://...` generada en `EXPO_PUBLIC_API_URL` de la App Móvil.
+Para conectar la app móvil y el estetoscopio ESP32 desde cualquier lugar:
+1. **Acceso Público Fijo (Tailscale Funnel + GitHub Pages):**
+   * **URL Pública Fija:** **`https://willor16.github.io/spiroscan`** (redirecciona a la instancia activa).
+   * **Tailscale Funnel Directo:** `https://spiroscan.<tailnet>.ts.net` expone directamente el backend FastAPI sin límites de tiempo.
+2. **Daemon Vigilante en Mac Studio (`mantener_en_linea.sh`):**
+   * Mantiene el sistema activo con `caffeinate` y verifica la salud de los servicios cada 30 segundos.
+   * Ejecución:
+     ```bash
+     ./mantener_en_linea.sh
+     ```
+3. **Respaldo Horario Automatizado (`backup.py`):**
+   * Guarda hasta 48 copias rotativas de la base de datos SQLite y los audios en `~/Documents/spirosan/respaldos`.
+   * Endpoint de monitoreo: `GET /api/backup/status`.
+4. **Túnel Secundario de Contingencia:**
+   * Cloudflare Tunnel o ngrok como enlace de respaldo si Tailscale se desactiva.

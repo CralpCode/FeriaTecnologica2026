@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="es" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SpiroScan — Presentación de la Solución (TRL 4)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdfa',
+              100: '#ccfbf1',
+              500: '#14b8a6',
+              600: '#0d9488',
+              700: '#0f766e',
+              900: '#134e4a',
+            },
+            clinical: {
+              blue: '#0284c7',
+              dark: '#0a0f1d',
+              card: '#111827',
+              border: '#1f2937',
+              red: '#ef4444',
+              amber: '#f59e0b',
+              emerald: '#10b981'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    /* Estilos personalizados y utilidades de presentación */
+    .glass-card, .card-interactive {
+      background: rgba(17, 24, 39, 0.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .glass-card:hover, .card-interactive:hover {
+      transform: translateY(-4px);
+      border-color: rgba(20, 184, 166, 0.6);
+      background: rgba(18, 30, 52, 0.92);
+      box-shadow: 0 16px 36px -8px rgba(20, 184, 166, 0.25), 0 0 20px -2px rgba(20, 184, 166, 0.15);
+    }
+    .glow-teal {
+      box-shadow: 0 0 35px -8px rgba(20, 184, 166, 0.25);
+    }
+    .glow-lamp-red {
+      box-shadow: 0 0 20px 4px rgba(239, 68, 68, 0.7);
+    }
+    .glow-lamp-amber {
+      box-shadow: 0 0 20px 4px rgba(245, 158, 11, 0.7);
+    }
+    .glow-lamp-green {
+      box-shadow: 0 0 20px 4px rgba(16, 185, 129, 0.7);
+    }
+    /* Scrollbar sutil para contenedores horizontales */
+    .custom-scrollbar::-webkit-scrollbar {
+      height: 7px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.7);
+      border-radius: 9999px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(20, 184, 166, 0.5);
+      border-radius: 9999px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(20, 184, 166, 0.85);
+    }
+    /* Ocultar barra de scroll pero mantener funcionalidad */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    /* Animación de pulso para simulación en vivo */
+    @keyframes ecgPulse {
+      0% { opacity: 0.3; }
+      50% { opacity: 1; }
+      100% { opacity: 0.3; }
+    }
+    .animate-ecg {
+      animation: ecgPulse 2s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-[#090d16] text-slate-100 min-h-screen selection:bg-teal-500 selection:text-white relative font-sans antialiased">
+
+  <!-- ========================================================================= -->
+  <!-- BARRA DE NAVEGACIÓN SUPERIOR (STICKY)                                     -->
+  <!-- ========================================================================= -->
+  <nav class="sticky top-0 z-50 glass-card border-b border-slate-800/80 px-4 lg:px-8 py-3.5 transition-all">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      
+      <!-- Logotipo & Kicker -->
+      <a href="#hero" class="flex items-center gap-3 group">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-teal-500 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-teal-500/20 group-hover:scale-105 transition-transform">
+          <i class="fa-solid fa-stethoscope text-lg"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="font-bold text-lg tracking-tight text-white group-hover:text-teal-300 transition-colors">SpiroScan</span>
+            <span class="text-[10px] font-semibold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-teal-500/10 text-teal-300 border border-teal-500/30" title="Prototipo físico integrado con pruebas piloto en voluntarios">Prototipo Integrado</span>
+          </div>
+          <p class="text-xs text-slate-400 font-medium">Asistencia al Triaje Cardiorrespiratorio</p>
+        </div>
+      </a>
+
+      <!-- Menú de Enlaces Rápidos -->
+      <div class="hidden md:flex items-center gap-1 text-xs font-medium text-slate-300">
+        <a href="#hero" class="px-2.5 py-1.5 rounded-lg hover:text-white hover:bg-slate-800/60 transition-colors">Inicio</a>
+        <a href="#problema" class="px-2.5 py-1.5 rounded-lg hover:text-white hover:bg-slate-800/60 transition-colors">1. El Problema</a>
+        <a href="#idea" class="px-2.5 py-1.5 rounded-lg hover:text-white hover:bg-slate-800/60 transition-colors">2. La Idea</a>
+        <a href="#flujo" class="px-2.5 py-1.5 rounded-lg hover:text-white hover:bg-slate-800/60 transition-colors">3. ¿Cómo funciona?</a>
+      </div>
+
+      <!-- Acciones de Cabecera: Enlace para Probar la App -->
+      <div class="flex items-center gap-3">
+        <a href="/" target="_blank" class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white font-bold text-xs shadow-md shadow-teal-500/25 transition-all hover:scale-105 active:scale-95 group" title="Abrir la aplicación clínica de SpiroScan">
+          <i class="fa-solid fa-laptop-medical text-xs group-hover:animate-bounce"></i>
+          <span>Probar la App</span>
+        </a>
+      </div>
+
+    </div>
+  </nav>
+
+  <!-- ========================================================================= -->
+  <!-- HERO: PORTADA DE PRESENTACIÓN EJECUTIVA                                   -->
+  <!-- ========================================================================= -->
+  <section id="hero" class="relative pt-16 pb-16 lg:pt-24 lg:pb-24 overflow-hidden border-b border-slate-800/60">
+    <!-- Fondos de gradiente sutil -->
+    <div class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[650px] h-[350px] bg-teal-500/10 blur-[130px] rounded-full pointer-events-none"></div>
+    <div class="absolute top-1/3 right-10 w-[300px] h-[300px] bg-cyan-500/10 blur-[100px] rounded-full pointer-events-none"></div>
+
+    <div class="max-w-7xl mx-auto px-4 lg:px-8 relative z-10">
+      
+      <!-- Título & Lema Central -->
+      <div class="text-center max-w-4xl mx-auto space-y-4">
+        <h1 class="text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-tight">
+          Un segundo par de oídos <br class="hidden sm:inline" />
+          <span class="bg-gradient-to-r from-teal-400 via-cyan-400 to-sky-400 bg-clip-text text-transparent">para el médico general</span>
+        </h1>
+        <p class="text-base sm:text-xl text-slate-300 font-normal leading-relaxed max-w-3xl mx-auto">
+          Prototipo biomédico integrado para el <strong class="text-white font-semibold">cribado preliminar y triaje asistido</strong> de señales cardiorrespiratorias, combinando acústica digital desacoplada, oximetría reflectiva y modelos de aprendizaje automático.
+        </p>
+      </div>
+
+      <!-- Botones de Acción Rápida -->
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <a href="#problema" class="px-6 py-3.5 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white font-semibold text-sm shadow-lg shadow-teal-500/25 flex items-center gap-2 transition-all hover:scale-105 active:scale-95">
+          <i class="fa-solid fa-arrow-down"></i>
+          <span>Comenzar la Historia</span>
+        </a>
+        <a href="/" target="_blank" class="px-6 py-3.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/90 text-teal-300 hover:text-white font-semibold text-sm border border-teal-500/40 flex items-center gap-2 shadow-md transition-all hover:scale-105 active:scale-95" title="Abrir la aplicación clínica de SpiroScan">
+          <i class="fa-solid fa-laptop-medical text-teal-400"></i>
+          <span>Probar la App</span>
+        </a>
+        <a href="#flujo" class="px-6 py-3.5 rounded-xl bg-slate-900/80 hover:bg-slate-800/80 text-slate-300 hover:text-white font-semibold text-sm border border-slate-800 flex items-center gap-2 transition-all hover:scale-105 active:scale-95">
+          <i class="fa-solid fa-diagram-project text-cyan-400"></i>
+          <span>Ver Flujo Técnico</span>
+        </a>
+      </div>
+
+      <!-- Estado de Desarrollo y Ensayos Reales (Ubicado en la parte inferior del Hero) -->
+      <div class="mt-10 pt-6 border-t border-slate-800/60 max-w-3xl mx-auto">
+        <div class="flex flex-wrap items-center justify-center gap-2.5">
+          <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-slate-900/90 border border-slate-800 text-slate-300 shadow-sm">
+            <i class="fa-solid fa-microchip text-teal-400"></i>
+            <span>Prototipo Físico Integrado</span>
+          </span>
+          <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 shadow-sm">
+            <i class="fa-solid fa-users text-emerald-400"></i>
+            <span>Pruebas Piloto en Voluntarios (Cohorte N=18)</span>
+          </span>
+          <button type="button" onclick="toggleAvisoRigor()" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all cursor-pointer shadow-sm group hover:scale-105 active:scale-95" title="Ver alcance clínico y regulatorio">
+            <i class="fa-solid fa-circle-info text-amber-400 text-xs group-hover:scale-110 transition-transform"></i>
+            <span>Alcance Clínico (TRL 4)</span>
+            <span id="avisoRigorChevron" class="text-[10px] text-amber-400/80 font-mono">▾</span>
+          </button>
+        </div>
+
+        <!-- Desplegable explicativo del estado real (al tocar el botón) -->
+        <div id="avisoRigorContent" class="hidden mt-4 p-4 rounded-2xl bg-slate-900/95 border border-slate-800 text-slate-300 text-xs text-left shadow-2xl backdrop-blur-md transition-all">
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex items-start gap-2.5">
+              <i class="fa-solid fa-shield-halved text-teal-400 text-base mt-0.5 shrink-0"></i>
+              <div class="space-y-1.5">
+                <strong class="text-white block text-xs">Estado de Desarrollo y Rigor Metodológico:</strong>
+                <p class="text-slate-300 leading-relaxed text-xs">
+                  El sistema cuenta con <strong>hardware físico ensamblado y validado en banco de pruebas</strong>, complementado con un estudio piloto observacional en 18 estudiantes de medicina.
+                </p>
+                <p class="text-slate-400 text-[11px] leading-relaxed">
+                  * <strong>Alcance regulatorio (TRL 4):</strong> Constituye una herramienta de asistencia preliminar al tamizaje. No emite diagnósticos concluyentes autónomos ni sustituye el criterio facultativo del médico. La validación clínica multicéntrica representa la siguiente fase de traslación.
+                </p>
+              </div>
+            </div>
+            <button type="button" onclick="toggleAvisoRigor()" class="text-slate-400 hover:text-white text-xs p-1 transition-colors" title="Cerrar">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ========================================================================= -->
+  <!-- BLOQUE 1: EL PROBLEMA CLÍNICO Y EL CUELLO DE BOTELLA                     -->
+  <!-- ========================================================================= -->
+  <section id="problema" class="py-16 lg:py-20 border-b border-slate-800/60 relative">
+    <div class="max-w-7xl mx-auto px-4 lg:px-8">
+      
+      <div class="max-w-3xl mb-10 space-y-3">
+        <span class="text-xs font-semibold uppercase tracking-wider text-teal-400 bg-teal-500/10 px-3 py-1 rounded-full border border-teal-500/20">
+          Paso 01 · El Problema Clínico
+        </span>
+        <h2 class="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
+          ¿Por qué se pierden signos tempranos en la consulta primaria?
+        </h2>
+        <p class="text-slate-300 text-sm sm:text-base leading-relaxed">
+          La auscultación tradicional genera señales corporales de baja amplitud que se interpretan de forma subjetiva y se contaminan fácilmente en entornos ruidosos.
+        </p>
+      </div>
+
+      <!-- Visual del Cuello de Botella Clínico en Atención Primaria -->
+      <div class="glass-card rounded-3xl p-6 sm:p-8 border border-slate-800 mb-10 space-y-6">
+        <div class="flex flex-wrap items-center justify-between pb-3 border-b border-slate-800 gap-3">
+          <div class="flex items-center gap-3">
+            <span class="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-300">
+              Flujo Real en Consulta Saturada (Red de 48–49 Hospitales MSPAS)
+            </span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-rose-400 font-semibold flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/20">
+              <i class="fa-solid fa-triangle-exclamation"></i> Cuello de botella crítico
+            </span>
+            <span class="text-xs text-slate-400 flex items-center gap-1.5 bg-slate-800/80 px-2.5 py-1 rounded-full xl:hidden">
+              <i class="fa-solid fa-arrow-right-long text-teal-400"></i> Desliza horizontalmente &rarr;
+            </span>
+          </div>
+        </div>
+
+        <!-- Contenedor con Scroll Horizontal y tarjetas ampliadas -->
+        <div class="flex xl:grid xl:grid-cols-4 gap-5 overflow-x-auto custom-scrollbar pb-3 pt-1">
+          
+          <!-- Etapa 1 -->
+          <div class="card-interactive cursor-pointer min-w-[280px] sm:min-w-[320px] xl:min-w-0 flex-shrink-0 xl:flex-shrink p-6 rounded-2xl space-y-4 group">
+            <div class="flex justify-between items-center text-slate-400 group-hover:text-teal-300 transition-colors">
+              <span class="font-mono text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-800 text-teal-300 border border-teal-500/20">
+                Etapa 01
+              </span>
+              <span class="text-xs font-mono text-slate-400 bg-slate-900/80 px-2.5 py-1 rounded border border-slate-800">
+                <i class="fa-regular fa-clock mr-1 text-teal-400"></i>10–20 min
+              </span>
+            </div>
+            <strong class="text-white text-base sm:text-lg block group-hover:text-teal-300 transition-colors">
+              1. Sala de Espera
+            </strong>
+            <p class="text-slate-300 text-xs sm:text-sm leading-relaxed">
+              Congestión continua de pacientes con afecciones respiratorias o cardiovasculares sin triaje precoz ni estratificación objetiva de gravedad.
+            </p>
+            <div class="pt-3 border-t border-slate-800/80 text-xs text-slate-400 flex items-center gap-2">
+              <i class="fa-solid fa-hourglass-half text-teal-400"></i>
+              <span>Tiempo pasivo sin registro basal de signos.</span>
+            </div>
+          </div>
+
+          <!-- Etapa 2 -->
+          <div class="card-interactive cursor-pointer min-w-[280px] sm:min-w-[320px] xl:min-w-0 flex-shrink-0 xl:flex-shrink p-6 rounded-2xl space-y-4 group">
+            <div class="flex justify-between items-center text-slate-400 group-hover:text-cyan-300 transition-colors">
+              <span class="font-mono text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-800 text-cyan-300 border border-cyan-500/20">
+                Etapa 02
+              </span>
+              <span class="text-xs font-mono text-slate-400 bg-slate-900/80 px-2.5 py-1 rounded border border-slate-800">
+                <i class="fa-regular fa-clock mr-1 text-cyan-400"></i>20–30 min
+              </span>
+            </div>
+            <strong class="text-white text-base sm:text-lg block group-hover:text-cyan-300 transition-colors">
+              2. Consulta Rápida
+            </strong>
+            <p class="text-slate-300 text-xs sm:text-sm leading-relaxed">
+              Auscultación con estetoscopio analógico, dependiente de la agudeza del examinador y altamente vulnerable al ruido ambiental en pasillos de hospital.
+            </p>
+            <div class="pt-3 border-t border-slate-800/80 text-xs text-slate-400 flex items-center gap-2">
+              <i class="fa-solid fa-ear-listen text-cyan-400"></i>
+              <span>Subjetividad clínica y fatiga auditiva.</span>
+            </div>
+          </div>
+
+          <!-- Etapa 3 (Cuello de Botella) -->
+          <div class="card-interactive cursor-pointer min-w-[280px] sm:min-w-[320px] xl:min-w-0 flex-shrink-0 xl:flex-shrink p-6 rounded-2xl space-y-4 group border-rose-500/50 bg-rose-950/25 relative overflow-hidden">
+            <div class="flex justify-between items-center text-rose-300 font-semibold">
+              <span class="font-mono text-xs font-semibold px-2.5 py-1 rounded-md bg-rose-900/60 text-rose-300 border border-rose-500/30">
+                Etapa 03 · Cuello de Botella
+              </span>
+              <span class="text-xs font-mono text-rose-300 bg-rose-900/80 px-2.5 py-1 rounded border border-rose-500/30">
+                <i class="fa-solid fa-triangle-exclamation mr-1 text-rose-400"></i>+1 a 2 horas
+              </span>
+            </div>
+            <strong class="text-rose-400 text-base sm:text-lg block group-hover:text-rose-300 transition-colors">
+              3. Duda Auscultatoria
+            </strong>
+            <p class="text-rose-200/90 text-xs sm:text-sm leading-relaxed">
+              Si el médico no está seguro del soplo o estertor acústico, solicita rayos X o ECG complementarios no siempre inmediatos en centros periféricos.
+            </p>
+            <div class="pt-3 border-t border-rose-500/30 text-xs text-rose-300 font-medium flex items-center gap-2">
+              <i class="fa-solid fa-circle-exclamation text-rose-400"></i>
+              <span>Incertidumbre retrasa derivación y satura rayos X.</span>
+            </div>
+          </div>
+
+          <!-- Etapa 4 -->
+          <div class="card-interactive cursor-pointer min-w-[280px] sm:min-w-[320px] xl:min-w-0 flex-shrink-0 xl:flex-shrink p-6 rounded-2xl space-y-4 group">
+            <div class="flex justify-between items-center text-slate-400 group-hover:text-slate-200 transition-colors">
+              <span class="font-mono text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 border border-slate-700/60">
+                Etapa 04
+              </span>
+              <span class="text-xs font-mono text-slate-400 bg-slate-900/80 px-2.5 py-1 rounded border border-slate-800">
+                <i class="fa-regular fa-clock mr-1 text-amber-400"></i>Días / Semanas
+              </span>
+            </div>
+            <strong class="text-white text-base sm:text-lg block group-hover:text-slate-200 transition-colors">
+              4. Derivación Tardía
+            </strong>
+            <p class="text-slate-300 text-xs sm:text-sm leading-relaxed">
+              Especialistas concentrados en centros urbanos; listas de espera saturadas por derivaciones tardías o sin priorización objetiva de triaje.
+            </p>
+            <div class="pt-3 border-t border-slate-800/80 text-xs text-slate-400 flex items-center gap-2">
+              <i class="fa-solid fa-hospital-user text-amber-400"></i>
+              <span>Riesgo de complicación evitable en periferia.</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- 3 Factores Clave (Mínimo Texto, Máximo Impacto) -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        <div class="glass-card rounded-2xl p-5 border border-slate-800 space-y-2.5">
+          <div class="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center text-base">
+            <i class="fa-solid fa-ear-deaf"></i>
+          </div>
+          <h3 class="text-sm font-bold text-white">Subjetividad & Fatiga Acústica</h3>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            La apreciación de soplos o sibilancias cambia entre examinadores y no deja registro objetivo para segundas opiniones.
+          </p>
+        </div>
+
+        <div class="glass-card rounded-2xl p-5 border border-slate-800 space-y-2.5">
+          <div class="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center text-base">
+            <i class="fa-solid fa-volume-xmark"></i>
+          </div>
+          <h3 class="text-sm font-bold text-white">Ruido Ambiental Clínico</h3>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            El murmullo de salas de espera, alarmas y roces sobre la piel degradan la relación señal-ruido del estetoscopio convencional.
+          </p>
+        </div>
+
+        <div class="glass-card rounded-2xl p-5 border border-slate-800 space-y-2.5">
+          <div class="w-9 h-9 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center text-base">
+            <i class="fa-solid fa-hospital-user"></i>
+          </div>
+          <h3 class="text-sm font-bold text-white">Sobrecarga en Atención Primaria</h3>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            Sin una herramienta rápida de cribado, los médicos de turno enfrentan la decisión de derivar a ciegas o posponer la atención.
+          </p>
+        </div>
+
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ========================================================================= -->
+  <!-- BLOQUE 2: LA IDEA (EL PITCH EN 20 SEGUNDOS)                               -->
+  <!-- ========================================================================= -->
+  <section id="idea" class="py-16 lg:py-20 border-b border-slate-800/60 relative bg-gradient-to-b from-[#090d16] via-slate-950 to-[#090d16]">
+    <div class="max-w-7xl mx-auto px-4 lg:px-8">
+      
+      <div class="max-w-3xl mb-12 space-y-3">
+        <span class="text-xs font-semibold uppercase tracking-wider text-teal-400 bg-teal-500/10 px-3 py-1 rounded-full border border-teal-500/20">
+          Paso 02 · La Propuesta
+        </span>
+        <h2 class="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
+          SpiroScan: Un segundo par de oídos para el médico general
+        </h2>
+        <p class="text-sm sm:text-base text-teal-300 font-medium leading-relaxed">
+          Sistema experimental de adquisición y análisis acústico de señales cardiorrespiratorias mediante aprendizaje automático para apoyo al triaje (TRL 4).
+        </p>
+      </div>
+
+      <!-- La Fórmula de 4 Pasos en 20 Segundos -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-10">
+        
+        <div class="glass-card rounded-2xl p-6 border border-slate-800 space-y-3 relative group hover:border-teal-500/40 transition-all">
+          <div class="w-10 h-10 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center text-lg font-bold font-mono">
+            1
+          </div>
+          <h3 class="text-base font-bold text-white">Capturar</h3>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            Señal de audio acústica directa desde el tórax mediante transductor digital MEMS I2S, evitando pérdidas analógicas.
+          </p>
+        </div>
+
+        <div class="glass-card rounded-2xl p-6 border border-slate-800 space-y-3 relative group hover:border-cyan-500/40 transition-all">
+          <div class="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center text-lg font-bold font-mono">
+            2
+          </div>
+          <h3 class="text-base font-bold text-white">Procesar</h3>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            Atenuación pasiva de ruido exterior con acoplamiento acústico cerrado y filtrado de banda digital en el ESP32.
+          </p>
+        </div>
+
+        <div class="glass-card rounded-2xl p-6 border border-slate-800 space-y-3 relative group hover:border-indigo-500/40 transition-all">
+          <div class="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center text-lg font-bold font-mono">
+            3
+          </div>
+          <h3 class="text-base font-bold text-white">Analizar (IA)</h3>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            Extracción de 61 características acústicas y clasificación algorítmica interpretable en 0.17 segundos por ciclo.
+          </p>
+        </div>
+
+        <div class="glass-card rounded-2xl p-6 border border-slate-800 space-y-3 relative group hover:border-emerald-500/40 transition-all">
+          <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center text-lg font-bold font-mono">
+            4
+          </div>
+          <h3 class="text-base font-bold text-white">Apoyar el Triaje</h3>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            Semáforo visual de prioridad clínica (Verde / Amarillo / Rojo) para asistir al médico en la decisión de referir a tiempo.
+          </p>
+        </div>
+
+      </div>
+
+      <!-- Declaración de Propósito Ético -->
+      <div class="p-4 rounded-2xl bg-teal-950/20 border border-teal-500/30 flex items-center gap-3.5 text-xs sm:text-sm text-teal-200">
+        <i class="fa-solid fa-circle-check text-teal-400 text-base shrink-0"></i>
+        <span>
+          <strong>Principio Fundacional:</strong> No buscamos sustituir la auscultación médica ni emitir diagnósticos autónomos. Buscamos objetivar la señal y brindarle al médico información para decidir a quién referir primero.
+        </span>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ========================================================================= -->
+  <!-- BLOQUE 3: ¿CÓMO FUNCIONA? (EL FLUJO TÉCNICO Y ARQUITECTURA)                -->
+  <!-- ========================================================================= -->
+  <section id="flujo" class="py-16 lg:py-20 border-b border-slate-800/60 relative">
+    <div class="max-w-7xl mx-auto px-4 lg:px-8">
+      
+      <div class="max-w-3xl mb-12 space-y-3">
+        <span class="text-xs font-semibold uppercase tracking-wider text-teal-400 bg-teal-500/10 px-3 py-1 rounded-full border border-teal-500/20">
+          Paso 03 · Arquitectura y Flujo
+        </span>
+        <h2 class="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
+          De la fisiología del paciente a la pantalla clínica
+        </h2>
+        <p class="text-slate-300 text-sm sm:text-base leading-relaxed">
+          El hardware actúa como el medio físico de captura limpia, transmitiendo datos hacia el pipeline algorítmico sin fricción en consulta.
+        </p>
+      </div>
+
+      <!-- Diagrama de Flujo Paso a Paso (6 Etapas Conectadas) -->
+      <div class="glass-card rounded-3xl p-6 lg:p-8 border border-slate-800 mb-8 shadow-xl">
+        
+        <!-- Cabecera de la cuadrícula interactiva -->
+        <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-800 text-xs">
+          <span class="text-slate-400 font-semibold flex items-center gap-2">
+            <i class="fa-solid fa-network-wired text-teal-400"></i>
+            <span>Pipeline de Señal y Procesamiento Extremo a Extremo</span>
+          </span>
+          <span class="text-[11px] text-teal-300 font-mono hidden sm:inline flex items-center gap-1.5">
+            <i class="fa-solid fa-arrow-pointer animate-bounce"></i> Pasa el cursor por cada etapa para ver especificaciones
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 text-xs">
+          
+          <!-- Etapa 1 -->
+          <div onmouseenter="inspeccionarEtapa(1)" onclick="inspeccionarEtapa(1)" class="card-interactive cursor-pointer p-4 rounded-xl space-y-2 text-center group transition-all">
+            <div class="w-8 h-8 rounded-lg bg-teal-500/20 text-teal-400 mx-auto flex items-center justify-center group-hover:scale-110 transition-transform">
+              <i class="fa-solid fa-user"></i>
+            </div>
+            <strong class="text-white block text-xs group-hover:text-teal-300 transition-colors">1. Paciente</strong>
+            <span class="text-[11px] text-slate-400 block font-medium">Ruidos de tórax</span>
+            <div class="pt-2 border-t border-slate-800/80 text-[10px] space-y-0.5 text-left leading-tight max-h-0 opacity-0 group-hover:max-h-24 group-hover:opacity-100 transition-all duration-300 overflow-hidden">
+              <span class="font-mono text-teal-400 font-semibold block">20–1200 Hz</span>
+              <span class="text-slate-400 block">S1/S2, soplos y murmullo vesicular.</span>
+            </div>
+          </div>
+
+          <!-- Etapa 2 -->
+          <div onmouseenter="inspeccionarEtapa(2)" onclick="inspeccionarEtapa(2)" class="card-interactive cursor-pointer p-4 rounded-xl space-y-2 text-center group transition-all">
+            <div class="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-400 mx-auto flex items-center justify-center group-hover:scale-110 transition-transform">
+              <i class="fa-solid fa-microphone"></i>
+            </div>
+            <strong class="text-white block text-xs group-hover:text-cyan-300 transition-colors">2. Captura MEMS</strong>
+            <span class="text-[11px] text-slate-400 block font-medium">INMP441 · I2S</span>
+            <div class="pt-2 border-t border-slate-800/80 text-[10px] space-y-0.5 text-left leading-tight max-h-0 opacity-0 group-hover:max-h-24 group-hover:opacity-100 transition-all duration-300 overflow-hidden">
+              <span class="font-mono text-cyan-400 font-semibold block">16 kHz / 24 bits</span>
+              <span class="text-slate-400 block">Digital nativo · SNR 61 dBA.</span>
+            </div>
+          </div>
+
+          <!-- Etapa 3 -->
+          <div onmouseenter="inspeccionarEtapa(3)" onclick="inspeccionarEtapa(3)" class="card-interactive cursor-pointer p-4 rounded-xl space-y-2 text-center group transition-all">
+            <div class="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 mx-auto flex items-center justify-center group-hover:scale-110 transition-transform">
+              <i class="fa-solid fa-microchip"></i>
+            </div>
+            <strong class="text-white block text-xs group-hover:text-indigo-300 transition-colors">3. ESP32</strong>
+            <span class="text-[11px] text-slate-400 block font-medium">Búfer & Filtrado</span>
+            <div class="pt-2 border-t border-slate-800/80 text-[10px] space-y-0.5 text-left leading-tight max-h-0 opacity-0 group-hover:max-h-24 group-hover:opacity-100 transition-all duration-300 overflow-hidden">
+              <span class="font-mono text-indigo-400 font-semibold block">DMA sin Jitter</span>
+              <span class="text-slate-400 block">Doble búfer circular y Wi-Fi &lt;20ms.</span>
+            </div>
+          </div>
+
+          <!-- Etapa 4 -->
+          <div onmouseenter="inspeccionarEtapa(4)" onclick="inspeccionarEtapa(4)" class="card-interactive cursor-pointer p-4 rounded-xl space-y-2 text-center group transition-all">
+            <div class="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 mx-auto flex items-center justify-center group-hover:scale-110 transition-transform">
+              <i class="fa-solid fa-wave-square"></i>
+            </div>
+            <strong class="text-white block text-xs group-hover:text-purple-300 transition-colors">4. 61 Features</strong>
+            <span class="text-[11px] text-slate-400 block font-medium">MFCCs & Espectro</span>
+            <div class="pt-2 border-t border-slate-800/80 text-[10px] space-y-0.5 text-left leading-tight max-h-0 opacity-0 group-hover:max-h-24 group-hover:opacity-100 transition-all duration-300 overflow-hidden">
+              <span class="font-mono text-purple-400 font-semibold block">39 MFCCs + ZCR</span>
+              <span class="text-slate-400 block">Energía RMS y centroide espectral.</span>
+            </div>
+          </div>
+
+          <!-- Etapa 5 -->
+          <div onmouseenter="inspeccionarEtapa(5)" onclick="inspeccionarEtapa(5)" class="card-interactive cursor-pointer p-4 rounded-xl space-y-2 text-center group transition-all">
+            <div class="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 mx-auto flex items-center justify-center group-hover:scale-110 transition-transform">
+              <i class="fa-solid fa-brain"></i>
+            </div>
+            <strong class="text-white block text-xs group-hover:text-rose-300 transition-colors">5. Modelo ML</strong>
+            <span class="text-[11px] text-slate-400 block font-medium">Regresión L2</span>
+            <div class="pt-2 border-t border-slate-800/80 text-[10px] space-y-0.5 text-left leading-tight max-h-0 opacity-0 group-hover:max-h-24 group-hover:opacity-100 transition-all duration-300 overflow-hidden">
+              <span class="font-mono text-rose-400 font-semibold block">0.17 s Inferencia</span>
+              <span class="text-slate-400 block">Patient-wise GroupKFold ICBHI.</span>
+            </div>
+          </div>
+
+          <!-- Etapa 6 -->
+          <div onmouseenter="inspeccionarEtapa(6)" onclick="inspeccionarEtapa(6)" class="card-interactive cursor-pointer p-4 rounded-xl space-y-2 text-center group border-emerald-500/40 bg-emerald-950/30 transition-all">
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 mx-auto flex items-center justify-center group-hover:scale-110 transition-transform">
+              <i class="fa-solid fa-traffic-light"></i>
+            </div>
+            <strong class="text-emerald-300 block text-xs">6. Triaje</strong>
+            <span class="text-[11px] text-emerald-400 block font-semibold">Semáforo Clínico</span>
+            <div class="pt-2 border-t border-emerald-500/30 text-[10px] space-y-0.5 text-left leading-tight max-h-0 opacity-0 group-hover:max-h-24 group-hover:opacity-100 transition-all duration-300 overflow-hidden">
+              <span class="font-mono text-emerald-300 font-semibold block">SpO₂ + FC + Audio</span>
+              <span class="text-emerald-400/90 block">Prioridad Verde / Amarillo / Rojo.</span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Inspector Dinámico de Señal y Arquitectura (Se actualiza al pasar el cursor) -->
+        <div id="inspectorFlujoBox" class="mt-5 p-4 lg:p-5 rounded-2xl bg-slate-900/90 border border-slate-800 transition-all flex items-start gap-4">
+          <div id="inspectorIconContainer" class="w-11 h-11 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center text-lg shrink-0 transition-transform">
+            <i id="inspectorIcon" class="fa-solid fa-hand-pointer text-base animate-pulse"></i>
+          </div>
+          <div class="space-y-1.5 flex-1 text-xs">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h4 id="inspectorTitle" class="font-bold text-teal-300 uppercase tracking-wider text-xs">
+                Inspección Técnica de la Señal
+              </h4>
+              <span id="inspectorBadge" class="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                Pasa el cursor sobre una etapa
+              </span>
+            </div>
+            <p id="inspectorDesc" class="text-slate-300 leading-relaxed text-xs">
+              Pasa el cursor sobre cualquiera de las 6 etapas del diagrama superior para inspeccionar parámetros de frecuencia, conversión digital I2S, búferes DMA, vector de descriptores y latencia del clasificador.
+            </p>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- NIVEL 2: PANEL COLAPSABLE DE INGENIERÍA MECÁNICA 3D (BAJO DEMANDA) -->
+      <div class="mb-10">
+        <button type="button" onclick="toggleHardwarePanel()" id="btnToggleHardware" class="w-full p-4 rounded-2xl glass-card border border-slate-800 hover:border-teal-500/40 flex items-center justify-between text-xs font-semibold text-slate-300 hover:text-white transition-all">
+          <div class="flex items-center gap-2.5">
+            <i class="fa-solid fa-cube text-teal-400 text-sm"></i>
+            <span>Nivel 2 (Ingeniería Física): Ver fotos del modelo 3D impreso, ensamble y materiales acústicos</span>
+          </div>
+          <span id="hardwareToggleIcon" class="text-teal-400 font-mono text-sm">[ + Desplegar ]</span>
+        </button>
+
+        <!-- Contenido oculto por defecto que se expande bajo demanda -->
+        <div id="hardwarePanelContent" class="hidden mt-4 glass-card rounded-3xl p-6 lg:p-8 border border-slate-800/80 space-y-8 animate-fadeIn">
+          
+          <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
+            <div>
+              <h4 class="text-base font-bold text-white flex items-center gap-2">
+                <i class="fa-solid fa-layer-group text-teal-400"></i>
+                <span>Galería de Ingeniería: Carcasa y Acoplamiento 3D</span>
+              </h4>
+              <p class="text-xs text-slate-400">Inspección de las piezas reales impresas en FDM y principios biomecánicos</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="cambiarSlideHardware(-1)" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center">
+                <i class="fa-solid fa-chevron-left text-xs"></i>
+              </button>
+              <span id="hwSlideIndicator" class="text-xs font-mono text-teal-400 px-2 font-semibold">1 / 4</span>
+              <button onclick="cambiarSlideHardware(1)" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center">
+                <i class="fa-solid fa-chevron-right text-xs"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Diapositivas internas del Carrusel de Hardware -->
+          <div class="relative overflow-hidden min-h-[340px]">
+            
+            <div class="hw-slide transition-opacity duration-300 flex flex-col md:flex-row items-center gap-6" data-index="0">
+              <div class="w-full md:w-1/2 flex items-center justify-center bg-black/60 rounded-2xl p-4 border border-slate-800">
+                <img src="figuras_carcasa/chasis_modulo_central.jpg" alt="Chasis Impreso del Módulo Central" class="max-h-64 object-contain rounded-lg">
+              </div>
+              <div class="w-full md:w-1/2 space-y-3 text-xs">
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-teal-500/10 text-teal-400 border border-teal-500/20">Pieza 1</span>
+                <h5 class="text-lg font-bold text-white">Chasis del Módulo Central</h5>
+                <p class="text-slate-300 leading-relaxed">
+                  Aloja la placa de control <strong>NodeMCU-32S (ESP32)</strong>, la batería Li-Ion 3.7V, el módulo cargador <strong>TP4056 con circuito de protección</strong> y el switch mecánico On/Off.
+                </p>
+                <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 text-slate-400">
+                  Material: PLA al 100% de relleno con torres de fijación roscada M3.
+                </div>
+              </div>
+            </div>
+
+            <div class="hw-slide hidden transition-opacity duration-300 flex flex-col md:flex-row items-center gap-6" data-index="1">
+              <div class="w-full md:w-1/2 flex items-center justify-center bg-black/60 rounded-2xl p-4 border border-slate-800">
+                <img src="figuras_carcasa/cono_acustico_camara_interna.jpg" alt="Cono Acústico de la Campana" class="max-h-64 object-contain rounded-lg">
+              </div>
+              <div class="w-full md:w-1/2 space-y-3 text-xs">
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">Pieza 2</span>
+                <h5 class="text-lg font-bold text-white">Cámara Cónica y Alojamiento Coaxial</h5>
+                <p class="text-slate-300 leading-relaxed">
+                  Geometría hiperbólica que concentra la presión acústica hacia el puerto frontal del micrófono digital <strong>INMP441</strong>. Incluye rosca calibrada para sujetar la membrana sin desgarro.
+                </p>
+              </div>
+            </div>
+
+            <div class="hw-slide hidden transition-opacity duration-300 flex flex-col md:flex-row items-center gap-6" data-index="2">
+              <div class="w-full md:w-1/2 flex items-center justify-center bg-black/60 rounded-2xl p-4 border border-slate-800">
+                <img src="figuras_carcasa/campana_acustica_perfil.jpg" alt="Perfil de la Campana" class="max-h-64 object-contain rounded-lg">
+              </div>
+              <div class="w-full md:w-1/2 space-y-3 text-xs">
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">Membrana</span>
+                <h5 class="text-lg font-bold text-white">Diafragma de Radiografía (PET + AgBr)</h5>
+                <p class="text-slate-300 leading-relaxed">
+                  Lámina clínica reutilizada con emulsión de bromuro de plata. Su rigidez a la flexión permite un <strong>movimiento en pistón rígido</strong> que transmite fielmente frecuencias altas (100–1000 Hz: sibilancias, crepitantes, S1/S2).
+                </p>
+              </div>
+            </div>
+
+            <div class="hw-slide hidden transition-opacity duration-300 flex flex-col md:flex-row items-center gap-6" data-index="3">
+              <div class="w-full md:w-1/2 flex items-center justify-center bg-black/60 rounded-2xl p-4 border border-slate-800">
+                <img src="figuras_carcasa/image2.png" alt="Corte CAD Isométrico" class="max-h-64 object-contain rounded-lg">
+              </div>
+              <div class="w-full md:w-1/2 space-y-3 text-xs">
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Aislamiento Sándwich</span>
+                <h5 class="text-lg font-bold text-white">Estructura Compuesta Tricapa</h5>
+                <p class="text-slate-300 leading-relaxed">
+                  TPU flexible barnizado (sellado dérmico) + Núcleo de fibra de vidrio (absorbe reflexiones internas) + Exoesqueleto de PLA sólido (masa acústica reflectora de ruido exterior).
+                </p>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Dualidad Campana vs Diafragma -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-800 text-xs">
+            <div class="p-3.5 rounded-xl bg-slate-900 border border-slate-800">
+              <strong class="text-teal-400 block mb-1">Campana Cónica (20–150 Hz):</strong>
+              <span class="text-slate-300">Resonancia para tonos graves cardíacos (S3, S4 y soplos diastólicos).</span>
+            </div>
+            <div class="p-3.5 rounded-xl bg-slate-900 border border-slate-800">
+              <strong class="text-cyan-400 block mb-1">Diafragma Frontal (100–1000 Hz):</strong>
+              <span class="text-slate-300">Filtro natural para soplos sistólicos, murmullo vesicular, sibilancias y crepitantes.</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+
+      <!-- PUENTE HACIA EL BLOQUE 4 (DEMOSTRACIÓN REAL) -->
+      <div class="p-8 rounded-3xl bg-gradient-to-r from-teal-950/40 via-cyan-950/30 to-slate-900 border border-teal-500/40 text-center space-y-4 shadow-2xl relative overflow-hidden">
+        <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-teal-500/20 text-teal-300 border border-teal-500/40">
+          <i class="fa-solid fa-arrow-right text-xs"></i> Próximo Paso · Paso 04
+        </div>
+        <h3 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+          "Ya conocen la idea y el flujo técnico. Ahora veámoslo en acción."
+        </h3>
+        <p class="text-xs sm:text-sm text-slate-300 max-w-xl mx-auto leading-relaxed">
+          En el siguiente bloque conectaremos la interfaz real: el simulador interactivo de triaje con semáforo en vivo, mapa anatómico de focos y reproductor de audio digital.
+        </p>
+        <div class="pt-3 flex flex-wrap items-center justify-center gap-4">
+          <a href="/" target="_blank" class="inline-flex items-center gap-2.5 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-teal-500 to-cyan-500 text-slate-950 font-bold text-sm shadow-xl shadow-teal-500/20 hover:scale-105 hover:shadow-teal-500/35 transition-all">
+            <i class="fa-solid fa-laptop-medical text-base"></i>
+            <span>Abrir Demostración en la App Web</span>
+          </a>
+          <a href="#problema" class="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-medium text-sm border border-slate-700/60 transition-colors">
+            <i class="fa-solid fa-arrow-up text-xs"></i>
+            <span>Volver al inicio</span>
+          </a>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ========================================================================= -->
+  <!-- PIE DE PÁGINA (FOOTER)                                                    -->
+  <!-- ========================================================================= -->
+  <footer class="py-12 border-t border-slate-800/80 bg-slate-950/60 text-xs text-slate-400">
+    <div class="max-w-7xl mx-auto px-4 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center font-bold">
+          🩺
+        </div>
+        <div>
+          <span class="font-bold text-white">SpiroScan AI</span> — Asignatura "f tecno" 2026
+          <p class="text-[11px] text-slate-500">Plataforma de Investigación en Telemetría y Triaje Cardiorrespiratorio</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-4 text-slate-400">
+        <a href="DOCUMENTACION_PROYECTO_SPIROSCAN.md" class="hover:text-teal-400 transition-colors flex items-center gap-1.5">
+          <i class="fa-solid fa-file-lines"></i>
+          <span>Memoria Técnica (Markdown)</span>
+        </a>
+        <span>·</span>
+        <span class="text-slate-500">Guatemala, 2026</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ========================================================================= -->
+  <!-- SCRIPTS BÁSICOS (FASE 1)                                                  -->
+  <!-- ========================================================================= -->
+  <script>
+    // Toggle para Aviso de Rigor Científico y Alcance
+    function toggleAvisoRigor() {
+      const content = document.getElementById('avisoRigorContent');
+      const chevron = document.getElementById('avisoRigorChevron');
+      if (!content) return;
+      if (content.classList.contains('hidden')) {
+        content.classList.remove('hidden');
+        if (chevron) chevron.textContent = '▴';
+      } else {
+        content.classList.add('hidden');
+        if (chevron) chevron.textContent = '▾';
+      }
+    }
+
+    // Toggle para Nivel 2: Panel de Ingeniería Mecánica y Carcasa 3D
+    function toggleHardwarePanel() {
+      const panel = document.getElementById('hardwarePanelContent');
+      const icon = document.getElementById('hardwareToggleIcon');
+      if (panel.classList.contains('hidden')) {
+        panel.classList.remove('hidden');
+        icon.textContent = '[ − Ocultar ]';
+      } else {
+        panel.classList.add('hidden');
+        icon.textContent = '[ + Desplegar ]';
+      }
+    }
+
+    // Control del Carrusel de Carcasa y Hardware 3D
+    let hwIndex = 0;
+    const hwSlides = document.querySelectorAll('.hw-slide');
+    const hwIndicator = document.getElementById('hwSlideIndicator');
+
+    function cambiarSlideHardware(delta) {
+      if (!hwSlides.length) return;
+      hwSlides[hwIndex].classList.add('hidden');
+      hwIndex = (hwIndex + delta + hwSlides.length) % hwSlides.length;
+      hwSlides[hwIndex].classList.remove('hidden');
+      if (hwIndicator) {
+        hwIndicator.textContent = `${hwIndex + 1} / ${hwSlides.length}`;
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Inspector Dinámico del Flujo de Señal (Paso 03)
+    // -------------------------------------------------------------------------
+    const etapasFlujoData = {
+      1: {
+        icon: "fa-solid fa-user",
+        color: "teal",
+        title: "Etapa 1 · Fisiología Acústica del Paciente",
+        badge: "Banda: 20 Hz – 1,200 Hz",
+        desc: "Captura directa sobre la piel torácica. Abarca tonos cardíacos graves (S1/S2 entre 20–150 Hz y soplos) y sonidos adventicios pulmonares (murmullo vesicular, sibilancias y crepitantes entre 100–1,200 Hz). El acoplamiento acústico cerrado contra la pared torácica reduce pérdidas y reflexiones parásitas."
+      },
+      2: {
+        icon: "fa-solid fa-microphone",
+        color: "cyan",
+        title: "Etapa 2 · Transducción Digital MEMS (INMP441)",
+        badge: "I2S Nativo · 16 kHz / 24 bits mono",
+        desc: "Micrófono MEMS omnidireccional con convertidor ADC integrado en el silicio. Digitaliza la presión acústica en el punto de contacto dérmico con relación señal-ruido SNR de 61 dBA, eliminando por completo zumbidos electromagnéticos de 60 Hz y pérdidas de cableado analógico."
+      },
+      3: {
+        icon: "fa-solid fa-microchip",
+        color: "indigo",
+        title: "Etapa 3 · Ingesta DMA y Filtrado (ESP32)",
+        badge: "Dual Core 240 MHz · DMA sin Jitter",
+        desc: "El microcontrolador NodeMCU-32S gestiona búferes circulares en memoria DMA para garantizar adquisición en tiempo real sin caídas de paquetes. Aplica prefiltrado digital de banda, empaquetado binario y transmisión inalámbrica hacia el backend con latencia menor a 20 ms."
+      },
+      4: {
+        icon: "fa-solid fa-wave-square",
+        color: "purple",
+        title: "Etapa 4 · Extracción de 61 Descriptores Acústicos",
+        badge: "Vector Determinista de 61 Features",
+        desc: "Vector matemático psicoacústico: 39 coeficientes cepstrales de frecuencia de Mel (13 MFCCs base + 13 Deltas de velocidad + 13 Delta-Deltas de aceleración), Tasa de Cruces por Cero (ZCR), Energía RMS y parámetros espectrales (centroide, dispersión, asimetría y rolloff)."
+      },
+      5: {
+        icon: "fa-solid fa-brain",
+        color: "rose",
+        title: "Etapa 5 · Inferencia Algorítmica Ligera (Regresión L2)",
+        badge: "Latencia ~0.17 s · Patient-Wise (GroupKFold)",
+        desc: "Clasificador lineal regularizado L2 con 61.22% ICBHI Score (promedio balanceado de Sensibilidad y Especificidad). Entrenado con partición estricta por paciente en el dataset internacional ICBHI 2017 para auditoría clínica transparente de coeficientes y nulo sobreajuste."
+      },
+      6: {
+        icon: "fa-solid fa-traffic-light",
+        color: "emerald",
+        title: "Etapa 6 · Semáforo de Triaje y Soporte Clínico",
+        badge: "Fusión SpO₂ + FC + Ruidos Adventicios",
+        desc: "Motor de reglas médicas deterministas que fusiona en tiempo real oximetría reflectiva, frecuencia cardíaca y sonidos patológicos detectados. Asigna prioridad visual inmediata en la app y hardware: Verde (atención general), Amarillo (alerta/monitoreo) o Rojo (urgencia inmediata)."
+      }
+    };
+
+    function inspeccionarEtapa(num) {
+      const data = etapasFlujoData[num];
+      if (!data) return;
+      
+      const icon = document.getElementById('inspectorIcon');
+      const title = document.getElementById('inspectorTitle');
+      const badge = document.getElementById('inspectorBadge');
+      const desc = document.getElementById('inspectorDesc');
+      const iconContainer = document.getElementById('inspectorIconContainer');
+
+      if (icon) icon.className = `${data.icon} text-base`;
+      if (title) title.textContent = data.title;
+      if (badge) badge.textContent = data.badge;
+      if (desc) desc.textContent = data.desc;
+      
+      if (iconContainer) {
+        iconContainer.className = `w-11 h-11 rounded-xl bg-${data.color}-500/10 text-${data.color}-400 border border-${data.color}-500/20 flex items-center justify-center text-lg shrink-0 transition-all scale-110`;
+      }
+    }
+  </script>
+</body>
+</html>

@@ -56,6 +56,7 @@ database.init_db()
 
 PORT = int(os.getenv("PORT", 8000))
 APP_DIST = os.getenv("APP_DIST", os.path.join(os.path.dirname(__file__), "..", "App Movil", "dist"))
+PRESENTACION_DIR = os.getenv("PRESENTACION_DIR", os.path.join(os.path.dirname(__file__), "..", "docs", "presentacion"))
 server_info: dict = {}
 
 
@@ -1009,6 +1010,29 @@ async def inject_demo_sample(sample_id: str, session_id: Optional[str] = Query(N
         "report": report,
         "recording": result,
     }
+
+
+# ---------------------------------------------------------------------------
+# Presentación y Landing Page del Proyecto (docs/presentacion)
+# ---------------------------------------------------------------------------
+if os.path.isdir(PRESENTACION_DIR):
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/presentacion", StaticFiles(directory=PRESENTACION_DIR, html=True), name="presentacion")
+
+    # Servir assets de carcasa 3D si se solicitan desde /home o rutas relativas
+    figuras_dir = os.path.join(PRESENTACION_DIR, "figuras_carcasa")
+    if os.path.isdir(figuras_dir):
+        app.mount("/figuras_carcasa", StaticFiles(directory=figuras_dir), name="figuras_carcasa_root")
+        app.mount("/home/figuras_carcasa", StaticFiles(directory=figuras_dir), name="figuras_carcasa_home")
+
+    @app.get("/home", response_class=FileResponse)
+    @app.get("/home/", response_class=FileResponse)
+    def get_home_presentation():
+        landing_path = os.path.join(PRESENTACION_DIR, "landing.html")
+        if os.path.isfile(landing_path):
+            return FileResponse(landing_path)
+        return FileResponse(os.path.join(PRESENTACION_DIR, "index.html"))
+
 
 
 # ---------------------------------------------------------------------------
