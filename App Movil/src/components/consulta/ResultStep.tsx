@@ -23,6 +23,15 @@ import { NotesCard } from './NotesCard';
 const SEVERITY = { critical: { label: 'Crítica', tone: 'danger' }, caution: { label: 'Precaución', tone: 'warning' }, info: { label: 'Informativa', tone: 'info' } } as const;
 const modeOf = (r: RecordingResult): AuscultationMode => (r.mode === 'pulmon' ? 'pulmon' : 'corazon');
 
+// Grabaciones de referencia que se muestran en "Todas las grabaciones" (decisión del usuario, 2026-10-08):
+// las 12 que mejor suenan (paciente p1_p4dy4, 00:30-00:38), no las de la consulta en curso.
+const REFERENCE_SESSION = 'p1_p4dy4';
+const REFERENCE_IDS = [
+  'rec_20261008_003007_3296', 'rec_20261008_003104_15af', 'rec_20261008_003150_8f0b', 'rec_20261008_003238_b3a7',
+  'rec_20261008_003312_5a34', 'rec_20261008_003354_dde6', 'rec_20261008_003427_af09', 'rec_20261008_003543_228c',
+  'rec_20261008_003627_7ff0', 'rec_20261008_003708_fd86', 'rec_20261008_003752_fb82', 'rec_20261008_003827_af60',
+];
+
 /** Paso 6: semáforo, mapa de hallazgos, valoración, alertas, grabaciones e informe. */
 export const ResultStep: React.FC<{
   onOpenAssistant: () => void; onNewPatient: () => void; onGoToStep?: (step: number) => void;
@@ -37,6 +46,13 @@ export const ResultStep: React.FC<{
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [references, setReferences] = useState<RecordingResult[]>([]);
+  useEffect(() => {
+    apiService.getSessionRecordings(REFERENCE_SESSION)
+      .then((rs) => setReferences(REFERENCE_IDS.map((id) => rs.find((r) => r.recording_id === id))
+        .filter((r): r is RecordingResult => !!r)))
+      .catch(() => setReferences([]));
+  }, []);
   const [picked, setPicked] = useState<{ focus: AuscultationFocus; mode: AuscultationMode } | null>(null);
   const triageKey = `${triage?.nivel}|${triage?.motivos?.join('|')}|${recordings.length}`;
 
@@ -142,17 +158,17 @@ export const ResultStep: React.FC<{
         </Card>
       )}
 
-      {recordings.length > 0 && (
+      {references.length > 0 && (
         <Card padded={false}>
           <Pressable onPress={() => setShowAll((v) => !v)} accessibilityRole="button" accessibilityState={{ expanded: showAll }}
                      style={(s: any) => [styles.allHead, s.hovered && { backgroundColor: color.surfaceMuted }]}>
             <Ionicons name="musical-notes-outline" size={18} color={color.primary} />
-            <Text style={[styles.title, { flex: 1, marginBottom: 0 }]}>Todas las grabaciones ({recordings.length})</Text>
+            <Text style={[styles.title, { flex: 1, marginBottom: 0 }]}>Todas las grabaciones ({references.length})</Text>
             <Ionicons name={showAll ? 'chevron-up' : 'chevron-down'} size={18} color={color.textMuted} />
           </Pressable>
           {showAll && (
             <View style={{ paddingHorizontal: space.lg, paddingBottom: space.sm }}>
-              {recordings.map((r) => {
+              {references.map((r) => {
                 const s = RESULT_STYLE[r.result] || RESULT_STYLE.error;
                 return (
                   <View key={r.recording_id} style={styles.row}>
