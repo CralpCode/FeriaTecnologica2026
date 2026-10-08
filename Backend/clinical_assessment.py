@@ -62,14 +62,22 @@ class ClinicalContext(ContextModel):
 def recent_vitals(session_id: str) -> dict:
     rows = database.get_recent_readings(session_id, seconds=60)
     latest = rows[-1] if rows else {}
-    out = {"heartRate": None, "bloodOxygen": None, "counts": {}, "latest_metadata": {
-        k: latest.get(k) for k in ("source", "signalQuality", "spo2Calibrated")}}
+    out = {"heartRate": None, "bloodOxygen": None, "spo2_estimated": False, "counts": {}, "latest_metadata": {
+        k: latest.get(k) for k in ("source", "signalQuality", "spo2Calibrated", "spo2Estimated")}}
     for channel in ("heartRate", "bloodOxygen"):
         values = [v for row in rows if (v := usable_value(row, channel, check_timestamp=False)) is not None]
         # An invalid latest packet invalidates older good readings, too.
         if usable_value(latest, channel) is not None and len(values) >= 3:
             out[channel] = round(median(values), 1)
         out["counts"][channel] = len(values)
+    if out["bloodOxygen"] is None:
+        # Sin SpO2 calibrada: la estimada (fórmula del fabricante) se usa marcada como tal.
+        values = [v for row in rows
+                  if (v := usable_value(row, "bloodOxygen", check_timestamp=False, allow_estimated=True)) is not None]
+        if usable_value(latest, "bloodOxygen", allow_estimated=True) is not None and len(values) >= 3:
+            out["bloodOxygen"] = round(median(values), 1)
+            out["spo2_estimated"] = True
+        out["counts"]["bloodOxygenEstimated"] = len(values)
     return out
 
 
@@ -184,8 +192,17 @@ def assess(context: dict, vitals: dict, recordings: list[dict]) -> dict:
     elif adult and ctx["at_rest"] is True and (hr < 45 or hr > 120):
         finding("pulse_outside_screening_range", "Pulso fuera de los límites de aviso del prototipo", [f"Mediana de pulso válido: {hr:g} BPM."])
         steps.append("Consultar si el pulso alterado persiste. No permite diagnosticar arritmias: para eso se requiere evaluación y ECG.")
+    spo2_estimated = vitals.get("spo2_estimated") is True
     if spo2 is None:
         missing.append("SpO2 válida, reciente y calibrada: el MAX30102 sin calibración no aporta oxígeno clínicamente interpretable.")
+    elif spo2_estimated:
+        # Estimación sin calibrar: orienta, pero no confirma ni descarta; el verde sigue requiriendo SpO2 calibrada.
+        missing.append(f"SpO2 calibrada: la estimada ({spo2:g} %, fórmula genérica del fabricante) no basta para descartar hipoxemia.")
+        limitations.append("La SpO2 del MAX30102 es una estimación sin calibrar con este módulo: puede desviarse varios puntos.")
+        if spo2 < 94:
+            finding("low_oxygen_estimated", "SpO2 estimada baja: confirmar con un oxímetro",
+                    [f"Mediana estimada: {spo2:g} % (sin calibrar)."])
+            steps.insert(0, "Confirmar de inmediato la saturación con un oxímetro; si se confirma baja, buscar valoración médica.")
     elif spo2 < 94:
         finding("low_oxygen", "SpO2 reducida: confirmar con equipo clínico", [f"Mediana válida: {spo2:g} %; considerar altitud y valor habitual."])
         if spo2 < 90:

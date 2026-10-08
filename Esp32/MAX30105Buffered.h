@@ -6,6 +6,7 @@ class MAX30105Buffered : public MAX30105 {
   TwoWire* bus = &Wire;
   uint32_t red[32] = {}, ir[32] = {};   // el FIFO del MAX30102 guarda hasta 32 muestras
   uint8_t count = 0, index = 0;
+  bool swap_red_ir = false;
   bool reg(uint8_t address, uint8_t& value) {
     bus->beginTransmission(0x57); bus->write(address);
     if (bus->endTransmission(false) != 0) return false;
@@ -17,6 +18,8 @@ public:
     bus = &wire; return MAX30105::begin(wire, speed);
   }
   void clearFIFO() { count = index = 0; MAX30105::clearFIFO(); }
+  // Modulos con los LED cruzados: la ranura 1 del FIFO trae el infrarrojo y la 2 el rojo.
+  void setSwapRedIr(bool swap) { swap_red_ir = swap; }
   uint16_t check() {
     if (available()) return 0;
     count = index = 0;
@@ -37,7 +40,7 @@ public:
         uint32_t r = 0, v = 0;
         for (int b = 0; b < 3; ++b) r = (r << 8) | bus->read();
         for (int b = 0; b < 3; ++b) v = (v << 8) | bus->read();
-        red[count] = r & 0x3ffff; ir[count] = v & 0x3ffff; ++count;
+        red[count] = (swap_red_ir ? v : r) & 0x3ffff; ir[count] = (swap_red_ir ? r : v) & 0x3ffff; ++count;
       }
     }
     if (overflow) { count = index = 0; return 65535; }   // muestras con un hueco antes: no se usan

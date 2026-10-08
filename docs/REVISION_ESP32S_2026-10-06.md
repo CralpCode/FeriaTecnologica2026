@@ -240,3 +240,21 @@ sin lectura, SDA soltado en cada ACK) encendió el LED del sensor. Se agregaron 
 el contador de desborde solo vuelve a 0 al leer, así que quedaba trabado (miles de errores, 0 muestras).
 Ahora vacía el FIFO y descarta esas muestras. Resultado físico con el dedo: FC 97–110 BPM válidas con
 calidad "good" en el servidor; SpO2 sigue "no calibrada" (no se muestra), como estaba previsto.
+
+## Oxígeno, variabilidad y estrés estimados; LED de estado (7 de octubre)
+
+Por decisión del equipo se muestran los cuatro datos del MAX30102. Oxígeno, variabilidad y estrés llevan
+la etiqueta "Estimado — no usar para diagnóstico". El servidor guarda `spo2Estimated`; la valoración usa
+la SpO2 estimada solo con esa etiqueta (pide confirmar con oxímetro si es baja, nunca da verde sin SpO2
+calibrada) y las alertas automáticas siguen usando solo SpO2 calibrada.
+
+El módulo trae los LED rojo e infrarrojo cruzados: con el dedo de una persona sana, R = 1.2–2.1 en el
+orden del datasheet (SpO2 imposible, -41 a 66 %) y R = 0.47–0.83 intercambiado (89–99 %); además la
+ranura "roja" recibía más luz, propio del infrarrojo. `SPIROSCAN_MAX30102_SWAP_RED_IR` (1 por defecto)
+los intercambia. La SpO2 es la mediana de las últimas 5 ventanas válidas (mínimo 3), solo con pulso
+válido y con el dedo apoyado ≥ 5 s. Prueba física: oxígeno 97 %, variabilidad 140–245 ms, estrés 25.
+
+Barra WS2812 (pin 25): amarillo de izquierda a derecha sin conexión; al conectarse, verde de izquierda a
+derecha dos veces y tres parpadeos; verde fijo en reposo; azul como barra de carga al grabar; azul
+parpadeando al enviar; naranja 3 s si la captura falla. "Conectado" = respuesta correcta del servidor en
+los últimos 15 s.

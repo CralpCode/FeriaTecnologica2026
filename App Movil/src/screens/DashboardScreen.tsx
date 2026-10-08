@@ -4,7 +4,7 @@ import { Text } from '../components/ui/Text';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useVitals } from '../context/VitalsContext';
 import { useClinical } from '../context/ClinicalContext';
-import { measurementValidity } from '../services/measurementQuality';
+import { measurementValidity, ESTIMATED } from '../services/measurementQuality';
 import { Colors } from '../theme/colors';
 import { color, font, radius, space, weight } from '../theme/tokens';
 import { HospitalEcgMonitor } from '../components/HospitalEcgMonitor';
@@ -59,12 +59,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToAI
                            value={valid.heartRate ? String(Math.round(vitals.heartRate)) : null}
                            hint={valid.heartRate ? 'Lectura válida; interpretar con edad y reposo' : 'Sin lectura válida'} source="MAX30102" />
                 <VitalTile icon="water-percent" tint={Colors.oxygen} label="Oxígeno (SpO2)" unit="%"
-                           value={valid.bloodOxygen ? vitals.bloodOxygen.toFixed(1) : null}
-                           hint={valid.bloodOxygen ? 'Estimación calibrada' : 'No disponible: sin calibración'} source="MAX30102" />
-                <VitalTile icon="heart-flash" tint={Colors.pressure} label="Variabilidad (HRV)" unit="ms" value={null}
-                           hint="No disponible: no validada" source="MAX30102" />
-                <VitalTile icon="brain" tint={Colors.stress} label="Índice de estrés" unit="/100" value={null}
-                           hint="No disponible: experimental" source="Estimación" />
+                           value={valid.bloodOxygen || valid.bloodOxygenEstimated ? vitals.bloodOxygen.toFixed(0) : null}
+                           hint={valid.bloodOxygen ? 'Estimación calibrada' : valid.bloodOxygenEstimated ? ESTIMATED : 'Esperando señal estable'}
+                           source="MAX30102" />
+                <VitalTile icon="heart-flash" tint={Colors.pressure} label="Variabilidad (HRV)" unit="ms"
+                           value={valid.hrv ? String(Math.round(vitals.hrv)) : null}
+                           hint={valid.hrv ? ESTIMATED : 'Esperando pulso estable'} source="MAX30102" />
+                <VitalTile icon="brain" tint={Colors.stress} label="Índice de estrés" unit="/100"
+                           value={valid.stress ? String(Math.round(vitals.stressLevel)) : null}
+                           hint={valid.stress ? ESTIMATED : 'Esperando pulso estable'} source="Estimación" />
                 <VitalTile icon="microphone" tint={Colors.audio} label="Micrófono" unit="dBFS"
                            value={audioAvailable ? vitals.audio_rms.toFixed(1) : null}
                            hint={audioAvailable ? 'Nivel digital, no presión sonora' : 'Sin lectura de audio'} source="INMP441" />

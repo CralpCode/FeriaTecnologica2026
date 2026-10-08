@@ -101,9 +101,13 @@ def _session_context(session_id: str) -> dict:
 
 
 def _clean_vitals(v: dict) -> dict:
-    return {"heartRate": usable_value(v, "heartRate"),
-            "bloodOxygen": usable_value(v, "bloodOxygen"),
-            "timestamp": v.get("timestamp"), "source": v.get("source")}
+    out = {"heartRate": usable_value(v, "heartRate"),
+           "bloodOxygen": usable_value(v, "bloodOxygen"),
+           "timestamp": v.get("timestamp"), "source": v.get("source")}
+    if out["bloodOxygen"] is None:
+        # Solo con la etiqueta: la IA no debe presentarla como una saturación medida.
+        out["SpO2_estimada_sin_calibrar"] = usable_value(v, "bloodOxygen", allow_estimated=True)
+    return out
 
 
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")

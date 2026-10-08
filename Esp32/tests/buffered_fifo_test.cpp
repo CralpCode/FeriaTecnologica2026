@@ -36,6 +36,17 @@ int main() {
   assert(sensor.check() == 1);                // vuelve a leer con normalidad
   assert(sensor.getFIFORed() == 70000 && sensor.getFIFOIR() == 120000);
   sensor.nextSample();
+  // Modulo con los LED cruzados: la ranura 1 es el infrarrojo.
+  sensor.clearFIFO();
+  Wire.fifo.clear(); Wire.offset = 0;
+  for (uint32_t value : {150000u, 110000u})
+    for (int shift : {16, 8, 0}) Wire.fifo.push_back((value >> shift) & 255);
+  Wire.write_pointer = 1;
+  sensor.setSwapRedIr(true);
+  assert(sensor.check() == 1);
+  assert(sensor.getFIFOIR() == 150000 && sensor.getFIFORed() == 110000);
+  sensor.nextSample();
+  sensor.setSwapRedIr(false);
   sensor.clearFIFO();
   Wire.write_pointer = 1; Wire.fail_fifo = true;
   assert(sensor.check() > 31);

@@ -196,8 +196,16 @@ static void ausc_discover_server() {
   }
 }
 
+// Ultima respuesta correcta del servidor: la barra de LED muestra "conectado" mientras sea reciente.
+static volatile unsigned long ausc_server_ok_ms = 0;
+static void ausc_mark_server_ok() { ausc_server_ok_ms = millis(); if (!ausc_server_ok_ms) ausc_server_ok_ms = 1; }
+bool ausc_connected() {
+  return ausc_wifi_ready() && ausc_server_ok_ms && millis() - ausc_server_ok_ms < 15000;
+}
+
 static void ausc_note_http_result(bool ok) {
   if (ok) {
+    ausc_mark_server_ok();
     ausc_http_failures = 0;
   } else if (++ausc_http_failures >= 5 && strlen(SERVER_URL) == 0) {
     Serial.println(F("[!] El servidor no responde: se volvera a buscar por mDNS"));
@@ -316,6 +324,7 @@ static bool ausc_register_job(int j, HTTPClient& http, SpiroScanTLSClient& tls, 
     String id = ausc_json_field(resp, "recording_id");
     if (id.length() && id.length() < sizeof(job.rec_id)) {
       strcpy(job.rec_id, id.c_str());
+      ausc_mark_server_ok();
       Serial.printf("[AUSC] Captura registrada: %s\r\n", job.rec_id);
       return true;
     }
@@ -385,7 +394,7 @@ static void ausc_upload_job(int j, HTTPClient& http, SpiroScanTLSClient& tls, Wi
         int colon = response.indexOf(':', key);
         accepted = code == 200 && key >= 0 && colon >= 0 &&
                    response.substring(colon + 1).toInt() == offset + size;
-        if (accepted) ausc_receive_command(response);
+        if (accepted) { ausc_mark_server_ok(); ausc_receive_command(response); }
         else { ausc_net_reset(http, tls, plain); ausc_retry_pause("Bloque", attempt, code); }
       }
       if (!accepted) ok = false;
@@ -407,7 +416,7 @@ static void ausc_upload_job(int j, HTTPClient& http, SpiroScanTLSClient& tls, Wi
       code = http.POST(String("{}"));
       String resp = http.getString();
       ok = code == 202 && ausc_json_field(resp, "sha256") == job.sha && resp.indexOf("true") >= 0;
-      if (ok) ausc_receive_command(resp);
+      if (ok) { ausc_mark_server_ok(); ausc_receive_command(resp); }
       else { ausc_net_reset(http, tls, plain); ausc_retry_pause("Confirmacion", attempt, code); }
     }
     Serial.printf("[AUSC] Audio %s confirmado: %s (HTTP %d) en %lu ms; pila libre %u\r\n", job.rec_id,
@@ -421,6 +430,9 @@ static bool ausc_jobs_active() {
   for (int i = 0; i < AUSC_QUEUE_LEN; i++) if (ausc_jobs[i].state != JOB_FREE) return true;
   return false;
 }
+
+// Hay audio grabado que todavia se esta enviando (la barra parpadea en azul).
+bool ausc_sending() { return ausc_jobs_active(); }
 
 // Siguiente captura lista para enviar (la mas antigua), o -1.
 static int ausc_next_ready_job() {
@@ -772,12 +784,12 @@ bool ausc_update_leds(int num_leds) {
   if (ausc_state == AUSC_RECORDING) {
     float progress = (float)ausc_samples_total / (AUSC_SAMPLE_RATE * AUSC_DURATION_S);
     int lit = (int)(progress * num_leds + 0.999f);
+    // Barra de carga azul: un LED mas por cada 1/8 de la grabacion.
     for (int i = 0; i < num_leds; i++) {
-      strip.setPixelColor(i, i < lit ? strip.Color(0, 60, 255) : strip.Color(0, 0, 8));
+      strip.setPixelColor(i, i < lit ? strip.Color(0, 70, 255) : strip.Color(0, 0, 0));
     }
   } else if (ausc_state == AUSC_PROCESSING) {
-    uint8_t p = (millis() / 4) % 255;
-    for (int i = 0; i < num_leds; i++) strip.setPixelColor(i, strip.Color(p, 0, p));
+    for (int i = 0; i < num_leds; i++) strip.setPixelColor(i, strip.Color(0, 70, 255));   // captura completa
   } else if (ausc_state == AUSC_SHOW_RESULT) {
     if (millis() > ausc_result_until) {
       ausc_state = AUSC_IDLE;

@@ -26,20 +26,21 @@ export const TrendChart: React.FC<TrendChartProps> = ({ data, metricKey, title, 
   const chartWidth = Math.max(260, measured || Math.min(width - 40, 960));
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const onLayout = (e: LayoutChangeEvent) => setMeasured(Math.round(e.nativeEvent.layout.width - 32));
-  const notValidated = metricKey === 'hrv' || metricKey === 'stressLevel';
 
   data = (data || []).filter((point) => point.source === 'real' && point.signalQuality === 'good'
     && typeof point.sampleAgeMs === 'number' && point.sampleAgeMs >= 0 && point.sampleAgeMs <= 15000
     && ((metricKey === 'heartRate' && point.heartRateValid === true && point.heartRate > 0)
-      || (metricKey === 'bloodOxygen' && point.bloodOxygenValid === true && point.spo2Calibrated === true && point.bloodOxygen > 0)));
+      || (metricKey === 'bloodOxygen' && point.bloodOxygenValid === true && point.bloodOxygen > 0
+          && (point.spo2Calibrated === true || (point.spo2Estimated === true && point.bloodOxygen >= 70)))
+      || (metricKey === 'hrv' && point.heartRateValid === true && (point.hrv ?? 0) > 0)
+      || (metricKey === 'stressLevel' && point.heartRateValid === true && (point.stressLevel ?? 0) > 0)));
   if (!data || data.length === 0) {
     return (
       <View style={[styles.card, styles.emptyContainer]}>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.emptyText}>
-          {notValidated ? 'No se grafica: esta lectura no está validada, así que no se usa ni se muestra.'
-            : metricKey === 'bloodOxygen' ? 'Sin SpO2 calibrada en este periodo: el sensor no está calibrado, así que no se grafica.'
-            : 'Sin lecturas válidas de pulso en este periodo. Aparecerán al medir con el dedo bien apoyado.'}
+          {metricKey === 'heartRate' ? 'Sin lecturas válidas de pulso en este periodo. Aparecerán al medir con el dedo bien apoyado.'
+            : 'Sin lecturas en este periodo. Aparecen con el dedo bien apoyado y el pulso estable (valores estimados).'}
         </Text>
       </View>
     );

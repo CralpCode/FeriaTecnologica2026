@@ -5,6 +5,8 @@ export interface MeasurementQuality {
   heartRateValid?: boolean;
   bloodOxygenValid?: boolean;
   spo2Calibrated?: boolean;
+  /** SpO2 con la fórmula genérica del fabricante, sin calibrar con este módulo: se muestra como estimada. */
+  spo2Estimated?: boolean;
   signalQuality?: string | null;
   audioUnit?: string;
   audioValid?: boolean;
@@ -105,6 +107,7 @@ export interface RawDevicePacket extends MeasurementQuality {
   heart_rate_valid?: boolean;
   spo2_valid?: boolean;
   spo2_calibrated?: boolean;
+  spo2_estimated?: boolean;
   signal_quality?: string | null;
   sample_age_ms?: number | null;
 }

@@ -89,6 +89,12 @@ static volatile bool recording_requested = false;
 static volatile bool optical_probe_requested = false;
 static volatile bool optical_probe_running = false;
 MAX30105Buffered particleSensor;
+// El modulo MAX30102 instalado trae los LED cruzados: la ranura del FIFO que deberia ser ROJA recibe
+// el INFRARROJO. Medido con el dedo de una persona sana: R=1.2-2.1 con el orden del datasheet (SpO2
+// -41..66 %, imposible) y R=0.47-0.83 intercambiado (89-99 %). Poner 0 si se cambia por un modulo correcto.
+#ifndef SPIROSCAN_MAX30102_SWAP_RED_IR
+#define SPIROSCAN_MAX30102_SWAP_RED_IR 1
+#endif
 
 // ------------------------------------------------------------------------------
 // 3. VARIABLES GLOBALES BIOMEDICAS Y ACUSTICAS (100% FISICAS)
@@ -152,16 +158,17 @@ uint32_t ppg_samples_acquired = 0;
 uint8_t ppg_max_batch = 0;
 uint32_t ppg_last_raw_red = 0;
 uint32_t ppg_last_raw_ir = 0;
-uint8_t spo2_consistent_windows = 0;
-int32_t spo2_previous_candidate = 0;
+// SpO2 estimada: mediana de las ultimas ventanas validas del algoritmo (una ventana suelta salta varios puntos).
+#define SPO2_MEDIAN_WINDOWS 5
+int16_t spo2_recent[SPO2_MEDIAN_WINDOWS] = {};
+uint8_t spo2_recent_count = 0, spo2_recent_next = 0;
 const char* FIRMWARE_ID = "2026-10-06-esp32s-telemetry";
 void invalidate_spo2(const char* reason, bool clear_window) {
   spo2_valid = false;
   spo2_val = 0.0f;
   spo2_last_valid_ms = 0;
   spo2_status = reason;
-  spo2_consistent_windows = 0;
-  spo2_previous_candidate = 0;
+  spo2_recent_count = spo2_recent_next = 0;
   if (clear_window) {
     spo2_sample_count = 0;
     spo2_decimation_count = 0;
@@ -543,6 +550,7 @@ void setup_max30102() {
       if (pin_options[i].scl_active) gpio_set_direction((gpio_num_t)scl, GPIO_MODE_INPUT_OUTPUT);
 
       particleSensor.setup(0x35, 4, 2, 400, 411, 4096);
+      particleSensor.setSwapRedIr(SPIROSCAN_MAX30102_SWAP_RED_IR);
       particleSensor.setPulseAmplitudeRed(0x35);
       particleSensor.setPulseAmplitudeIR(0x35);
       particleSensor.setPulseAmplitudeGreen(0);
@@ -567,6 +575,7 @@ void setup_max30102() {
     if (particleSensor.begin(Wire, 10000)) {
       // Ruta lenta: mantener el FIFO por debajo del ancho de banda del bus.
       particleSensor.setup(0x35, 4, 2, 100, 411, 4096);
+      particleSensor.setSwapRedIr(SPIROSCAN_MAX30102_SWAP_RED_IR);
       particleSensor.setPulseAmplitudeRed(0x35);
       particleSensor.setPulseAmplitudeIR(0x35);
       particleSensor.setPulseAmplitudeGreen(0);
@@ -946,9 +955,6 @@ void update_biometric_signals() {
               Serial.printf("  >>> [PULSO CARDIACO FIJADO: %d BPM] INICIANDO 20s DE MEDICION CLINICA <<<\r\n", beat_avg);
               Serial.println(F("=========================================================================\r\n"));
 
-              // Destello breve en LED 3 para confirmar enganche de pulso
-              strip.setPixelColor(3, strip.Color(255, 255, 255));
-              strip.show();
             }
 
             // Calculo robusto de BPM con Media Recortada (Trimmed Mean / Interquartile)
@@ -1069,8 +1075,30 @@ void update_biometric_signals() {
     // Algoritmo de referencia SparkFun/Maxim; no hay calibracion del montaje.
     maxim_heart_rate_and_oxygen_saturation(spo2_ir, BUFFER_SIZE, spo2_red,
       &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid);
-    // No presentar una estimacion sin calibrar como una saturacion valida.
-    invalidate_spo2("uncalibrated", false);
+    // SpO2 ESTIMADA con la formula generica del fabricante (sin calibrar con este modulo): se envia
+    // marcada como estimada, solo con pulso valido, como mediana de las ultimas 5 ventanas validas
+    // (al menos 3). Una ventana invalida no borra el valor; si no hay ventanas validas en 4 s, se retira.
+    // La ventana del algoritmo abarca 4 s: solo se usa cuando el dedo lleva 5 s apoyado sin interrupcion,
+    // para que no mezcle muestras de antes del contacto (daba un primer valor falsamente bajo).
+    bool settled = ppg_finger_start_us && now_us - ppg_finger_start_us >= 5000000ULL;
+    if (ch_spo2_valid && n_spo2 >= 70 && n_spo2 <= 100 && bpm_valid && settled) {
+      spo2_recent[spo2_recent_next] = (int16_t)n_spo2;
+      spo2_recent_next = (spo2_recent_next + 1) % SPO2_MEDIAN_WINDOWS;
+      if (spo2_recent_count < SPO2_MEDIAN_WINDOWS) spo2_recent_count++;
+      if (spo2_recent_count >= 3) {
+        int16_t sorted[SPO2_MEDIAN_WINDOWS];
+        memcpy(sorted, spo2_recent, sizeof(sorted));
+        std::sort(sorted, sorted + spo2_recent_count);
+        spo2_val = sorted[spo2_recent_count / 2];
+        spo2_valid = true;
+        spo2_last_valid_ms = now_ms;
+        spo2_status = "estimated";
+      } else {
+        spo2_status = "acquiring";
+      }
+    } else if (!spo2_valid) {
+      spo2_status = ch_spo2_valid ? "implausible" : "algorithm_invalid";
+    }
     uint32_t min_ir = UINT32_MAX, max_ir = 0, min_red = UINT32_MAX, max_red = 0;
     uint64_t sum_ir = 0, sum_red = 0;
     for (int i = 0; i < BUFFER_SIZE; i++) {
@@ -1085,7 +1113,7 @@ void update_biometric_signals() {
                   (unsigned long)ppg_fifo_dropped, (unsigned long)ppg_i2c_errors);
 
   }
-  if (spo2_valid && (!finger_detected || now_ms - ppg_last_data_ms > 250 || now_ms - spo2_last_valid_ms > 2000))
+  if (spo2_valid && (!finger_detected || now_ms - ppg_last_data_ms > 250 || now_ms - spo2_last_valid_ms > 4000))
     invalidate_spo2("stale", false);
 
   // 5. Lectura de temperatura del silicio del chip MAX30102 (cada 4 segundos)
@@ -1263,12 +1291,6 @@ void start_continuous_mode() {
   Serial.println(F("  >>> Para apagar todo: envia 'OFF' / 'SLEEP' por comando.<<<"));
   Serial.println(F("=========================================================================\r\n"));
 
-  // Destello rápido Blanco Puro / Clínico en todos los LEDs indicando Modo Infinito
-  for (int i = 0; i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, strip.Color(255, 255, 255));
-  }
-  strip.show();
-  delay(150);
 }
 
 void toggle_continuous_mode() {
@@ -1296,9 +1318,6 @@ void update_scan_status() {
         Serial.printf("  >>> [PULSO CARDIACO FIJADO: %d BPM] INICIANDO 20s DE MEDICION CLINICA <<<\r\n", beat_avg);
         Serial.println(F("=========================================================================\r\n"));
 
-        // Destello breve en LED 3 para confirmar enganche de pulso
-        strip.setPixelColor(3, strip.Color(255, 255, 255));
-        strip.show();
       } else {
         // Timeout: Si pasan 35 segundos sin colocar el dedo / fijar pulso, volver a reposo
         if (now - cardiac_wait_start_ms >= 35000) {
@@ -1576,6 +1595,19 @@ void handle_incoming_commands(String raw_cmd) {
     Serial.println(F("[AUSC] Grabacion en curso; espera el resultado antes de iniciar otro modo."));
     return;
   }
+  if (cmd == "LEDCOLOR" && sensor_hw_found) {
+    // Identificar a simple vista que LED fisico maneja cada canal (algunos modulos los traen cruzados).
+    Serial.println(F("[LEDCOLOR] Canal 1 (registro LED1, deberia ser ROJO) encendido 8 s"));
+    optical_probe_set_currents(0x7F, 0x00); delay(8000);
+    Serial.println(F("[LEDCOLOR] Ambos apagados 3 s"));
+    optical_probe_set_currents(0x00, 0x00); delay(3000);
+    Serial.println(F("[LEDCOLOR] Canal 2 (registro LED2, deberia ser INFRARROJO, invisible) encendido 8 s"));
+    optical_probe_set_currents(0x00, 0x7F); delay(8000);
+    optical_probe_set_currents(0x35, 0x35);
+    particleSensor.clearFIFO();
+    Serial.println(F("[LEDCOLOR] fin"));
+    return;
+  }
   if (cmd == "LEDTEST") {
     max_led_blind_test();
     return;
@@ -1711,8 +1743,8 @@ void broadcast_telemetry() {
   if (sample_age > 250) valid_mask &= ~7;
   char json_payload[768];
   snprintf(json_payload, sizeof(json_payload),
-           "{\"source\":\"real\",\"device_id\":\"ESP32-BIO-01\",\"heartRateValid\":%s,\"bloodOxygenValid\":false,\"spo2Calibrated\":false,\"signalQuality\":\"%s\",\"sampleAgeMs\":%lu,\"audioUnit\":\"dBFS\",\"audioValid\":%s,\"v\":2,\"valid\":%d,\"bpm\":%d,\"spo2\":%.1f,\"systolic\":0,\"diastolic\":0,\"temperature\":%.1f,\"chip_temp\":%.1f,\"stress\":%d,\"hrv\":%d,\"audio_rms\":%.1f,\"audio_peak\":%.6f,\"finger\":%s,\"scan_mode\":\"%s\",\"scan_sec\":%d,\"scan_phase\":\"%s\",\"cardiac_locked\":%s,\"power\":\"%s\",\"cal\":false,\"audio_unit\":\"dBFS\"}\n",
-           (valid_mask & 1) ? "true" : "false", quality, (unsigned long)sample_age, audio_valid ? "true" : "false", valid_mask,
+           "{\"source\":\"real\",\"device_id\":\"ESP32-BIO-01\",\"heartRateValid\":%s,\"bloodOxygenValid\":%s,\"spo2Calibrated\":false,\"spo2Estimated\":true,\"signalQuality\":\"%s\",\"sampleAgeMs\":%lu,\"audioUnit\":\"dBFS\",\"audioValid\":%s,\"v\":2,\"valid\":%d,\"bpm\":%d,\"spo2\":%.1f,\"systolic\":0,\"diastolic\":0,\"temperature\":%.1f,\"chip_temp\":%.1f,\"stress\":%d,\"hrv\":%d,\"audio_rms\":%.1f,\"audio_peak\":%.6f,\"finger\":%s,\"scan_mode\":\"%s\",\"scan_sec\":%d,\"scan_phase\":\"%s\",\"cardiac_locked\":%s,\"power\":\"%s\",\"cal\":false,\"audio_unit\":\"dBFS\"}\n",
+           (valid_mask & 1) ? "true" : "false", (valid_mask & 2) ? "true" : "false", quality, (unsigned long)sample_age, audio_valid ? "true" : "false", valid_mask,
            bpm_valid ? beat_avg : 0,
            spo2_valid ? spo2_val : 0.0f,
            0.0f,
@@ -1757,218 +1789,58 @@ void broadcast_telemetry() {
 // 11. EFECTOS VISUALES DEL LED RGB WS2812B (IO25) - PANEL DE CONTROL CLÍNICO INDIVIDUAL
 // ------------------------------------------------------------------------------
 void update_led_effects() {
+  // Barra WS2812 (8 LED, pin 25) = estado del aparato, de izquierda a derecha:
+  //   sin conexion al servidor : AMARILLO que se enciende uno por uno, en ciclo
+  //   al conectarse            : VERDE de izquierda a derecha dos veces y luego 3 parpadeos
+  //   conectado y en reposo    : VERDE fijo
+  //   grabando                 : AZUL como barra de carga (un LED por cada 1/8 de los 15 s)
+  //   enviando el audio        : AZUL parpadeando; al terminar vuelve a VERDE
+  //   captura fallida          : NARANJA 3 s
   static unsigned long last_led_update = 0;
+  static bool was_connected = false;
+  static unsigned long connect_anim_start = 0;
   unsigned long now = millis();
-
-  // Controlar refresco a intervalos estables (~30 FPS)
-  if (now - last_led_update < 33) return;
+  if (now - last_led_update < 33) return;   // ~30 cuadros por segundo
   last_led_update = now;
-  if (ausc_update_leds(NUM_LEDS)) return;
 
-  if (power_state == STATE_STANDBY_SAVER) {
-    // LED 0: Power / Alimentación (Verde Esmeralda fijo)
-    uint32_t led0_color = sensor_hw_found ? strip.Color(0, 230, 60) : strip.Color(240, 90, 0);
-    strip.setPixelColor(0, led0_color);
+  if (ausc_update_leds(NUM_LEDS)) return;   // grabacion (barra azul) y resultado de la captura
 
-    // LED 1: Bluetooth BLE (Azul Neón fijo si conectado; suave parpadeo cada 500ms en espera)
-    uint32_t led1_color;
-    if (ble_connected) {
-      led1_color = strip.Color(0, 120, 255);
-    } else {
-      bool blink_on = (now / 500) % 2;
-      led1_color = blink_on ? strip.Color(0, 80, 255) : strip.Color(0, 0, 0);
-    }
-    strip.setPixelColor(1, led1_color);
+  const uint32_t yellow = strip.Color(255, 150, 0);
+  const uint32_t green = strip.Color(0, 210, 40);
+  const uint32_t blue = strip.Color(0, 70, 255);
+  const uint32_t off = strip.Color(0, 0, 0);
 
-    // LEDs 2 al 7: Sensores médicos y acústica totalmente apagados en reposo
-    for (int i = 2; i < NUM_LEDS; i++) {
-      strip.setPixelColor(i, strip.Color(0, 0, 0));
-    }
+  if (ausc_sending()) {
+    bool on = (now / 250) % 2 == 0;
+    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, on ? blue : off);
     strip.show();
     return;
   }
 
-  // ============================================================================
-  // MAPEO INDIVIDUAL DE LOS 8 LEDS - ESTADOS DINÁMICOS Y COMPORTAMIENTO CLÍNICO:
-  // ============================================================================
+  bool connected = ausc_connected();
+  if (connected && !was_connected) connect_anim_start = now ? now : 1;
+  was_connected = connected;
 
-  // LED 0: SISTEMA & HARDWARE (Power / Alimentación)
-  // Verde Esmeralda clínico puro cuando el sistema y sensores están activos (Ámbar si hay fallo)
-  uint32_t led0_color = sensor_hw_found ? strip.Color(0, 230, 60) : strip.Color(240, 90, 0);
-  strip.setPixelColor(0, led0_color);
+  if (!connected) {
+    const unsigned long STEP_MS = 120;
+    int step = (now / STEP_MS) % (NUM_LEDS + 3);   // se llena y queda lleno un momento antes de reiniciar
+    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, i < step ? yellow : off);
+    strip.show();
+    return;
+  }
 
-  // LED 1: BLUETOOTH BLE (Enlace Inalámbrico)
-  // Parpadea rítmicamente en Azul Eléctrico en espera; queda Azul Neón fijo al conectar con el celular
-  uint32_t led1_color;
-  if (ble_connected) {
-    led1_color = strip.Color(0, 120, 255); // Azul Neón brillante fijo al conectar
+  const unsigned long SWEEP_STEP_MS = 70, BLINK_MS = 180;
+  const unsigned long sweep_ms = SWEEP_STEP_MS * NUM_LEDS;
+  unsigned long t = connect_anim_start ? now - connect_anim_start : ULONG_MAX;
+  if (t < 2 * sweep_ms) {
+    int lit = (t % sweep_ms) / SWEEP_STEP_MS + 1;
+    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, i < lit ? green : off);
+  } else if (t < 2 * sweep_ms + 6 * BLINK_MS) {
+    bool on = ((t - 2 * sweep_ms) / BLINK_MS) % 2 == 0;
+    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, on ? green : off);
   } else {
-    bool blink_on = (now / 450) % 2;       // Parpadeo suave cada 450 ms
-    led1_color = blink_on ? strip.Color(0, 80, 255) : strip.Color(0, 0, 0);
+    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, green);
   }
-  strip.setPixelColor(1, led1_color);
-
-  // LED 2: DETECCIÓN DE CONTACTO (Sensor Óptico / Dedo)
-  // Totalmente apagado en reposo; se enciende en Dorado / Oro Cálido en cuanto detecta el dedo
-  uint32_t led2_color = finger_detected ? strip.Color(200, 130, 0) : strip.Color(0, 0, 0);
-  strip.setPixelColor(2, led2_color);
-
-  // LED 3: LATIDO CARDÍACO EN VIVO (Onda Sistólica Fisiológica)
-  // Apagado sin dedo.
-  // En fase de lectura/calibración: suave respiración rubí indicando adquisición activa.
-  // En ritmo fijado: destello sistólico potente y nítido en cada latido real con brasa diastólica.
-  uint32_t led3_color;
-  if (!finger_detected) {
-    led3_color = strip.Color(0, 0, 0);
-  } else if (beat_avg == 0) {
-    // Fase de lectura / adquisición: respiración suave en rubí (~75 BPM) indicando medición en curso
-    float breath = 0.5f + 0.5f * sin((float)now / 140.0f);
-    int r = (int)(110.0f * breath + 20.0f);
-    int b = (int)(20.0f * breath);
-    led3_color = strip.Color(r, 0, b);
-  } else {
-    unsigned long elapsed = now - beat_flash_start;
-    if (elapsed < 280 && beat_flash_start > 0) {
-      if (elapsed < 75) {
-        // Pico sistólico máximo: Rojo Rubí brillante con destello blanco/coral intenso
-        led3_color = strip.Color(255, 45, 65);
-      } else {
-        // Caída diastólica suave y orgánica
-        float fade = 1.0f - ((float)(elapsed - 75) / 205.0f);
-        int r = (int)(235.0f * fade + 20.0f);
-        int g = (int)(40.0f * fade);
-        int b = (int)(55.0f * fade + 5.0f);
-        led3_color = strip.Color(r, g, b);
-      }
-    } else {
-      // Línea de base diastólica: suave brasa rubí (corazón en reposo fisiológico entre latidos)
-      led3_color = strip.Color(20, 0, 4);
-    }
-  }
-  strip.setPixelColor(3, led3_color);
-
-  // LED 4: OXÍGENO EN SANGRE SpO2 (Semáforo de Saturación)
-  // Apagado sin dedo; respiración turquesa sutil durante lectura inicial; Turquesa fijo si >=95%; Naranja si <95%
-  uint32_t led4_color;
-  if (!finger_detected) {
-    led4_color = strip.Color(0, 0, 0);
-  } else if (spo2_val < 70.0f) {
-    // Calibrando SpO2: suave respiración turquesa
-    float breath = 0.5f + 0.5f * sin((float)now / 180.0f);
-    led4_color = strip.Color(0, (int)(60.0f * breath + 10.0f), (int)(45.0f * breath + 10.0f));
-  } else if (spo2_val >= 95.0f) {
-    led4_color = strip.Color(0, 210, 160); // Turquesa Glaciar eléctrico
-  } else {
-    led4_color = strip.Color(255, 60, 0);   // Naranja Fuego de alerta hipoxia
-  }
-  strip.setPixelColor(4, led4_color);
-
-  // LED 5: RANGO DE FRECUENCIA CARDÍACA (BPM Zone Gauge)
-  // Apagado sin dedo; respiración fucsia sutil durante lectura inicial; Fucsia (60-100 BPM normal); Rojo (>100); Índigo (<60)
-  uint32_t led5_color;
-  if (!finger_detected) {
-    led5_color = strip.Color(0, 0, 0);
-  } else if (beat_avg == 0) {
-    // Calibrando FC: suave respiración fucsia
-    float breath = 0.5f + 0.5f * sin((float)now / 180.0f);
-    led5_color = strip.Color((int)(60.0f * breath + 10.0f), 0, (int)(40.0f * breath + 10.0f));
-  } else if (beat_avg > 100) {
-    led5_color = strip.Color(255, 0, 0);    // Rojo Intenso (Taquicardia)
-  } else if (beat_avg >= 60) {
-    led5_color = strip.Color(220, 15, 120); // Fucsia Neón (Ritmo normal saludable)
-  } else {
-    led5_color = strip.Color(70, 0, 220);   // Índigo Profundo (Bradicardia)
-  }
-  strip.setPixelColor(5, led5_color);
-
-  // LED 6: ACÚSTICA MÉDICA / MICRÓFONO INMP441 (VUMetro Reactivo Proporcional)
-  // Escala digital dBFS: conserva la respuesta equivalente del indicador anterior.
-  static float smooth_audio_level = 0.0f;
-  float target_level = 0.0f;
-
-  if (audio_valid && audio_rms >= -58.0f) {
-    // Umbrales visuales de -58 a -30 dBFS; no son niveles de presión sonora.
-    float ratio = (audio_rms + 58.0f) / 28.0f;
-    if (ratio > 1.0f) ratio = 1.0f;
-    target_level = ratio * ratio; // Curva cuadrática para percepción visual natural
-  }
-
-  // Ataque rápido al sonido (sube al instante), decaimiento suave y orgánico (~250 ms)
-  if (target_level > smooth_audio_level) {
-    smooth_audio_level = target_level;
-  } else {
-    smooth_audio_level = smooth_audio_level * 0.80f;
-    // Corte limpio en 0.06: evita que al desvanecerse el sub-píxel rojo quede visible
-    if (smooth_audio_level < 0.06f) smooth_audio_level = 0.0f;
-  }
-
-  uint32_t led6_color;
-  if (smooth_audio_level >= 0.06f) {
-    // Proporción Verde dominante (255) y Rojo (180): Amarillo Limón puro sin virar a naranja/rojo
-    int g = (int)(255.0f * smooth_audio_level);
-    int r = (int)(180.0f * smooth_audio_level);
-    // Destello blanco al acercarse al extremo superior del indicador digital.
-    int b = (smooth_audio_level > 0.75f) ? (int)(160.0f * (smooth_audio_level - 0.75f) * 4.0f) : 0;
-    led6_color = strip.Color(r, g, b);
-  } else {
-    led6_color = strip.Color(0, 0, 0); // Totalmente apagado en silencio
-  }
-  strip.setPixelColor(6, led6_color);
-
-  // LED 7: ÍNDICE DE ESTRÉS FISIOLÓGICO (0 - 100)
-  // Apagado sin dedo; Aguamarina (Relajado <45); Coral Naranja (Moderado 45-70); Rojo (Alto >70)
-  uint32_t led7_color;
-  if (!finger_detected) {
-    led7_color = strip.Color(0, 0, 0);
-  } else if (beat_avg == 0) {
-    float breath = 0.5f + 0.5f * sin((float)now / 180.0f);
-    led7_color = strip.Color(0, (int)(50.0f * breath + 10.0f), (int)(30.0f * breath + 10.0f));
-  } else if (stress_score > 70) {
-    led7_color = strip.Color(255, 0, 0);    // Rojo Alarma (Estrés alto)
-  } else if (stress_score >= 45) {
-    led7_color = strip.Color(255, 100, 15); // Coral Naranja Cálido (Estrés moderado)
-  } else {
-    led7_color = strip.Color(0, 200, 100);  // Aguamarina fresco (Relajado / Óptimo)
-  }
-  strip.setPixelColor(7, led7_color);
-
-  // ============================================================================
-  // AISLAMIENTO ESTRICTO DE LEDS SEGÚN MODO DE ESCANEO
-  // ============================================================================
-  if (active_scan_mode == SCAN_CARDIAC) {
-    // 1. En chequeo cardíaco: El micrófono (LED 6) queda COMPLETAMENTE APAGADO
-    strip.setPixelColor(6, strip.Color(0, 0, 0));
-
-    // 2. Si aún está en fase de calibración inicial (!cardiac_locked):
-    if (!cardiac_locked) {
-      if (!finger_detected) {
-        // Sin dedo aún: LED 2 apagado, LED 3 respirando en rubí suave invitando al usuario, LEDs 4, 5, 7 apagados
-        strip.setPixelColor(2, strip.Color(0, 0, 0));
-        float breath = 0.5f + 0.5f * sin((float)now / 200.0f);
-        strip.setPixelColor(3, strip.Color((int)(110.0f * breath + 20.0f), 0, (int)(30.0f * breath)));
-        strip.setPixelColor(4, strip.Color(0, 0, 0));
-        strip.setPixelColor(5, strip.Color(0, 0, 0));
-        strip.setPixelColor(7, strip.Color(0, 0, 0));
-      } else {
-        // Dedo colocado, estabilizando filtro DC y calculando primer pulso: LED 2 dorado, LED 3 respirando rubí/coral
-        strip.setPixelColor(2, strip.Color(200, 130, 0));
-        float breath = 0.5f + 0.5f * sin((float)now / 130.0f);
-        strip.setPixelColor(3, strip.Color((int)(150.0f * breath + 30.0f), (int)(15.0f * breath), (int)(35.0f * breath)));
-        strip.setPixelColor(4, strip.Color(0, (int)(45.0f * breath + 10.0f), (int)(35.0f * breath + 10.0f)));
-        strip.setPixelColor(5, strip.Color((int)(45.0f * breath + 10.0f), 0, (int)(30.0f * breath + 10.0f)));
-        strip.setPixelColor(7, strip.Color(0, (int)(35.0f * breath + 10.0f), (int)(20.0f * breath + 10.0f)));
-      }
-    }
-  } else if (active_scan_mode == SCAN_PULMONARY) {
-    // En auscultación pulmonar: Todos los LEDs biomédicos del sensor óptico (2, 3, 4, 5, 7) quedan TOTALMENTE APAGADOS
-    strip.setPixelColor(2, strip.Color(0, 0, 0));
-    strip.setPixelColor(3, strip.Color(0, 0, 0));
-    strip.setPixelColor(4, strip.Color(0, 0, 0));
-    strip.setPixelColor(5, strip.Color(0, 0, 0));
-    strip.setPixelColor(7, strip.Color(0, 0, 0));
-    // Únicamente LED 0 (Power), LED 1 (BLE) y LED 6 (Micrófono I2S) están activos
-  }
-
   strip.show();
 }
 

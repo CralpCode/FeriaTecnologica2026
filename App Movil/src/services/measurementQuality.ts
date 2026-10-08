@@ -1,5 +1,8 @@
 import { VitalSigns } from '../types/vitals';
 
+/** Etiqueta de los datos derivados del MAX30102 sin calibración ni validación clínica. */
+export const ESTIMATED = 'Estimado — no usar para diagnóstico';
+
 /** Missing provenance or quality metadata never becomes a valid clinical measurement. */
 export function measurementValidity(vitals: VitalSigns, now = Date.now()) {
   const received = Date.parse(vitals.timestamp);
@@ -9,16 +12,23 @@ export function measurementValidity(vitals: VitalSigns, now = Date.now()) {
     && typeof age === 'number' && Number.isFinite(age) && age >= 0 && age + Math.max(0, elapsed) <= 10000;
   const eligible = fresh && vitals.source === 'real' && vitals.finger === true && vitals.signalQuality === 'good'
     && vitals.device_connected !== false;
+  const pulse = eligible && vitals.heartRateValid === true && Number.isFinite(vitals.heartRate) && vitals.heartRate > 0;
+  const spo2 = eligible && vitals.bloodOxygenValid === true
+    && Number.isFinite(vitals.bloodOxygen) && vitals.bloodOxygen > 0 && vitals.bloodOxygen <= 100;
   return {
-    heartRate: eligible && vitals.heartRateValid === true && Number.isFinite(vitals.heartRate) && vitals.heartRate > 0,
-    bloodOxygen: eligible && vitals.bloodOxygenValid === true && vitals.spo2Calibrated === true
-      && Number.isFinite(vitals.bloodOxygen) && vitals.bloodOxygen > 0 && vitals.bloodOxygen <= 100,
+    heartRate: pulse,
+    bloodOxygen: spo2 && vitals.spo2Calibrated === true,
+    // Estimaciones derivadas del mismo sensor: se muestran siempre con su advertencia.
+    bloodOxygenEstimated: spo2 && vitals.spo2Calibrated !== true && vitals.spo2Estimated === true
+      && vitals.bloodOxygen >= 70,
+    hrv: pulse && Number.isFinite(vitals.hrv) && vitals.hrv > 0,
+    stress: pulse && Number.isFinite(vitals.stressLevel) && vitals.stressLevel > 0,
   };
 }
 
 /** Indicadores que solo envía el firmware nuevo; si no llega ninguno, el paquete es del formato original. */
 const NEW_FORMAT_KEYS = ['v', 'valid', 'source', 'heartRateValid', 'heart_rate_valid', 'bloodOxygenValid', 'spo2_valid',
-  'spo2Calibrated', 'spo2_calibrated', 'signalQuality', 'signal_quality', 'sampleAgeMs', 'sample_age_ms'];
+  'spo2Calibrated', 'spo2_calibrated', 'spo2Estimated', 'signalQuality', 'signal_quality', 'sampleAgeMs', 'sample_age_ms'];
 
 export function isLegacyPacket(raw: object): boolean {
   return !NEW_FORMAT_KEYS.some((key) => key in raw);

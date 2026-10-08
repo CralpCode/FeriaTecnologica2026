@@ -372,6 +372,7 @@ class DeviceBridgeService {
     const heartRateValid = legacyCheck ? legacyCheck.stable : (raw.heartRateValid ?? raw.heart_rate_valid) === true;
     const bloodOxygenValid = legacy ? false : (raw.bloodOxygenValid ?? raw.spo2_valid) === true;
     const spo2Calibrated = legacy ? false : (raw.spo2Calibrated ?? raw.spo2_calibrated) === true;
+    const spo2Estimated = legacy ? false : (raw.spo2Estimated ?? raw.spo2_estimated) === true;
     // Preserve the measured values; never smooth away clinically relevant changes.
     const finalHeartRate = Number.isFinite(raw.bpm) ? raw.bpm : 0;
     const currentSpo2 = !legacy && Number.isFinite(raw.spo2) ? raw.spo2 : 0;
@@ -398,6 +399,7 @@ class DeviceBridgeService {
       heartRateValid,
       bloodOxygenValid,
       spo2Calibrated,
+      spo2Estimated,
       signalQuality: legacyCheck
         ? (legacyCheck.stable ? 'good' : legacyCheck.finger ? 'unstable' : 'no_finger')
         : raw.signalQuality ?? raw.signal_quality ?? null,
@@ -434,6 +436,7 @@ class DeviceBridgeService {
           heartRateValid: data.heartRateValid ?? data.heart_rate_valid,
           bloodOxygenValid: data.bloodOxygenValid ?? data.spo2_valid,
           spo2Calibrated: data.spo2Calibrated ?? data.spo2_calibrated,
+          spo2Estimated: data.spo2Estimated ?? data.spo2_estimated,
           signalQuality: data.signalQuality ?? data.signal_quality,
           sampleAgeMs: data.sampleAgeMs ?? data.sample_age_ms,
           device_id: 'SpiroScan-Band',

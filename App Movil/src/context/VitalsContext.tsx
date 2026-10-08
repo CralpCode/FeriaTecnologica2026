@@ -224,6 +224,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           heartRateValid: incomingVitals.heartRateValid,
           bloodOxygenValid: incomingVitals.bloodOxygenValid,
           spo2Calibrated: incomingVitals.spo2Calibrated,
+          spo2Estimated: incomingVitals.spo2Estimated,
         };
         setHistory((prev) => {
           const updated = [...prev, newPoint];

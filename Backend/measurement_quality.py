@@ -5,11 +5,11 @@ from collections import deque
 from datetime import datetime, timezone
 
 MAX_AGE_S = 15
-QUALITY_FIELDS = ("source", "heartRateValid", "bloodOxygenValid", "spo2Calibrated",
+QUALITY_FIELDS = ("source", "heartRateValid", "bloodOxygenValid", "spo2Calibrated", "spo2Estimated",
                   "signalQuality", "sampleAgeMs", "finger", "audioUnit", "audioValid", "device_connected", "validadoPor")
 # Indicadores que solo envía el firmware nuevo; si no llega ninguno, el paquete es del formato original.
 NEW_FORMAT_KEYS = ("v", "valid", "source", "heartRateValid", "heart_rate_valid", "bloodOxygenValid", "spo2_valid",
-                   "spo2Calibrated", "spo2_calibrated", "signalQuality", "signal_quality",
+                   "spo2Calibrated", "spo2_calibrated", "spo2Estimated", "signalQuality", "signal_quality",
                    "sampleAgeMs", "sample_age_ms")
 
 
@@ -27,7 +27,13 @@ def number(value):
         return None
 
 
-def usable_value(data: dict, channel: str, *, check_timestamp=True):
+# SpO2 estimada: fórmula genérica del fabricante (Maxim) sin calibrar con este módulo. Se muestra y se usa
+# siempre con esa etiqueta; nunca cuenta como medición calibrada. Fuera de 70-100 % no es plausible.
+ESTIMATED_SPO2_RANGE = (70.0, 100.0)
+
+
+def usable_value(data: dict, channel: str, *, check_timestamp=True, allow_estimated=False):
+    """Valor utilizable del canal. Para SpO2, allow_estimated acepta también la estimada sin calibrar."""
     if data.get("source") != "real" or data.get("demo"):
         return None
     if data.get("signalQuality") != "good" or data.get("finger") is not True:
@@ -50,8 +56,12 @@ def usable_value(data: dict, channel: str, *, check_timestamp=True):
     if value is None or value <= 0:
         return None
     if channel == "bloodOxygen":
-        if data.get("spo2Calibrated") is not True or value > 100:
+        if value > 100:
             return None
+        if data.get("spo2Calibrated") is not True:
+            lo, hi = ESTIMATED_SPO2_RANGE
+            if not (allow_estimated and data.get("spo2Estimated") is True and lo <= value <= hi):
+                return None
     elif value > 300:
         return None
     return value
@@ -133,6 +143,7 @@ def clean_packet(raw: dict) -> tuple[dict, list[str]]:
     for key, aliases in (("heartRateValid", ("heartRateValid", "heart_rate_valid")),
                          ("bloodOxygenValid", ("bloodOxygenValid", "spo2_valid")),
                          ("spo2Calibrated", ("spo2Calibrated", "spo2_calibrated")),
+                         ("spo2Estimated", ("spo2Estimated", "spo2_estimated")),
                          ("audioValid", ("audioValid", "audio_valid"))):
         value = pick(*aliases)
         if value is not None and not isinstance(value, bool):

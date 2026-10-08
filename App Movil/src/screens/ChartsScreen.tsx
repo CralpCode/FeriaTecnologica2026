@@ -47,7 +47,7 @@ export const ChartsScreen: React.FC = () => {
       unit: '% SpO2',
       color: Colors.oxygen,
       icon: 'water-percent',
-      info: 'Saturación periférica de oxígeno por oximetría de pulso (luz roja 660 nm e infrarroja 880 nm).',
+      info: 'Saturación estimada por oximetría de pulso (luz roja e infrarroja) con la fórmula genérica del fabricante, sin calibrar con este módulo: puede desviarse varios puntos. No usar para diagnóstico.',
     },
     {
       id: 'hrv',
@@ -55,7 +55,7 @@ export const ChartsScreen: React.FC = () => {
       unit: 'ms',
       color: Colors.pressure,
       icon: 'heart-flash',
-      info: 'Variación del intervalo entre latidos detectados por el sensor óptico. Medición de referencia, no validada clínicamente.',
+      info: 'Variación del intervalo entre latidos detectados por el sensor óptico (estimada, en reposo). No validada clínicamente.',
     },
     {
       id: 'stressLevel',
@@ -63,7 +63,7 @@ export const ChartsScreen: React.FC = () => {
       unit: '/100',
       color: Colors.stress,
       icon: 'brain',
-      info: 'Índice experimental calculado en el firmware a partir del pulso y el nivel sonoro. No es una medición validada.',
+      info: 'Índice orientativo calculado en el firmware a partir de la variabilidad del pulso. No es una medición validada.',
     },
   ];
 
