@@ -36,6 +36,8 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
   useStepAction({ label: 'Continuar a corazón', icon: 'arrow-forward', onPress: onNext });
 
   const valid = measurementValidity(vitals, now);
+  const audioAvailable = vitals.source === 'real' && vitals.audioUnit === 'dBFS' && vitals.audioValid === true
+    && Number.isFinite(vitals.audio_rms) && vitals.audio_rms < 0 && now - Date.parse(vitals.timestamp) < 10000;
   const pulseUsed = triage?.datos_usados?.vitales_ultimo_minuto?.fc ?? null;
   const connected = connectedType !== 'none';
   const live = valid.heartRate ? Math.round(vitals.heartRate) : null;
@@ -127,6 +129,9 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
         <VitalTile icon="brain" tint={Colors.stress} label="Índice de estrés" unit="/100"
                    value={stress !== null ? String(Math.round(stress)) : null}
                    hint={stress !== null ? ESTIMATED : 'Esperando pulso estable'} />
+        <VitalTile icon="microphone" tint={Colors.audio} label="Micrófono" unit="dBFS"
+                   value={audioAvailable ? vitals.audio_rms.toFixed(1) : null}
+                   hint={audioAvailable ? 'Nivel digital, no presión sonora' : 'Sin lectura de audio'} />
       </View>
 
       {pulseUsed === null && (

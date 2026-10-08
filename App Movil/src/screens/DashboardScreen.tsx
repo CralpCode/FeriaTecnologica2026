@@ -27,6 +27,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToAI
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
 
   const valid = measurementValidity(vitals, now);
+  const audioAvailable = vitals.source === 'real' && vitals.audioUnit === 'dBFS'
+    && Number.isFinite(vitals.audio_rms) && vitals.audio_rms < 0 && now - Date.parse(vitals.timestamp) < 10000;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -65,6 +67,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToAI
                 <VitalTile icon="brain" tint={Colors.stress} label="Índice de estrés" unit="/100"
                            value={valid.stress ? String(Math.round(vitals.stressLevel)) : null}
                            hint={valid.stress ? ESTIMATED : 'Esperando pulso estable'} />
+                <VitalTile icon="microphone" tint={Colors.audio} label="Micrófono" unit="dBFS"
+                           value={audioAvailable ? vitals.audio_rms.toFixed(1) : null}
+                           hint={audioAvailable ? 'Nivel digital, no presión sonora' : 'Sin lectura de audio'} />
               </View>
             </View>
           }

@@ -21,6 +21,8 @@ export const AIAssistantScreen: React.FC = () => {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const valid = measurementValidity(vitals, now);
+  const audioAvailable = vitals.source === 'real' && vitals.audioUnit === 'dBFS'
+    && Number.isFinite(vitals.audio_rms) && vitals.audio_rms < 0 && now - Date.parse(vitals.timestamp) < 10000;
   const [inputText, setInputText] = useState('');
   const [showExplainer, setShowExplainer] = useState(false);
   const scrollViewRef = useRef<any>(null);
@@ -86,6 +88,8 @@ export const AIAssistantScreen: React.FC = () => {
             <LiveValue icon="water" tint={Colors.oxygen} label="Oxígeno SpO2"
                        value={valid.bloodOxygen ? `${vitals.bloodOxygen.toFixed(1)} %` : 'No disponible'} />
             <LiveValue icon="pulse" tint={Colors.stress} label="HRV" value="No disponible" />
+            <LiveValue icon="mic" tint={Colors.audio} label="Micrófono"
+                       value={audioAvailable ? `${vitals.audio_rms.toFixed(1)} dBFS` : 'Sin lectura'} />
           </View>
         </View>
 

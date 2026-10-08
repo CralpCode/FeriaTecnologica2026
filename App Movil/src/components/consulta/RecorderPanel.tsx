@@ -283,6 +283,7 @@ const RecordingCountdown: React.FC<{ elapsed: number; analyzing: boolean; proces
             <View style={styles.levelTrack}>
               <View style={[styles.levelFill, { width: `${Math.max(2, Math.min(100, ((level + 60) / 60) * 100))}%` }]} />
             </View>
+            <Text style={[styles.levelText, tabular]}>{level.toFixed(1)} dBFS</Text>
           </View>
         )}
       </View>
@@ -466,6 +467,7 @@ const styles = StyleSheet.create({
   levelRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.sm },
   levelTrack: { flex: 1, height: 6, borderRadius: 3, backgroundColor: color.border, overflow: 'hidden' },
   levelFill: { height: 6, borderRadius: 3, backgroundColor: color.info },
+  levelText: { fontSize: font.xs, color: color.textSecondary, fontWeight: weight.bold },
   error: { color: color.danger, fontSize: font.sm, marginTop: space.sm },
   links: { flexDirection: 'row', flexWrap: 'wrap', gap: space.lg, marginTop: space.sm },
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 40, cursor: 'pointer' as any },
