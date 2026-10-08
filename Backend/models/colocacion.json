@@ -8,7 +8,20 @@
       "ruido": 0.925,
       "pulmon_icbhi": 0.34456521739130436
     },
-    "activo": true
+    "activo": true,
+    "equipo": {
+      "umbral": 0.12,
+      "n_buenas": 10,
+      "n_ruido": 8,
+      "min_buenas": 0.0779,
+      "max_ruido": 0.1168,
+      "pasan_buenas": 7,
+      "bloquea_ruido": 8,
+      "fijado_por_usuario": true,
+      "traslape": true,
+      "generado": "2026-10-08T00:59:53",
+      "nota": "Calibrado con el estetoscopio del proyecto: sin latidos claros el corazón pide repetir."
+    }
   },
   "pulmon": {
     "umbral": 0.11738871133742983,

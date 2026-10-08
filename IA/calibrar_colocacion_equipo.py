@@ -12,7 +12,10 @@ Se mide la misma periodicidad que usa el servidor (placement.measure). Si los do
 queda a la mitad entre la buena más baja y la de ruido más alta, y el control BLOQUEA: sin latidos claros el
 servidor no da normal ni anormal. Si se traslapan no se escribe nada (nunca se inventa un umbral).
 
-Uso:  python calibrar_colocacion_equipo.py [--minimo 8] [--solo-mostrar]
+Si se traslapan, el usuario puede fijar el umbral a mano con --umbral (queda anotado como decisión suya, con
+cuántas buenas pasan y cuántas de ruido se bloquean con ese valor).
+
+Uso:  python calibrar_colocacion_equipo.py [--minimo 8] [--solo-mostrar] [--umbral 0.12]
 Salida: bloque corazon.equipo de Backend/models/colocacion.json (el resto del archivo se conserva).
 """
 import argparse
@@ -63,6 +66,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--minimo", type=int, default=8)
     ap.add_argument("--solo-mostrar", action="store_true")
+    ap.add_argument("--umbral", type=float, help="umbral elegido por el usuario cuando los grupos se traslapan")
     args = ap.parse_args()
 
     conn = sqlite3.connect(str(DB))
@@ -77,13 +81,23 @@ def main():
     ruido = [v for _, v in groups["ruido"]]
     thr, why = proponer_umbral(buenas, ruido, args.minimo)
     print(why)
+    manual = args.umbral is not None
+    if manual:
+        if len(buenas) < args.minimo or len(ruido) < args.minimo:
+            return 1
+        thr = round(args.umbral, 4)
     if thr is None or args.solo_mostrar:
         return 1 if thr is None else 0
+    pasan = sum(v >= thr for v in buenas)
+    bloqueadas = sum(v < thr for v in ruido)
+    print(f"Con {thr:.3f}: pasan {pasan} de {len(buenas)} buenas y se bloquean {bloqueadas} de {len(ruido)} con ruido.")
 
     cfg = json.loads(OUT.read_text())
     cfg.setdefault("corazon", {})["equipo"] = {
         "umbral": thr, "n_buenas": len(buenas), "n_ruido": len(ruido),
         "min_buenas": round(min(buenas), 4), "max_ruido": round(max(ruido), 4),
+        "pasan_buenas": pasan, "bloquea_ruido": bloqueadas,
+        "fijado_por_usuario": manual, "traslape": min(buenas) <= max(ruido),
         "generado": datetime.now().isoformat(timespec="seconds"),
         "nota": "Calibrado con el estetoscopio del proyecto: sin latidos claros el corazón pide repetir.",
     }
