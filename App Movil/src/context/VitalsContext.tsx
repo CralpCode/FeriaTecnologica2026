@@ -404,7 +404,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         setIsBackendOnline(true);
         const ac = res.report.acoustic_analysis;
         if (ac) {
-          modelText = `Modelo base: ${ac.prediction} (salida acústica del modelo ${Math.round(ac.probability_abnormal * 100)} %).`;
+          modelText = `Modelo base: ${ac.prediction}.`;
         }
       }
     } catch {

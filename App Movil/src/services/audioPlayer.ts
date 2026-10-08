@@ -1,5 +1,6 @@
 import { Linking } from 'react-native';
 import { AuscultationMode } from '../types/vitals';
+import { loadWaveform, playbackGain, START_SKIP_S } from './waveform';
 
 /**
  * Reproductor de grabaciones (.wav) del servidor, con filtro de escucha.
@@ -82,6 +83,10 @@ function connectFilters() {
       currentNodes.push(f);
     }
   }
+  // Volumen automático: los latidos del estetoscopio son suaves (ver waveform.ts)
+  const gain = ctx.createGain();
+  gain.gain.value = currentUrl ? playbackGain(currentUrl) : 1;
+  currentNodes.push(gain);
   let node = currentSource;
   for (const f of currentNodes) {
     node.connect(f);
@@ -153,9 +158,14 @@ export const audioPlayer = {
       await Linking.openURL(url);
       return;
     }
+    loadWaveform(url);   // volumen de escucha (normalmente ya calculado al dibujar la onda); no se espera: el navegador exige reproducir enseguida
     const audio = new (window as any).Audio();
     audio.crossOrigin = 'anonymous'; // necesario para filtrar audio de otro origen (app en desarrollo)
     audio.src = url;
+    // Se salta el golpe de arranque del micrófono
+    audio.addEventListener('loadedmetadata', () => {
+      if (Number(audio.duration) > START_SKIP_S * 4) audio.currentTime = START_SKIP_S;
+    }, { once: true });
     audio.onended = () => this.stop();
     current = audio;
     currentUrl = url;

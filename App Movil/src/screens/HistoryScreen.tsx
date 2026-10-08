@@ -259,7 +259,6 @@ const SessionDetail: React.FC<{
               <Text style={styles.recText} numberOfLines={1}>{focusName(r.location)}</Text>
               <Text style={styles.meta}>
                 {when(r.created_at)}
-                {r.probability !== null && r.probability !== undefined ? ` · salida ${Math.round(r.probability * 100)} %` : ''}
                 {r.recording_id.startsWith('demo_') ? ' · caso de demostración' : ''}
               </Text>
             </View>

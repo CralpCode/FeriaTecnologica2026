@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { Text } from '../ui/Text';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import Svg, { Line, Path } from 'react-native-svg';
 import { useClinical } from '../../context/ClinicalContext';
 import { useVitals } from '../../context/VitalsContext';
 import { apiService } from '../../services/api';
@@ -291,32 +290,6 @@ const RecordingCountdown: React.FC<{ elapsed: number; analyzing: boolean; proces
   );
 };
 
-/** Medidor semicircular: salida del clasificador frente a su umbral (no es probabilidad de enfermedad). */
-const Gauge: React.FC<{ value: number; threshold: number; tint: string }> = ({ value, threshold, tint }) => {
-  const W = 132, H = 74, cx = W / 2, cy = 68, r = 56;
-  const pt = (f: number) => {
-    const a = Math.PI * (1 - Math.max(0, Math.min(1, f)));
-    return { x: cx + r * Math.cos(a), y: cy - r * Math.sin(a) };
-  };
-  const arc = (f: number) => {
-    const p = pt(f);
-    return `M${cx - r} ${cy} A${r} ${r} 0 0 1 ${p.x.toFixed(2)} ${p.y.toFixed(2)}`;
-  };
-  const t1 = pt(threshold);
-  const a = Math.PI * (1 - threshold);
-  const t2 = { x: cx + (r - 13) * Math.cos(a), y: cy - (r - 13) * Math.sin(a) };
-  return (
-    <View style={{ width: W, height: H + 4, alignItems: 'center' }}>
-      <Svg width={W} height={H}>
-        <Path d={arc(1)} stroke={color.surfaceMuted} strokeWidth={10} fill="none" strokeLinecap="round" />
-        {value > 0.005 && <Path d={arc(value)} stroke={tint} strokeWidth={10} fill="none" strokeLinecap="round" />}
-        <Line x1={t1.x + (t1.x - cx) * 0.12} y1={t1.y + (t1.y - cy) * 0.12} x2={t2.x} y2={t2.y} stroke={color.text} strokeWidth={2.5} strokeLinecap="round" />
-      </Svg>
-      <Text style={[styles.gaugeValue, tabular, { color: tint }]}>{pct(value)}</Text>
-    </View>
-  );
-};
-
 /** Resultado de una grabación: onda real, salida del clasificador frente a su umbral y descripción. */
 export const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) => {
   const { refresh } = useClinical();
@@ -331,8 +304,6 @@ export const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) =>
   const s = RESULT_STYLE[result.result] || RESULT_STYLE.error;
   const t = toneColors[s.tone];
   const hasProb = result.probability !== null && result.probability !== undefined;
-  const prob = result.probability ?? 0;
-  const thr = result.threshold ?? 0.5;
   const playable = !!result.recording_id && !result.recording_id.startsWith('demo_') && result.has_audio !== false;
   return (
     <Card tone={s.tone}>
@@ -362,19 +333,8 @@ export const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) =>
                   + 'presión firme y constante sobre el foco, y pide silencio.'} />
       )}
 
-      {hasProb ? (
-        <View style={styles.gaugeRow}>
-          <Gauge value={prob} threshold={thr} tint={t.fg} />
-          <View style={{ flex: 1, minWidth: 160 }}>
-            <Text style={styles.gaugeLabel}>Salida del clasificador</Text>
-            <Text style={styles.meta}>
-              <Text style={styles.strong}>{pct(prob)}</Text> frente al umbral de <Text style={styles.strong}>{pct(thr)}</Text>
-              {' '}(la raya negra). Por encima del umbral se marca como posible anormal.
-            </Text>
-            <Text style={styles.meta}>No es probabilidad de enfermedad ni certeza clínica.</Text>
-          </View>
-        </View>
-      ) : !!result.reason && result.details?.colocacion?.ok !== false
+      {/* Decisión del usuario (2026-10-08): no se muestra el puntaje del modelo, solo el resultado. */}
+      {!hasProb && !!result.reason && result.details?.colocacion?.ok !== false
         && <Text style={[styles.meta, { marginTop: space.sm }]}>{result.reason}</Text>}
 
       {result.result === 'error' && playable && <Button label="Reintentar análisis del audio guardado"
@@ -406,15 +366,15 @@ const DetailsView: React.FC<{ result: RecordingResult }> = ({ result }) => {
       {traits.length > 0 && <Text style={styles.detailsTitle}>Cómo suena el soplo</Text>}
       {traits.map(([k, tr]) => (
         <DetailRow key={k} label={TRAIT_NAMES[k] || k} value={tr.valor}
-                   note={`salida ${pct(tr.confianza)} · exactitud en prueba ${pct(tr.exactitud_modelo)}`} />
+                   note={`exactitud en prueba ${pct(tr.exactitud_modelo)}`} />
       ))}
       {sounds.length > 0 && <Text style={styles.detailsTitle}>Ruidos respiratorios</Text>}
       {sounds.map(([k, so]) => (
         <DetailRow key={k} label={k.charAt(0).toUpperCase() + k.slice(1)} value={so.presente ? 'detectados' : 'no detectados'}
-                   note={pct(so.probabilidad)} />
+ />
       ))}
       {d.patron && <DetailRow label="Patrón compatible con" value={d.patron.compatible_con} note="descripción acústica; no identifica una enfermedad" />}
-      {d.modelo_base && <DetailRow label="Modelo base" value={d.modelo_base.prediction} note={pct(d.modelo_base.probability_abnormal)} />}
+      {d.modelo_base && <DetailRow label="Modelo base" value={d.modelo_base.prediction} />}
       {traits.length > 0 && <Text style={styles.meta}>Describe el sonido; no identifica la causa del soplo.</Text>}
     </View>
   );
@@ -494,9 +454,6 @@ const styles = StyleSheet.create({
   resultTitle: { fontSize: font.lg, fontWeight: weight.heavy, letterSpacing: -0.3 },
   meta: { fontSize: font.xs, color: color.textSecondary, lineHeight: 18, marginTop: 4 },
   waveBox: { backgroundColor: '#FFFFFF', borderRadius: radius.md, padding: space.md, marginTop: space.md },
-  gaugeRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.lg, marginTop: space.md },
-  gaugeValue: { fontSize: font.lg, fontWeight: weight.heavy, marginTop: -30 },
-  gaugeLabel: { fontSize: font.sm, fontWeight: weight.heavy, color: color.text },
   suggest: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.md },
   details: { backgroundColor: '#FFFFFF', borderRadius: radius.md, padding: space.md, marginTop: space.md, gap: 2 },
   detailsTitle: { fontSize: font.xs, fontWeight: weight.heavy, color: color.textMuted, letterSpacing: 0.5, textTransform: 'uppercase', marginTop: 4 },

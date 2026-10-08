@@ -87,8 +87,6 @@ def _session_context(session_id: str) -> dict:
              "foco": LOCATION_NAMES.get(r["location"], r["location"] or "sin especificar"),
              "resultado": r["result"],
              "detalles": r.get("details") or {},
-             "puntuacion_modelo": f"{r['probability']:.0%}" if r["probability"] is not None else None,
-             "umbral": f"{r['threshold']:.0%}" if r["threshold"] is not None else None,
              "hora": r["created_at"]}
             for r in recs
         ],
@@ -242,8 +240,7 @@ def _fallback_report(ctx: dict) -> dict:
         hallazgos.append(f"SpO2 promedio {s['spo2_prom']} % (mínimo {s['spo2_min']} %).")
     anormales = [g for g in ctx["grabaciones"] if g["resultado"] == "anormal"]
     for g in ctx["grabaciones"]:
-        p = f" ({g['puntuacion_modelo']})" if g["puntuacion_modelo"] else ""
-        hallazgos.append(f"Foco {g['foco']}: {g['resultado']}{p}.")
+        hallazgos.append(f"Foco {g['foco']}: {g['resultado']}.")
     alerta = bool(anormales or any(a["severidad"] == "crítica" for a in ctx["alertas"]))
     return {
         "resumen": f"Sesión con {s.get('n', 0)} lecturas válidas y {len(ctx['grabaciones'])} grabaciones cardíacas.",
@@ -273,7 +270,7 @@ def chat(session_id: str, message: str) -> str:
         + "Si la respuesta no está en ninguna de las dos fuentes, dilo y no inventes.\n"
         + "Si preguntan algo que el dispositivo no mide o que requiere diagnóstico, explícalo con amabilidad.\n"
         + "Si la persona cuenta síntomas en el chat, pídele que los registre en la valoración de Auscultación.\n"
-        + "La 'puntuacion_modelo' es la puntuación de la red neuronal, no una probabilidad ni una certeza clínica.\n"
+        + "No menciones porcentajes ni puntajes de los modelos: informa solo el resultado de cada grabación.\n"
         + f"BASE DE CONOCIMIENTO DEL PROYECTO:\n{project_knowledge()}\n"
         + f"DATOS DE LA SESIÓN (fuente única de verdad):\n{json.dumps(ctx, ensure_ascii=False, default=str)}"
     )

@@ -146,15 +146,13 @@ def _findings_section(session_id: str, h2, body, small) -> list:
                      "anormal &nbsp;&nbsp; Blanco: sin grabación válida reciente. Último resultado de cada foco en los últimos "
                      "30 minutos. Frente: la derecha del paciente queda a la izquierda del dibujo.", small)]
     if recs:
-        rows = [["Foco / zona", "Tipo", "Resultado", "Salida / umbral", "Hora"]]
+        rows = [["Foco / zona", "Tipo", "Resultado", "Hora"]]
         for r in sorted(recs, key=lambda r: ((r.get("mode") or "corazon") != "corazon", r.get("location") or "")):
-            p, t = r.get("probability"), r.get("threshold")
             rows.append([report_body.NAMES.get(r.get("location"), r.get("location") or "—"),
                          "Pulmón" if r.get("mode") == "pulmon" else "Corazón",
                          "Posible anormal" if r.get("result") == "anormal" else "Sin hallazgos",
-                         f"{p:.0%} / {t:.0%}" if p is not None and t is not None else "—",
                          str(r.get("created_at", ""))[11:19]])
-        out += [Spacer(1, 4), _table(rows, [150, 60, 100, 90, 60], compact=True)]
+        out += [Spacer(1, 4), _table(rows, [190, 80, 150, 80], compact=True)]
     return out
 
 

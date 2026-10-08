@@ -28,7 +28,7 @@ TEMPLATES = {
                  "El dispositivo está conectado pero no detecta pulso desde hace {sustain} s.",
                  "Colocar el dedo sobre el sensor óptico sin presionar demasiado."),
     "soplo": ("caution", "Sonido cardíaco anormal",
-              "La grabación del foco {location} tuvo puntuación del modelo {prob:.0%} (no es certeza clínica) (umbral {thr:.0%}).",
+              "La grabación del foco {location} mostró un posible sonido anormal (tamizaje, no es certeza clínica).",
               "Esto es un tamizaje, no un diagnóstico: referir a evaluación médica y ecocardiograma."),
     "hallazgo_pulmonar": ("caution", "Posible hallazgo pulmonar",
                           "La grabación de la zona {location} mostró: {finding}.",
@@ -109,16 +109,13 @@ def evaluate_recording(result: dict) -> list[dict]:
         if not parts and (det.get("modelo_base") or {}).get("is_abnormal") == 1:
             parts.append("sonido patológico según el modelo base")
         _last_alert.pop((sid, "hallazgo_pulmonar"), None)
-        prob, thr = result.get("probability"), result.get("threshold")
         a = _fire(sid, "hallazgo_pulmonar", location=loc, finding="; ".join(parts) or "sonido anormal",
-                  recording_id=result["recording_id"], details=det, demo=demo,
-                  puntuacion_modelo=f"{prob:.0%}" if prob is not None else None,
-                  umbral=f"{thr:.0%}" if thr is not None else None)
+                  recording_id=result["recording_id"], details=det, demo=demo)
         return [a] if a else []
     if result["result"] == "anormal":
         # Cada grabación anormal es un hallazgo independiente: sin enfriamiento.
         _last_alert.pop((sid, "soplo"), None)
-        a = _fire(sid, "soplo", location=loc, prob=result["probability"], thr=result["threshold"],
+        a = _fire(sid, "soplo", location=loc,
                   recording_id=result["recording_id"], demo=demo,
                   caracteristicas=(result.get("details") or {}).get("caracteristicas_soplo", {}))
         return [a] if a else []
