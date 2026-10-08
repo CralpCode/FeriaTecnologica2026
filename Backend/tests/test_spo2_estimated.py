@@ -45,10 +45,21 @@ class EstimatedSpo2AssessmentTests(unittest.TestCase):
         self.assertNotEqual(out["status"], "urgent")
         self.assertNotEqual(out["status"], "findings")
 
-    def test_normal_estimate_never_gives_green(self):
-        out = self.assess(97.0)
-        self.assertNotEqual(out["status"], "no_specific_findings")
-        self.assertTrue(any("SpO2 calibrada" in m for m in out["missing_data"]))
+    def test_uncalibrated_or_missing_spo2_never_blocks_green(self):
+        import clinical_assessment
+        ctx = clinical_assessment.ClinicalContext(
+            age_years=30, at_rest=True, altitude_m=1500,
+            symptoms={k: False for k in clinical_assessment.Symptoms.model_fields},
+            history={k: False for k in clinical_assessment.History.model_fields}).model_dump()
+        recs = [{"id": f, "mode": "corazon", "location": f, "result": "normal", "source": "real"}
+                for f in ("AV", "PV", "TV", "MV")] + [{"id": "AL", "mode": "pulmon", "location": "AL",
+                                                       "result": "normal", "source": "real"}]
+        for spo2, estimated in ((80.5, True), (None, False)):
+            out = clinical_assessment.assess(ctx, {"heartRate": 72.0, "bloodOxygen": spo2,
+                                                   "spo2_estimated": estimated, "counts": {}}, recs)
+            self.assertEqual(out["status"], "no_specific_findings", out["missing_data"])
+            self.assertFalse(any("SpO2" in m for m in out["missing_data"]))
+            self.assertTrue(any("SpO2 calibrada" in m for m in out["limitations"]))
 
 
 if __name__ == "__main__":

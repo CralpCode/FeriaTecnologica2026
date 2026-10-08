@@ -181,14 +181,11 @@ def assess(context: dict, vitals: dict, recordings: list[dict]) -> dict:
         finding("pulse_outside_screening_range", "Pulso fuera de los límites de aviso del prototipo", [f"Mediana de pulso válido: {hr:g} BPM."])
         steps.append("Consultar si el pulso alterado persiste. No permite diagnosticar arritmias: para eso se requiere evaluación y ECG.")
     spo2_estimated = vitals.get("spo2_estimated") is True
-    if spo2 is None:
-        missing.append("SpO2 válida, reciente y calibrada: el MAX30102 sin calibración no aporta oxígeno clínicamente interpretable.")
-    elif spo2_estimated:
-        # Estimación sin calibrar: orienta, pero no confirma ni descarta; el verde sigue requiriendo SpO2 calibrada.
-        missing.append("SpO2 calibrada: la estimada (sin calibrar) no sirve para confirmar ni descartar hipoxemia.")
-        limitations.append("La SpO2 del MAX30102 es una estimación sin calibrar con este módulo: puede desviarse varios puntos.")
-        # Decisión del usuario (2026-10-08): una SpO2 estimada sin calibrar nunca genera hallazgo ni cambia el
-        # semáforo; con este módulo da valores bajos falsos. Solo la SpO2 calibrada puede generar hallazgos.
+    # Decisión del usuario (2026-10-08): la SpO2 sin calibrar (o ausente) no cambia el semáforo: ni genera hallazgo
+    # ni cuenta como dato faltante (antes impedía llegar a verde). Queda solo como limitación declarada.
+    if spo2 is None or spo2_estimated:
+        limitations.append("Sin SpO2 calibrada: la del MAX30102 es una estimación sin calibrar con este módulo y no confirma "
+                           "ni descarta hipoxemia; no se usa en el semáforo.")
     elif spo2 < 94:
         finding("low_oxygen", "SpO2 reducida: confirmar con equipo clínico", [f"Mediana válida: {spo2:g} %; considerar altitud y valor habitual."])
         if spo2 < 90:

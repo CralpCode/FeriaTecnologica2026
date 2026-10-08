@@ -158,7 +158,7 @@ export const AIExplainerModal: React.FC<{ visible: boolean; onClose: () => void 
               <Text style={styles.p}>No es inteligencia artificial: son reglas fijas, fáciles de revisar.</Text>
               <Bullet color={Colors.danger} text="ROJO: un síntoma de alarma (dificultad intensa para respirar, labios azulados, confusión, desmayo o dolor de pecho) u oxígeno calibrado menor a 90 %." />
               <Bullet color={Colors.warning} text="AMARILLO: sonido del corazón o de los pulmones anormal, síntomas comunicados, oxígeno calibrado menor a 94 % o pulso fuera de 45–120 en un adulto en reposo." />
-              <Bullet color={Colors.textSecondary} text="GRIS: faltan datos. Sin oxígeno calibrado todavía no se puede llegar a VERDE." />
+              <Bullet color={Colors.textSecondary} text="GRIS: faltan datos (edad, síntomas, pulso o grabaciones). El oxígeno sin calibrar no cuenta para el semáforo." />
               <Bullet color={Colors.success} text="VERDE: sin hallazgos y sin datos faltantes." />
             </Section>
 

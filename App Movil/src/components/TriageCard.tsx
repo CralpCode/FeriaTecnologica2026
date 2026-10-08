@@ -62,7 +62,7 @@ export const TriageCard: React.FC<{ triage: TriageResult | null }> = ({ triage }
         </View>
       </View>
       <Text style={styles.note}>
-        Combina síntomas, pulso, SpO2 (solo si está calibrada) y sonidos de corazón y pulmón con reglas fijas del equipo. No es un diagnóstico.
+        Combina síntomas, pulso y sonidos de corazón y pulmón con reglas fijas del equipo (la SpO2 solo cuenta si está calibrada). No es un diagnóstico.
       </Text>
     </View>
   );
