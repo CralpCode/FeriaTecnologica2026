@@ -115,6 +115,10 @@ def model_info() -> dict:
     }
 
 
+PLACEMENT_REASON = ("No se oyen latidos claros (ruido, roce o estetoscopio mal colocado). "
+                    "Repite con el estetoscopio quieto, presión firme y en silencio.")
+
+
 def classify_wav(path: str | Path, eq=None, check_placement: bool = False) -> dict:
     """Devuelve probabilidad de anormalidad, resultado y calidad de la señal.
 
@@ -139,6 +143,10 @@ def classify_wav(path: str | Path, eq=None, check_placement: bool = False) -> di
                 "probability": None, "threshold": None, "quality": quality}
 
     colocacion = placement.check(y, sr, "corazon") if check_placement else None
+    if colocacion and colocacion.get("bloquea") and not colocacion["ok"]:
+        # Sin latidos claros (ruido, roce o mala colocación) el modelo juzgaría ruido: no se da normal ni anormal.
+        return {"result": "calidad_insuficiente", "reason": PLACEMENT_REASON, "probability": None, "threshold": None,
+                "quality": quality, "details": {"colocacion": colocacion, "motivo": PLACEMENT_REASON}}
     if eq is not None:
         y = eq(y, sr)
     _load()

@@ -158,7 +158,7 @@ export interface RecordingDetails {
   /** Presente si el servidor corrigió el audio con la respuesta medida de la pieza (fantoma). */
   ecualizacion?: { perfil: string; bandas_corregidas: number; max_refuerzo_db: number; relativa_a_referencia?: boolean };
   /** Aviso de colocación (Backend/ml/placement.py): si se oyen latidos con ritmo. No cambia el resultado. */
-  colocacion?: { periodicidad: number; umbral: number; ok: boolean; que: string };
+  colocacion?: { periodicidad: number; umbral: number; ok: boolean; que: string; fuente?: 'equipo' | 'clinico'; bloquea?: boolean };
 }
 
 export type TriageLevel = 'rojo' | 'amarillo' | 'verde' | 'gris';

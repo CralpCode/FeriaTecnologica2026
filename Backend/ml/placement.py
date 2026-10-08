@@ -10,7 +10,8 @@ públicas fue la medida que mejor separó latidos de ruido (IA/calibrar_colocaci
 El umbral sale de IA/calibrar_colocacion.py con grabaciones reales (PhysioNet, CirCor, ICBHI) y queda en
 Backend/models/colocacion.json; sin ese archivo el control está apagado.
 
-Es solo un AVISO: no cambia el resultado del clasificador. Sirve para sugerir revisar la colocación y repetir.
+Sin calibrar con el equipo es solo un AVISO. Calibrado con este estetoscopio (bloque "equipo" del json),
+el clasificador del corazón no da normal/anormal cuando no hay latidos claros: pide repetir (ml/classifier.py).
 """
 import json
 from pathlib import Path
@@ -83,10 +84,16 @@ def measure(y: np.ndarray, sr: int, mode: str) -> float:
 
 
 def check(y: np.ndarray, sr: int, mode: str) -> dict | None:
-    """None si el control está apagado para ese modo; si no, {periodicidad, umbral, ok, que}."""
+    """None si el control está apagado para ese modo; si no, {periodicidad, umbral, ok, que, fuente, bloquea}.
+
+    Con un umbral calibrado con ESTE estetoscopio (bloque "equipo", IA/calibrar_colocacion_equipo.py) el control
+    bloquea: sin latidos claros no se da normal ni anormal. Sin esa calibración solo avisa (umbral clínico)."""
     cfg = (_load_config() or {}).get(mode) or {}
     if not cfg.get("activo") or mode not in PARAMS:
         return None
     r = measure(y, sr, mode)
-    thr = float(cfg["umbral"])
-    return {"periodicidad": round(r, 3), "umbral": round(thr, 3), "ok": bool(r >= thr), "que": PARAMS[mode]["que"]}
+    device = cfg.get("equipo") or {}
+    calibrated = isinstance(device.get("umbral"), (int, float))
+    thr = float(device["umbral"] if calibrated else cfg["umbral"])
+    return {"periodicidad": round(r, 3), "umbral": round(thr, 3), "ok": bool(r >= thr), "que": PARAMS[mode]["que"],
+            "fuente": "equipo" if calibrated else "clinico", "bloquea": calibrated}

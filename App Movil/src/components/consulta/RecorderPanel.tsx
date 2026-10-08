@@ -355,8 +355,11 @@ export const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) =>
 
       {result.details?.colocacion?.ok === false && (
         <Banner tone="warning" icon="locate-outline" style={{ marginTop: space.md, marginBottom: 0 }}
-                title={`No se detectaron ${result.details.colocacion.que} claros`}
-                text="¿El estetoscopio está en el foco correcto y con buen contacto? Conviene repetir esta grabación." />
+                title={result.details.colocacion.bloquea
+                  ? `No se oyen ${result.details.colocacion.que} claros: repite la grabación`
+                  : `No se detectaron ${result.details.colocacion.que} claros`}
+                text={'Puede ser ruido, roce o mala colocación. Para repetir: estetoscopio quieto y sin tocar el cable, '
+                  + 'presión firme y constante sobre el foco, y pide silencio.'} />
       )}
 
       {hasProb ? (
@@ -371,7 +374,8 @@ export const ResultCard: React.FC<{ result: RecordingResult }> = ({ result }) =>
             <Text style={styles.meta}>No es probabilidad de enfermedad ni certeza clínica.</Text>
           </View>
         </View>
-      ) : !!result.reason && <Text style={[styles.meta, { marginTop: space.sm }]}>{result.reason}</Text>}
+      ) : !!result.reason && result.details?.colocacion?.ok !== false
+        && <Text style={[styles.meta, { marginTop: space.sm }]}>{result.reason}</Text>}
 
       {result.result === 'error' && playable && <Button label="Reintentar análisis del audio guardado"
         onPress={retryAnalysis} loading={retrying} variant="secondary" />}

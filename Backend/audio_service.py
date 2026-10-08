@@ -323,6 +323,7 @@ def _stored_result(rec: dict) -> dict:
         "source": rec.get("source"), "mode": rec.get("mode") or "corazon", "duration_s": rec.get("duration_s"),
         "result": rec.get("result") or rec["status"], "probability": rec.get("probability"),
         "threshold": rec.get("threshold"), "quality": parsed("quality"), "model": rec.get("model"),
-        "details": parsed("details") or {}, "reason": (parsed("quality") or {}).get("error"),
+        "details": parsed("details") or {},
+        "reason": (parsed("details") or {}).get("motivo") or (parsed("quality") or {}).get("error"),
         "has_audio": bool(rec.get("wav_path")) and Path(rec["wav_path"]).exists(), "repetido": True,
     }

@@ -100,6 +100,12 @@ def main():
         "nota": "Aviso de colocación: no cambia el resultado del clasificador. Calibrado con estetoscopios clínicos.",
     }
     OUT.parent.mkdir(exist_ok=True)
+    try:   # la calibración con el equipo (calibrar_colocacion_equipo.py) se conserva
+        previous = json.loads(OUT.read_text())
+    except (OSError, ValueError):
+        previous = {}
+    if (previous.get("corazon") or {}).get("equipo"):
+        cfg["corazon"]["equipo"] = previous["corazon"]["equipo"]
     OUT.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
     for mode in ("corazon", "pulmon"):
         c = cfg[mode]
