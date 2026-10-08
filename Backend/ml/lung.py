@@ -123,7 +123,7 @@ def classify_wav(path: str | Path, eq=None, check_placement: bool = False) -> di
     quality["windows"] = int(len(x))
     details: dict = {}
     abnormal = False
-    top_prob = 0.0
+    top = None   # (margen, salida, umbral) de la salida más cerca o más por encima de su umbral: la que se muestra
     usable_outputs = 0
 
     if sounds is not None:
@@ -147,7 +147,8 @@ def classify_wav(path: str | Path, eq=None, check_placement: bool = False) -> di
             found[name] = {"presente": present, "probabilidad": round(float(score[j]), 3), "umbral": round(thr, 3),
                            "sensibilidad_modelo": round(full.get("sensibilidad", m["sensibilidad"]), 2)}
             abnormal |= present
-            top_prob = max(top_prob, float(score[j]))
+            if top is None or score[j] - thr > top[0]:
+                top = (float(score[j] - thr), float(score[j]), float(thr))
         details["ruidos"] = found
 
     if disease is not None and disease[1].get("mostrar"):
@@ -171,4 +172,5 @@ def classify_wav(path: str | Path, eq=None, check_placement: bool = False) -> di
         return {**base, "result": "indeterminado", "details": details,
                 "reason": "Ninguna salida del modelo cumple los criterios de uso; no se puede concluir normalidad"}
     return {**base, "result": "anormal" if abnormal else "normal", "reason": None,
-            "probability": round(top_prob, 4) if "ruidos" in details else None, "details": details}
+            "probability": round(top[1], 4) if top else None, "threshold": round(top[2], 4) if top else None,
+            "details": details}
