@@ -62,5 +62,27 @@ class EstimatedSpo2AssessmentTests(unittest.TestCase):
             self.assertFalse(any("calibr" in m.lower() for m in out["missing_data"] + out["limitations"] + out["next_steps"]))
 
 
+class TrafficLightTests(unittest.TestCase):
+    """El semáforo no exagera: los síntomas comunes no lo ponen amarillo; solo lo que encuentra el equipo."""
+
+    def assess(self, symptoms=None, heart_result="normal"):
+        import clinical_assessment as ca
+        base = {k: False for k in ca.Symptoms.model_fields}
+        base.update(symptoms or {})
+        ctx = ca.ClinicalContext(age_years=30, at_rest=True, altitude_m=1500, symptoms=base,
+                                 history={k: False for k in ca.History.model_fields}).model_dump()
+        recs = [{"id": f, "mode": "corazon", "location": f, "result": heart_result if f == "MV" else "normal",
+                 "source": "real"} for f in ("AV", "PV", "TV", "MV")]
+        recs.append({"id": "AL", "mode": "pulmon", "location": "AL", "result": "normal", "source": "real"})
+        return ca.assess(ctx, {"heartRate": 72.0, "bloodOxygen": None, "counts": {}}, recs)["status"]
+
+    def test_common_symptoms_do_not_turn_yellow(self):
+        self.assertEqual(self.assess({"cough": True, "fever": True, "wheeze": True}), "no_specific_findings")
+
+    def test_device_findings_turn_yellow_and_alarm_symptoms_red(self):
+        self.assertEqual(self.assess(heart_result="anormal"), "findings")
+        self.assertEqual(self.assess({"chest_pain": True}), "urgent")
+
+
 if __name__ == "__main__":
     unittest.main()

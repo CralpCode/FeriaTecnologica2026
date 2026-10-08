@@ -44,7 +44,7 @@ Se combinan resultados acústicos, mediciones válidas y síntomas mediante regl
 
 La API, el semáforo, los informes y el chat comparten este motor. Las secciones clínicas del informe son fijas (reglas). El modelo de lenguaje local (Qwen3-Next) redacta el chat, un resumen en lenguaje sencillo del informe y el texto de las alertas a partir de estos datos; no decide hallazgos ni enfermedades, y un texto con cifras que no están en los datos se descarta.
 
-Semáforo: ROJO si hay un síntoma de alarma. AMARILLO si hay hallazgos (pulso fuera de 45 a 120 BPM en un adulto en reposo, sonido cardíaco o pulmonar anormal) o síntomas comunicados. GRIS si faltan datos. VERDE sin hallazgos ni datos faltantes. El oxígeno del sensor no cambia el semáforo.
+Semáforo: ROJO si hay un síntoma de alarma. AMARILLO solo si el equipo encuentra algo (pulso fuera de 45 a 120 BPM en un adulto en reposo, sonido cardíaco o pulmonar anormal); los síntomas comunes como tos o fiebre no lo cambian. GRIS si faltan datos. VERDE sin hallazgos ni datos faltantes. El oxígeno del sensor no cambia el semáforo.
 
 ## Uso
 

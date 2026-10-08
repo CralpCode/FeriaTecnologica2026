@@ -157,7 +157,7 @@ export const AIExplainerModal: React.FC<{ visible: boolean; onClose: () => void 
             <Section icon="traffic-light" color={Colors.warning} title="4. Las reglas: el semáforo">
               <Text style={styles.p}>No es inteligencia artificial: son reglas fijas, fáciles de revisar.</Text>
               <Bullet color={Colors.danger} text="ROJO: un síntoma de alarma (dificultad intensa para respirar, labios azulados, confusión, desmayo o dolor de pecho)." />
-              <Bullet color={Colors.warning} text="AMARILLO: sonido del corazón o de los pulmones anormal, síntomas comunicados o pulso fuera de 45–120 en un adulto en reposo." />
+              <Bullet color={Colors.warning} text="AMARILLO: el equipo encontró algo: sonido del corazón o de los pulmones anormal, o pulso fuera de 45–120 en un adulto en reposo. Los síntomas comunes (tos, fiebre) no lo cambian." />
               <Bullet color={Colors.textSecondary} text="GRIS: faltan datos (edad, síntomas, pulso o grabaciones)." />
               <Bullet color={Colors.success} text="VERDE: sin hallazgos y sin datos faltantes." />
             </Section>

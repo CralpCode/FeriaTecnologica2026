@@ -253,8 +253,10 @@ def assess(context: dict, vitals: dict, recordings: list[dict]) -> dict:
         steps.append("Consultar a personal de salud por los síntomas; las lecturas del prototipo no descartan sus causas.")
     if not steps:
         steps.append("Completar los datos faltantes y repetir mediciones válidas. Si aparecen síntomas, buscar valoración médica.")
-    has_symptoms = any(v is True for v in symptoms.values())
-    status = "urgent" if urgent else "findings" if findings or possibilities or has_symptoms else "insufficient_data" if missing else "no_specific_findings"
+    # Decisión del usuario (2026-10-08): el semáforo no exagera. Amarillo solo si el equipo encuentra algo (sonido
+    # anormal, pulso fuera de rango); los síntomas comunes (tos, fiebre...) y las posibilidades no lo cambian.
+    # Rojo solo con síntomas de alarma.
+    status = "urgent" if urgent else "findings" if findings else "insufficient_data" if missing else "no_specific_findings"
     summary = {"urgent": "Hay señales que requieren atención médica urgente; no espere a la IA.",
                "findings": "Hay hallazgos o síntomas que requieren valoración. Estas posibilidades no son diagnósticos ni están ordenadas por probabilidad.",
                "insufficient_data": "Faltan datos válidos para orientar la valoración; no se puede concluir que todo esté normal.",
