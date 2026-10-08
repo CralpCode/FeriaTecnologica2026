@@ -679,6 +679,32 @@ async def _audio_queue_loop():
         await asyncio.sleep(0.5)
 
 
+def _warm_up_models():
+    """Carga los modelos y hace un análisis de prueba al arrancar: así la primera grabación de la consulta
+    (en especial la de pulmón, con el modelo AST de 343 MB) no espera la carga."""
+    import tempfile
+    import numpy as np
+    import soundfile as sf
+    from ml import classifier, lung
+    started = time.perf_counter()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = os.path.join(tmp, "calentamiento.wav")
+            rng = np.random.default_rng(0)
+            sf.write(wav, (0.05 * rng.standard_normal(16000 * 10)).astype(np.float32), 16000)
+            lung.classify_wav(wav)
+            classifier.classify_wav(wav)
+        print(f"[MODELOS] Corazón y pulmón listos en {time.perf_counter() - started:.1f} s", flush=True)
+    except Exception as exc:   # nunca impide arrancar: se cargarán en la primera grabación
+        print(f"[MODELOS] No se pudieron precargar: {exc}", flush=True)
+
+
+@app.on_event("startup")
+async def _preload_models():
+    if os.getenv("SPIROSCAN_PRELOAD_MODELS", "1") != "0":
+        app.state.warmup_task = asyncio.create_task(asyncio.to_thread(_warm_up_models))
+
+
 @app.on_event("startup")
 async def _start_audio_queue():
     _load_device_link()

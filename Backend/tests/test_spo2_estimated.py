@@ -39,11 +39,11 @@ class EstimatedSpo2AssessmentTests(unittest.TestCase):
         vitals = {"heartRate": 72.0, "bloodOxygen": spo2, "spo2_estimated": True, "counts": {}}
         return clinical_assessment.assess(ctx, vitals, [])
 
-    def test_low_estimate_asks_to_confirm_but_is_not_an_emergency(self):
-        out = self.assess(88.0)
-        self.assertIn("low_oxygen_estimated", [f["code"] for f in out["findings"]])
+    def test_low_estimate_never_creates_a_finding(self):
+        out = self.assess(80.5)
+        self.assertEqual(out["findings"], [])
         self.assertNotEqual(out["status"], "urgent")
-        self.assertTrue(any("oxímetro" in s for s in out["next_steps"]))
+        self.assertNotEqual(out["status"], "findings")
 
     def test_normal_estimate_never_gives_green(self):
         out = self.assess(97.0)

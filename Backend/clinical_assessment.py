@@ -185,12 +185,10 @@ def assess(context: dict, vitals: dict, recordings: list[dict]) -> dict:
         missing.append("SpO2 válida, reciente y calibrada: el MAX30102 sin calibración no aporta oxígeno clínicamente interpretable.")
     elif spo2_estimated:
         # Estimación sin calibrar: orienta, pero no confirma ni descarta; el verde sigue requiriendo SpO2 calibrada.
-        missing.append(f"SpO2 calibrada: la estimada ({spo2:g} %, fórmula genérica del fabricante) no basta para descartar hipoxemia.")
+        missing.append("SpO2 calibrada: la estimada (sin calibrar) no sirve para confirmar ni descartar hipoxemia.")
         limitations.append("La SpO2 del MAX30102 es una estimación sin calibrar con este módulo: puede desviarse varios puntos.")
-        if spo2 < 94:
-            finding("low_oxygen_estimated", "SpO2 estimada baja: confirmar con un oxímetro",
-                    [f"Mediana estimada: {spo2:g} % (sin calibrar)."])
-            steps.insert(0, "Confirmar de inmediato la saturación con un oxímetro; si se confirma baja, buscar valoración médica.")
+        # Decisión del usuario (2026-10-08): una SpO2 estimada sin calibrar nunca genera hallazgo ni cambia el
+        # semáforo; con este módulo da valores bajos falsos. Solo la SpO2 calibrada puede generar hallazgos.
     elif spo2 < 94:
         finding("low_oxygen", "SpO2 reducida: confirmar con equipo clínico", [f"Mediana válida: {spo2:g} %; considerar altitud y valor habitual."])
         if spo2 < 90:
