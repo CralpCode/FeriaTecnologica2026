@@ -1,0 +1,42 @@
+import { test, expect } from '@playwright/test';
+
+test('external oxygen: validation, persistence, patient isolation and withdrawal', async ({ page, request }, info) => {
+  const code = `OX${info.project.name === 'celular' ? 'CEL' : 'PC'}${Date.now() % 100000}`;
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Nuevo paciente', exact: true }).first().click();
+  await page.getByLabel('Código o iniciales del paciente').fill(code);
+  await page.getByRole('button', { name: 'Crear paciente', exact: true }).click();
+  await page.getByRole('button', { name: 'Guardar y continuar', exact: true }).click();
+  await page.getByRole('button', { name: 'Agregar SpO2 externa', exact: true }).click();
+  await page.getByLabel('SpO2 del oxímetro externo (%)').fill('101');
+  await page.getByRole('button', { name: 'Guardar SpO2 externa', exact: true }).click();
+  await expect(page.getByText('Escribe el porcentaje del oxímetro, mayor que 0 y hasta 100.', { exact: true })).toBeVisible();
+  await page.getByLabel('SpO2 del oxímetro externo (%)').fill('95,5');
+  await page.getByLabel('Nombre del oxímetro externo').fill('Oxímetro de referencia');
+  await page.getByRole('button', { name: 'Guardar SpO2 externa', exact: true }).click();
+  await expect(page.getByLabel('SpO2 externa: 95.5 por ciento')).toBeVisible();
+  // Use the persisted reading to identify the patient's server session independently of UI storage keys.
+  const overview = await (await request.get('/api/history')).json();
+  const patient = overview.find((r: any) => r.session_id.includes(code.toLowerCase()) || r.session_id.includes(code));
+  expect(patient).toBeTruthy();
+  const context = await (await request.get(`/api/clinical/assessment/${patient.session_id}`)).json();
+  expect(context.vitals_used.bloodOxygen).toBe(95.5);
+  expect(context.vitals_used.bloodOxygenSource).toBe('manual_external');
+  await page.reload();
+  await page.getByRole('tab', { name: /Paso 3: Pulso/ }).click();
+  await expect(page.getByLabel('SpO2 externa: 95.5 por ciento')).toBeVisible();
+  await page.getByRole('button', { name: 'Nuevo paciente', exact: true }).first().click();
+  await page.getByLabel('Código o iniciales del paciente').fill(`${code}B`);
+  await page.getByRole('button', { name: 'Crear paciente', exact: true }).click();
+  await page.getByRole('button', { name: 'Guardar y continuar', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Agregar SpO2 externa', exact: true })).toBeVisible();
+  await expect(page.getByLabel('SpO2 externa: 95.5 por ciento')).not.toBeVisible();
+  await page.getByRole('button', { name: 'Agregar SpO2 externa', exact: true }).click();
+  await page.getByLabel('SpO2 del oxímetro externo (%)').fill('96');
+  await page.getByRole('button', { name: 'Guardar SpO2 externa', exact: true }).click();
+  await expect(page.getByLabel('SpO2 externa: 96 por ciento')).toBeVisible();
+  await page.getByRole('button', { name: 'Retirar SpO2 externa', exact: true }).click();
+  await expect(page.getByText('Lectura externa retirada.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Agregar SpO2 externa', exact: true })).toBeVisible();
+  expect((await (await request.get(`/api/clinical/external-spo2/${patient.session_id}`)).json()).reading.value).toBe(95.5);
+});

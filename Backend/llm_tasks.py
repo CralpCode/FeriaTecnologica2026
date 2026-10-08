@@ -81,6 +81,7 @@ def _session_context(session_id: str) -> dict:
     return {
         "vitales_ultimas_lecturas": database.get_latest_reading(session_id=session_id),
         "resumen_vitales_sesion": database.get_vitals_summary(session_id),
+        "oximetria_externa": database.get_external_spo2(session_id),
         "grabaciones": [
             {"tipo": "pulmón" if r.get("mode") == "pulmon" else "corazón",
              "foco": LOCATION_NAMES.get(r["location"], r["location"] or "sin especificar"),
@@ -304,6 +305,8 @@ def chat(session_id: str, message: str, app_vitals: dict | None = None) -> str:
         + "no permiten diagnosticar estrés. Un nivel de micrófono no detecta enfermedades. "
         + "Si el estado dice 'ultima_valida_esperando_senal', aclara que es la última lectura, no una muestra actual. "
         + "Para conclusiones clínicas utiliza exclusivamente 'valoracion' y 'triaje'.\n"
+        + "'oximetria_externa' es SpO2 ingresada manualmente desde otro oxímetro, con su fecha y origen. "
+        + "Solo si active=true es reciente para la valoración; no la atribuyas al MAX30102 ni infieras su calibración.\n"
         + f"BASE DE CONOCIMIENTO DEL PROYECTO:\n{project_knowledge()}\n"
         + f"DATOS DE LA SESIÓN (fuente única de verdad):\n{json.dumps(ctx, ensure_ascii=False, default=str)}"
     )
@@ -322,9 +325,14 @@ def chat(session_id: str, message: str, app_vitals: dict | None = None) -> str:
 def _chat_fallback(assessment: dict, vitals: dict | None = None) -> str:
     """Respuesta fija por reglas cuando el modelo de lenguaje no está disponible."""
     lines = []
+    external = assessment.get('vitals_used', {}).get('externalBloodOxygen')
+    if external:
+        state = 'reciente' if external.get('active') else 'anterior, fuera de la valoración actual'
+        lines.append(f"SpO2 externa: {external['value']:g} %; ingreso manual de {external['device_name']} ({state}), "
+                     f"registrada {external['measured_at']}. No procede del MAX30102.")
     if vitals:
         readings = vitals.get('lecturas_dispositivo', {})
-        labels = {'heartRate': 'Pulso', 'bloodOxygen': 'Oxígeno SpO2', 'hrv': 'Variabilidad PRV',
+        labels = {'heartRate': 'Pulso', 'bloodOxygen': 'SpO2 del sensor', 'hrv': 'Variabilidad PRV',
                   'experimentalStressScore': 'Estrés experimental', 'audio_rms': 'Micrófono'}
         values = []
         for key, label in labels.items():

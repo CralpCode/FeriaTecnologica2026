@@ -99,6 +99,8 @@ unsigned long cardiac_wait_start_ms = 0;      // Tiempo de espera para colocar e
 
 Adafruit_NeoPixel strip(NUM_LEDS, WS2812_PIN, NEO_GRB + NEO_KHZ800);
 #include "auscultacion.h"
+#include "wifi_setup.h"
+static volatile bool ble_initial_telemetry_pending = false;
 static volatile bool recording_requested = false;
 static volatile bool optical_probe_requested = false;
 static volatile bool optical_probe_running = false;
@@ -1587,6 +1589,7 @@ void run_optical_emitter_probe() {
 // ------------------------------------------------------------------------------
 void handle_incoming_commands(String raw_cmd) {
   raw_cmd.trim();
+  if (raw_cmd.startsWith("WIFI_")) return;  // Provisioning is exclusively through BLE.
   raw_cmd.toUpperCase();
 
   // Limpieza estricta de caracteres de control o basura de trama
@@ -1779,7 +1782,13 @@ void broadcast_telemetry() {
                 audio_rms, (valid_mask & 16) ? 1 : 0,
                 finger_detected ? "SI" : "NO", scan_str, scan_remaining);
   Serial.print(json_payload);
-  ausc_send_telemetry(json_payload);
+  uint32_t sample_age_ms = UINT32_MAX;
+  if ((valid_mask & 7) && ppg_last_data_ms) sample_age_ms = millis() - ppg_last_data_ms;
+  if ((valid_mask & 16) && audio_last_data_ms) {
+    uint32_t audio_age_ms = millis() - audio_last_data_ms;
+    if (audio_age_ms < sample_age_ms) sample_age_ms = audio_age_ms;
+  }
+  ausc_send_telemetry(json_payload, sample_age_ms);
 }
 
 // ------------------------------------------------------------------------------
@@ -2028,6 +2037,7 @@ public:
 private:
     void process_incoming(String cmd) {
       cmd.trim();
+      if (wifi_receive_ble(cmd)) return;  // Credentials must never reach logs or uppercase conversion.
       Serial.printf("[BLE RX CALLBACK] Comando recibido: \"%s\" (len: %d)\r\n", cmd.c_str(), cmd.length());
       if (cmd.length() > 0) {
         handle_incoming_commands(cmd);
@@ -2039,14 +2049,18 @@ private:
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       ble_connected = true;
+      wifi_bluetooth_seen = true;
+      ble_initial_telemetry_pending = true;
       Serial.println(F("\r\n========================================================================="));
       Serial.println(F("  [BLE] >>> ¡CLIENTE BLUETOOTH CONECTADO DIRECTO! (CELULAR / PC)       <<<"));
       Serial.println(F("=========================================================================\r\n"));
-      broadcast_telemetry();
     };
 
     void onDisconnect(BLEServer* pServer) {
       ble_connected = false;
+      portENTER_CRITICAL(&wifi_setup_mux);
+      wifi_buffer.clear();
+      portEXIT_CRITICAL(&wifi_setup_mux);
       Serial.println(F("\r\n[BLE] Cliente desconectado. Reiniciando publicidad inmediata..."));
       delay(100);
       BLEDevice::startAdvertising();
@@ -2137,7 +2151,7 @@ void setup() {
   setup_max30102();
   report_i2s_clocks();
   report_i2s_sd();
-  ausc_wifi_begin();
+  wifi_load_settings();
 
   Serial.println(F("[OK] Firmware inicializado con exito."));
   Serial.println(F("=========================================================================\r\n"));
@@ -2160,6 +2174,12 @@ void loop() {
     handle_incoming_commands(ser_cmd);
   }
 
+  // Serialize JSON notifications in loop so WiFi fragments cannot interleave.
+  if (ble_initial_telemetry_pending) {
+    ble_initial_telemetry_pending = false;
+    broadcast_telemetry();
+  }
+  wifi_setup_maintain();
   ausc_net_maintain();
   if (optical_probe_requested && !ausc_busy()) {
     optical_probe_requested = false;

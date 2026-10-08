@@ -71,7 +71,7 @@ class IntegratedTelemetryTests(unittest.TestCase):
         self.assertEqual(readings['audio_rms']['unit'], 'relative_uncalibrated')
         with patch('ai_engine.llm_chat', side_effect=TimeoutError('prueba')):
             reply = self.client.post('/api/ai/chat', json={'session_id': 'merge-patient', 'message': 'Mis datos'}).json()['reply']
-        self.assertIn('Oxígeno SpO2: 97.5 %', reply)
+        self.assertIn('SpO2 del sensor: 97.5 %', reply)
         self.assertIn('sin calibrar', reply)
         self.assertIn('Variabilidad PRV: 40 ms', reply)
         self.assertIn('Micrófono: 53.6 relative_uncalibrated', reply)

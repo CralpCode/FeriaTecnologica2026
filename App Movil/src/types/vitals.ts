@@ -215,8 +215,19 @@ export interface TriageResult {
   aviso: string;
   demo?: boolean;               // incluye un caso de demostración ICBHI (no es de esta persona)
   datos_usados?: {
-    vitales_ultimo_minuto: { spo2: number | null; fc: number | null; lecturas: number } | null;
+    vitales_ultimo_minuto: { spo2: number | null; fc: number | null; lecturas: number; lecturas_pulso?: number; spo2_origen?: string | null } | null;
   };
+}
+
+export interface ExternalSpO2Reading {
+  id: number;
+  session_id: string;
+  value: number;
+  device_name: string;
+  measured_at: string;
+  source: 'manual_external';
+  active: boolean;
+  expires_after_seconds: number;
 }
 
 export interface RecordingResult {
@@ -256,6 +267,7 @@ export interface SessionOverview {
   first_seen: string | null;
   last_seen: string | null;
   readings: number;
+  external_readings?: number;
   recordings: number;
   abnormal_recordings: number;
   alerts: number;

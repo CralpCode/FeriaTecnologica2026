@@ -3,7 +3,8 @@
 // que arma el WAV y lo clasifica con la CNN.
 //
 // Protocolo (ver Backend/audio_service.py):
-//   POST /api/audio/start   {"device_id","sample_rate"}  -> {"recording_id"}
+//   GET /api/device/comando?device_id=... (cada segundo sin bloquear sensores)
+//   POST /api/audio/start   {"device_id","sample_rate","comando_id"} -> {"recording_id"}
 //   POST /api/audio/chunk?recording_id=...   PCM int16 LE mono (0.5 s por bloque)
 //   POST /api/audio/finish?recording_id=...  -> {"result": "normal" | "anormal" | "calidad_insuficiente"}
 //
@@ -12,7 +13,7 @@
 //
 // Servidor:
 //   - SERVER_URL vacio  -> busca la Mac en el MISMO WiFi por mDNS (servicio _spiroscan._tcp).
-//   - SERVER_URL "https://...trycloudflare.com" -> envia por internet desde CUALQUIER red.
+//   - SERVER_URL "https://spiroscan.tail8e9fc2.ts.net" -> envia por internet.
 // La telemetria de pulso/SpO2 (1 vez por segundo) se envia desde una tarea aparte, para que
 // la conexion https (mas lenta) nunca frene la lectura de los sensores.
 // ==============================================================================
@@ -25,12 +26,13 @@
 #include <driver/i2s.h>
 #include <Adafruit_NeoPixel.h>
 #include "recording_command.h"
+#include "server_protocol.h"
 
 #if __has_include("spiroscan_config.h")
 #include "spiroscan_config.h"
 #else
 #include "spiroscan_config.example.h"
-#warning "Usando spiroscan_config.example.h: crea spiroscan_config.h con el nombre y la clave del WiFi"
+#warning "Usando spiroscan_config.example.h; WiFi configurable desde la app por Bluetooth"
 #endif
 
 #ifndef SERVER_URL
@@ -69,12 +71,14 @@ static volatile int ausc_http_failures = 0;
 // Ultima telemetria pendiente de enviar (la escribe el loop, la lee la tarea de envio)
 static char ausc_telem_json[512];
 static unsigned long ausc_telem_queued_ms = 0;
+static uint32_t ausc_telem_sample_age_ms = 0;
 static volatile bool ausc_telem_pending = false;
 static portMUX_TYPE ausc_telem_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t ausc_telem_task = nullptr;
 static RecordingCommand ausc_command;
 static portMUX_TYPE ausc_command_mux = portMUX_INITIALIZER_UNLOCKED;
-static void ausc_receive_command(const String& body);
+static bool ausc_receive_command(const String& body);
+static void ausc_start_network_task();
 
 static bool ausc_queue_recording_id(const String& id) {
   portENTER_CRITICAL(&ausc_command_mux);
@@ -113,18 +117,7 @@ static void ausc_http_begin(HTTPClient& http, WiFiClientSecure& tls, WiFiClient&
 // ------------------------------------------------------------------------------
 // WiFi
 // ------------------------------------------------------------------------------
-void ausc_wifi_begin() {
-#if !__has_include("spiroscan_config.h")
-  // Without WiFi credentials, USB/BLE remain usable without retrying a placeholder network.
-  WiFi.mode(WIFI_OFF);
-  Serial.println(F("[WiFi] Sin configuracion local: telemetria disponible por USB/BLE."));
-  return;
-#endif
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(true);   // ESP32 requiere modem sleep al coexistir WiFi y BLE.
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.printf("[*] WiFi: conectando a \"%s\"...\r\n", WIFI_SSID);
-}
+// WiFi lifecycle and BLE-first provisioning live in wifi_setup.h.
 
 bool ausc_wifi_ready() {
   return WiFi.status() == WL_CONNECTED;
@@ -186,8 +179,8 @@ void ausc_net_maintain() {
 
 bool ausc_busy();
 
-// Tarea (nucleo 0) que envia la telemetria pendiente 1 vez por segundo. Mantiene la conexion
-// abierta entre envios (importante con https: el saludo TLS es lo mas lento).
+// Red en nucleo 0: consulta ordenes a 1 Hz incluso en reposo/sin telemetria.
+// GET y POST comparten conexion. Durante la captura esta tarea deja la red al audio.
 static void ausc_telemetry_task(void*) {
   WiFiClientSecure tls;
   WiFiClient plain;
@@ -195,28 +188,66 @@ static void ausc_telemetry_task(void*) {
   http.setReuse(true);
   bool open = false;
   char json[sizeof(ausc_telem_json)];
+  TickType_t next = xTaskGetTickCount();
+  const TickType_t period = pdMS_TO_TICKS(1000);
   while (true) {
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelayUntil(&next, period);
+    // Skip missed slots after a slow connection; never burst requests to catch up.
+    if (xTaskGetTickCount() - next >= period) next = xTaskGetTickCount();
     if (ausc_busy()) {
       // Durante la grabacion se libera la conexion: la memoria y la red son para el audio.
       if (open) { http.end(); tls.stop(); plain.stop(); open = false; }
       continue;
     }
-    if (!ausc_wifi_ready() || !ausc_server_known() || !ausc_telem_pending) continue;
+    if (!ausc_wifi_ready() || !ausc_server_known()) {
+      if (open) { http.end(); tls.stop(); plain.stop(); open = false; }
+      continue;
+    }
+
+    ausc_http_begin(http, tls, plain, ausc_server() + "/api/device/comando?device_id=" + DEVICE_ID);
+    int command_code = http.GET();
+    String command_response = http.getString();
+    open = true;
+    char command_id[9] = {};
+    if (command_code == 200 && spiroscan_protocol::recording_id(command_response.c_str(), command_id)) {
+      // Free the TLS connection before loop starts its own /audio/start request.
+      http.end(); tls.stop(); plain.stop(); open = false;
+      if (ausc_queue_recording_id(String(command_id))) continue;
+    }
+    if (command_code != 200) {
+      Serial.printf("[NET] Consulta de orden no disponible (HTTP %d)\r\n", command_code);
+      http.end(); tls.stop(); plain.stop(); open = false;
+      ausc_note_http_result(false);
+      continue;
+    }
+    ausc_note_http_result(true);
+    if (!ausc_telem_pending || ausc_busy()) continue;
     portENTER_CRITICAL(&ausc_telem_mux);
     memcpy(json, ausc_telem_json, sizeof(json));
-    bool expired = millis() - ausc_telem_queued_ms > 2000;
+    uint32_t queued_age = millis() - ausc_telem_queued_ms;
+    uint32_t sample_age = ausc_telem_sample_age_ms;
+    bool expired = queued_age > 2000;
     ausc_telem_pending = false;
     portEXIT_CRITICAL(&ausc_telem_mux);
     if (expired) continue;
+    sample_age = sample_age > UINT32_MAX - queued_age ? UINT32_MAX : sample_age + queued_age;
+    char* payload = spiroscan_protocol::telemetry(json, DEVICE_ID, sample_age);
+    if (!payload) continue;
 
     String url = ausc_server() + "/api/telemetry";
     ausc_http_begin(http, tls, plain, url);
     http.addHeader("Content-Type", "application/json");
-    int code = http.POST((uint8_t*)json, strlen(json));
+    int code = http.POST((uint8_t*)payload, strlen(payload));
+    cJSON_free(payload);
     String response = http.getString();
-    if (code == 200) ausc_receive_command(response);
     open = true;
+    if (code == 200) {
+      char id[9] = {};
+      if (spiroscan_protocol::recording_id(response.c_str(), id)) {
+        http.end(); tls.stop(); plain.stop(); open = false;
+        ausc_receive_command(response);
+      }
+    }
     if (code != 200) {
       Serial.printf("[NET] Telemetria no enviada (HTTP %d)\r\n", code);
       http.end(); tls.stop(); plain.stop(); open = false;
@@ -225,41 +256,35 @@ static void ausc_telemetry_task(void*) {
   }
 }
 
-// Guarda la ultima telemetria; la tarea de envio la manda (no bloquea el loop).
-void ausc_send_telemetry(const char* json) {
+static void ausc_start_network_task() {
   if (!ausc_telem_task) {
     xTaskCreatePinnedToCore(ausc_telemetry_task, "ausc_telem", 16384, nullptr, 1, &ausc_telem_task, 0);
   }
+}
+
+// Guarda la ultima telemetria; la tarea de envio la manda (no bloquea el loop).
+void ausc_send_telemetry(const char* json, uint32_t sample_age_ms) {
+  ausc_start_network_task();
   portENTER_CRITICAL(&ausc_telem_mux);
   strncpy(ausc_telem_json, json, sizeof(ausc_telem_json) - 1);
   ausc_telem_json[sizeof(ausc_telem_json) - 1] = '\0';
   ausc_telem_queued_ms = millis();
+  ausc_telem_sample_age_ms = sample_age_ms;
   ausc_telem_pending = true;
   portEXIT_CRITICAL(&ausc_telem_mux);
 }
 
 static String ausc_json_field(const String& body, const char* key) {
-  String k = String("\"") + key + "\":\"";
-  int i = body.indexOf(k);
-  if (i < 0) return "";
-  i += k.length();
-  int j = body.indexOf('"', i);
-  return j > i ? body.substring(i, j) : "";
+  cJSON* root = cJSON_ParseWithOpts(body.c_str(), nullptr, true);
+  const cJSON* field = cJSON_GetObjectItemCaseSensitive(root, key);
+  String value = cJSON_IsString(field) ? String(field->valuestring) : String("");
+  cJSON_Delete(root);
+  return value;
 }
 
-static void ausc_receive_command(const String& body) {
-  // Scope fields to the command object (never to the telemetry/session object).
-  int start = body.indexOf("\"comando\":");
-  if (start < 0) return;
-  start += 10;
-  while (start < (int)body.length() && body[start] == ' ') ++start;
-  if (start >= (int)body.length() || body[start] != '{') return;
-  int end = body.indexOf('}', start);
-  if (end < 0) return;
-  String command = body.substring(start, end + 1);
-  if (ausc_json_field(command, "accion") == "grabar") {
-    ausc_queue_recording_id(ausc_json_field(command, "id"));
-  }
+static bool ausc_receive_command(const String& body) {
+  char id[9] = {};
+  return spiroscan_protocol::recording_id(body.c_str(), id) && ausc_queue_recording_id(String(id));
 }
 
 // ------------------------------------------------------------------------------
@@ -334,6 +359,7 @@ bool ausc_start(const String& command_id = "") {
   String resp = http.getString();
   http.end();
   if (code != 200) {
+    if (code == 409) Serial.println(F("[AUSC] Orden vencida o sustituida: no se enviara audio; esperando otra orden."));
     Serial.printf("[AUSC] El servidor rechazo el inicio: HTTP %d %s\r\n", code, resp.c_str());
     ausc_result_color = strip.Color(255, 120, 0);
     ausc_result_until = millis() + 3000;
@@ -341,6 +367,10 @@ bool ausc_start(const String& command_id = "") {
     return false;
   }
   ausc_recording_id = ausc_json_field(resp, "recording_id");
+  if (!ausc_recording_id.length()) {
+    Serial.println(F("[AUSC] Inicio sin recording_id valido: captura cancelada."));
+    return false;
+  }
 
   ausc_upload_error = false;
   ausc_capture_done = false;
@@ -484,11 +514,11 @@ void ausc_diag(bool sensor_found, bool finger, int bpm, float spo2) {
                  : F("  -> OJO: poca memoria; con https la grabacion puede fallar"));
 
   if (ausc_wifi_ready()) {
-    Serial.printf("WiFi: conectado a \"%s\" | senal %d dBm | IP %s\r\n", WIFI_SSID, WiFi.RSSI(),
+    Serial.printf("WiFi: conectado a \"%s\" | senal %d dBm | IP %s\r\n", WiFi.SSID().c_str(), WiFi.RSSI(),
                   WiFi.localIP().toString().c_str());
     if (WiFi.RSSI() < -75) Serial.println(F("  -> Senal debil: acerca el ESP32 al router"));
   } else {
-    Serial.printf("WiFi: SIN CONEXION a \"%s\" (revisa nombre/clave y que sea de 2.4 GHz)\r\n", WIFI_SSID);
+    Serial.printf("WiFi: SIN CONEXION a \"%s\" (revisa nombre/clave y que sea de 2.4 GHz)\r\n", WiFi.SSID().c_str());
   }
 
   if (ausc_server_known()) {

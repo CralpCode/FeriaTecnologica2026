@@ -231,6 +231,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   useEffect(() => {
     const unsubVitals = deviceBridge.onVitals((incomingVitals) => {
       if (userManualDisconnectRef.current) return;
+      if (connectedTypeRef.current === 'wokwi_wifi') return;
 
       const now = Date.now();
 
@@ -305,6 +306,7 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     });
 
     const unsubStatus = deviceBridge.onStatus((connected, name) => {
+      if (connectedTypeRef.current === 'wokwi_wifi' && !userManualDisconnectRef.current) return;
       if (connected && !userManualDisconnectRef.current) {
         setConnectedType('direct_ble');
         setDevice({
@@ -389,8 +391,12 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const connectDirectBluetooth = useCallback(async () => {
     userManualDisconnectRef.current = false;
-    const res = await deviceBridge.scanAndConnectRealBluetooth();
+    const res = deviceBridge.getBluetoothConnected()
+      ? { success: true, message: 'Bluetooth conectado.', deviceName: deviceBridge.getDeviceName() || undefined }
+      : await deviceBridge.scanAndConnectRealBluetooth();
     if (res.success) {
+      deviceBridge.setRelayToCloud(true);
+      connectedTypeRef.current = 'direct_ble';
       setConnectedType('direct_ble');
       setDevice({
         name: res.deviceName || 'SpiroScan-Band (Bluetooth BLE)',
@@ -412,9 +418,17 @@ export const VitalsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   // ESP32 por WiFi: los datos llegan al servidor (la Mac) y la app los lee de ahí.
   const connectViaServer = useCallback(async () => {
+    if (!deviceBridge.getBluetoothConnected()) {
+      return { success: false, message: 'Primero conecta el ESP32 por Bluetooth desde Dispositivo.' };
+    }
+    if (deviceBridge.wifi.status?.state !== 'connected' || deviceBridge.wifi.status?.error) {
+      return { success: false, message: 'Configura el WiFi desde Dispositivo y espera la confirmación del ESP32.' };
+    }
     try {
       await apiService.linkDevice();
       userManualDisconnectRef.current = false;
+      deviceBridge.setRelayToCloud(false);
+      connectedTypeRef.current = 'wokwi_wifi';
       setConnectedType('wokwi_wifi');
       return { success: true, message: 'Recibiendo datos del ESP32 a través del servidor.' };
     } catch (e: any) {

@@ -8,7 +8,7 @@ from datetime import datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Request, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictStr, field_validator
 
 try:
     from dotenv import load_dotenv
@@ -705,11 +705,53 @@ def get_triage(session_id: str):
     return triage.evaluate(_get_effective_session(session_id))
 
 
+class ExternalSpO2Input(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    value: StrictFloat = Field(gt=0, le=100)
+    device_name: StrictStr = Field(default="Oxímetro externo", min_length=1, max_length=80)
+
+    @field_validator("device_name")
+    @classmethod
+    def clean_device_name(cls, value):
+        value = value.strip()
+        if not value or any(ord(c) < 32 for c in value):
+            raise ValueError("Nombre de oxímetro no válido")
+        return value
+
+
+@app.get("/api/clinical/external-spo2/{session_id}")
+def get_external_oxygen(session_id: str):
+    return {"reading": database.get_external_spo2(_get_effective_session(session_id))}
+
+
+@app.post("/api/clinical/external-spo2/{session_id}", openapi_extra={"requestBody": {
+    "required": True, "content": {"application/json": {"schema": ExternalSpO2Input.model_json_schema()}}}})
+async def save_external_oxygen(session_id: str, request: Request):
+    # Invalid non-finite JSON numbers must not break FastAPI's error serialization.
+    try:
+        payload = ExternalSpO2Input.model_validate(await request.json())
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Porcentaje o nombre del oxímetro no válido")
+    sid = _get_effective_session(session_id)
+    reading = database.save_external_spo2(sid, payload.value, payload.device_name)
+    await _publish_triage_if_changed(sid)
+    return {"reading": reading}
+
+
+@app.delete("/api/clinical/external-spo2/{session_id}")
+async def remove_external_oxygen(session_id: str):
+    sid = _get_effective_session(session_id)
+    database.save_external_spo2(sid, None, "")
+    await _publish_triage_if_changed(sid)
+    return {"reading": None}
+
+
 async def _publish_triage_if_changed(sid: str):
     t = triage.evaluate(sid)
     v = t["datos_usados"]["vitales_ultimo_minuto"] or {}
     # También avisa cuando el pulso o la SpO2 empiezan o dejan de usarse (para el paso "Pulso" de la consulta)
     key = t["nivel"] + "|" + "|".join(t["motivos"]) + f"|fc={v.get('fc') is not None}|spo2={v.get('spo2') is not None}"
+    key += f"|oxygen={v.get('spo2')}|oxygen_source={v.get('spo2_origen')}"
     if _last_triage.get(sid) != key:
         _last_triage[sid] = key
         await manager.broadcast({"type": "TRIAGE_UPDATE", "session_id": sid, "data": t})

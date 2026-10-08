@@ -5,6 +5,7 @@ import { nativeBle } from './NativeBleBridge';
 import { isLegacyPacket, LegacyPulseValidator, normalizeDevicePacket, decodeHeartRateMeasurement } from './measurementQuality';
 
 import { DevicePacketBuffer } from './DevicePacketBuffer';
+import { WifiProvisioner } from './wifiProvisioning';
 
 export { RawDevicePacket };
 
@@ -25,6 +26,22 @@ class DeviceBridgeService {
   private smoothedBpm: number = 0;
   private legacyPulse = new LegacyPulseValidator();
   private packetBuffer = new DevicePacketBuffer();
+  public readonly wifi = new WifiProvisioner(() => this.getBluetoothConnected(), frame => this.sendWifiFrame(frame));
+
+  public getBluetoothConnected(): boolean {
+    return Platform.OS === 'web' ? !!(this.bluetoothDevice?.gatt?.connected && this.customChar) : nativeBle.getConnected();
+  }
+
+  private async sendWifiFrame(frame: string): Promise<boolean> {
+    if (!this.getBluetoothConnected()) return false;
+    if (Platform.OS !== 'web') return nativeBle.sendCommand(frame);
+    try {
+      const data = new TextEncoder().encode(frame);
+      if (typeof this.customChar.writeValueWithResponse === 'function') await this.customChar.writeValueWithResponse(data);
+      else await this.customChar.writeValue(data);
+      return true;
+    } catch { return false; }
+  }
 
   public getConnected(): boolean {
     if (Platform.OS !== 'web') {
@@ -331,6 +348,7 @@ class DeviceBridgeService {
    * Enviar comando de control al ESP32 (p. ej. "WAKE")
    */
   public async sendCommand(cmd: string): Promise<boolean> {
+    if (cmd.startsWith('WIFI_')) return this.sendWifiFrame(cmd);
     // 1. Android Nativo (APK)
     if (Platform.OS !== 'web') {
       return await nativeBle.sendCommand(cmd);
@@ -402,6 +420,8 @@ class DeviceBridgeService {
   }
 
   public handleIncomingRawData(raw: RawDevicePacket) {
+    // Configuration acknowledgments are never clinical data or cloud telemetry.
+    if (this.wifi.receive(raw)) return;
     // Si el usuario desconectó el dispositivo, ignorar paquetes residuales inmediatamente
     if (!this.isConnected) {
       return;
@@ -461,6 +481,7 @@ class DeviceBridgeService {
   }
 
   private notifyStatusListeners(connected: boolean, deviceName: string | null) {
+    if (!connected) this.wifi.disconnect();
     this.statusListeners.forEach((l) => l(connected, deviceName));
   }
 }

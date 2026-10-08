@@ -72,6 +72,12 @@ def build_session_pdf(report_id: int, session_id: str, content: dict, llm_genera
         story += [Paragraph("Notas del médico", h2), Paragraph(escape(notes).replace("\n", "<br/>"), body),
                   Paragraph("Texto libre del médico; el sistema no lo verifica ni lo usa en sus reglas.", small)]
 
+    external = datos["oximetria_externa"] if "oximetria_externa" in datos else database.get_external_spo2(session_id)
+    if external:
+        status = "Reciente para la valoración" if external["active"] else "Lectura anterior; fuera de la valoración actual"
+        story += [Paragraph("SpO2 de oxímetro externo · ingreso manual", h2),
+                  Paragraph(escape(f"{external['value']:g} % · {external['device_name']} · {external['measured_at']}"), body),
+                  Paragraph(escape(status + ". No es una medición del MAX30102."), small)]
     story.append(Paragraph("Signos vitales medidos (MAX30102)", h2))
     if s.get("n") or s.get("n_spo2"):
         vt = [["", "Promedio", "Mínimo", "Máximo"],

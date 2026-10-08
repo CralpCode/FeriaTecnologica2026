@@ -70,6 +70,13 @@ def recent_vitals(session_id: str) -> dict:
         if usable_value(latest, channel) is not None and len(values) >= 3:
             out[channel] = round(median(values), 1)
         out["counts"][channel] = len(values)
+    external = database.get_external_spo2(session_id)
+    out["externalBloodOxygen"] = external
+    out["bloodOxygenSource"] = "sensor" if out["bloodOxygen"] is not None else None
+    if external and external["active"]:
+        out["bloodOxygen"] = external["value"]
+        out["bloodOxygenSource"] = "manual_external"
+        out["counts"]["bloodOxygen"] = 1
     return out
 
 
@@ -179,15 +186,19 @@ def assess(context: dict, vitals: dict, recordings: list[dict]) -> dict:
         limitations.append("La altitud puede modificar la SpO2 basal; no se aplica una corrección numérica inventada.")
 
     hr, spo2 = vitals.get("heartRate"), vitals.get("bloodOxygen")
+    external_oxygen = vitals.get("bloodOxygenSource") == "manual_external"
+    if external_oxygen:
+        limitations.append("SpO2 registrada manualmente desde un oxímetro externo; no es una medición del MAX30102 ni demuestra su calibración.")
     if hr is None:
         missing.append("Pulso real válido y reciente: al menos 3 lecturas y buena señal.")
     elif adult and ctx["at_rest"] is True and (hr < 45 or hr > 120):
         finding("pulse_outside_screening_range", "Pulso fuera de los límites de aviso del prototipo", [f"Mediana de pulso válido: {hr:g} BPM."])
         steps.append("Consultar si el pulso alterado persiste. No permite diagnosticar arritmias: para eso se requiere evaluación y ECG.")
     if spo2 is None:
-        missing.append("SpO2 válida, reciente y calibrada: el MAX30102 sin calibración no aporta oxígeno clínicamente interpretable.")
+        missing.append("SpO2 válida y reciente: registrar un oxímetro externo o usar un sensor con calibración verificada.")
     elif spo2 < 94:
-        finding("low_oxygen", "SpO2 reducida: confirmar con equipo clínico", [f"Mediana válida: {spo2:g} %; considerar altitud y valor habitual."])
+        origin = "Oxímetro externo, ingreso manual" if external_oxygen else "Mediana válida del sensor"
+        finding("low_oxygen", "SpO2 reducida: confirmar con equipo clínico", [f"{origin}: {spo2:g} %; considerar altitud y valor habitual."])
         if spo2 < 90:
             urgent = True
             steps.insert(0, "SpO2 por debajo de 90 %: buscar valoración médica inmediata y confirmar con equipo clínico, sin demorar atención por síntomas.")

@@ -244,6 +244,7 @@ const SessionDetail: React.FC<{
 
       <View style={styles.stats}>
         <Stat value={session.readings} label="lecturas" />
+        {!!session.external_readings && <Stat value={session.external_readings} label="externas" />}
         <Stat value={session.recordings} label="grabaciones" />
         <Stat value={session.abnormal_recordings} label="anormales" tint={session.abnormal_recordings ? color.danger : undefined} />
         <Stat value={session.alerts} label="alertas" />

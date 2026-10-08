@@ -1,7 +1,7 @@
 import sqlite3
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 DB_PATH = os.getenv("SPIROSCAN_DB_PATH", os.path.join(os.path.dirname(__file__), "telemetry.db"))
 
@@ -80,6 +80,12 @@ def init_db():
         conn.execute("""CREATE TABLE IF NOT EXISTS clinical_context (
             session_id TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at TEXT NOT NULL
         )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS external_spo2 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+            value REAL CHECK(value IS NULL OR (value > 0 AND value <= 100)),
+            device_name TEXT NOT NULL, measured_at TEXT NOT NULL
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_external_spo2_session ON external_spo2(session_id, id)")
         # Sesiones archivadas: solo se ocultan de las listas; sus datos no se tocan
         conn.execute("""CREATE TABLE IF NOT EXISTS archived_sessions (
             session_id TEXT PRIMARY KEY, archived_at TEXT NOT NULL
@@ -98,6 +104,32 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_rec_session ON recordings(session_id);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_session ON alerts(session_id);")
     conn.close()
+
+def save_external_spo2(session_id: str, value: float | None, device_name: str) -> dict | None:
+    """Append corrections/withdrawals; never write into ESP32 telemetry."""
+    conn = get_db_connection()
+    with conn:
+        conn.execute("INSERT INTO external_spo2(session_id, value, device_name, measured_at) VALUES (?, ?, ?, ?)",
+                     (session_id, value, device_name, datetime.now(timezone.utc).isoformat()))
+    conn.close()
+    return get_external_spo2(session_id)
+
+
+def get_external_spo2(session_id: str) -> dict | None:
+    conn = get_db_connection()
+    row = conn.execute("SELECT * FROM external_spo2 WHERE session_id = ? ORDER BY id DESC LIMIT 1", (session_id,)).fetchone()
+    conn.close()
+    if row is None or row["value"] is None:
+        return None
+    result = dict(row)
+    result.update(source="manual_external", expires_after_seconds=900, active=False)
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(result["measured_at"])).total_seconds()
+        result["active"] = 0 <= age <= 900
+    except (ValueError, TypeError):
+        pass
+    return result
+
 
 def save_reading(data: dict):
     data = {**data, **normalize_measurements(data)}
@@ -476,10 +508,12 @@ def get_sessions_overview(limit: int = 100, archived: bool | None = False) -> li
         d = row(r["s"]); d["alerts"] = r["n"]; d["active_alerts"] = r["act"] or 0; touch(d, None, r["b"])
     for r in conn.execute("SELECT session_id s, COUNT(*) n, MAX(created_at) b FROM reports GROUP BY session_id"):
         d = row(r["s"]); d["reports"] = r["n"]; touch(d, None, r["b"])
+    for r in conn.execute("SELECT session_id s, COUNT(value) n, MIN(measured_at) a, MAX(measured_at) b FROM external_spo2 GROUP BY session_id"):
+        d = row(r["s"]); d["external_readings"] = r["n"]; touch(d, r["a"], r["b"])
     conn.close()
     # Se omiten las sesiones vacías (se crea una cada vez que alguien abre la app sin medir nada)
     rows = [d for d in out.values()
-            if d["recordings"] or d["reports"] or d["alerts"] or d["readings"] >= 5]
+            if d["recordings"] or d["reports"] or d["alerts"] or d.get("external_readings") or d["readings"] >= 5]
     hidden = archived_ids()
     for d in rows:
         d["archived"] = d["session_id"] in hidden
@@ -498,6 +532,7 @@ def session_exists(session_id: str) -> bool:
         "SELECT 1 FROM alerts WHERE session_id = ? LIMIT 1",
         "SELECT 1 FROM reports WHERE session_id = ? LIMIT 1",
         "SELECT 1 FROM clinical_context WHERE session_id = ? LIMIT 1",
+        "SELECT 1 FROM external_spo2 WHERE session_id = ? LIMIT 1",
     ))
     conn.close()
     return found

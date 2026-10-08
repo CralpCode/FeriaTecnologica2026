@@ -34,7 +34,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "d3331c26-9ca5-4d8e-bc90-19c6500766ab"
+        "projectId": "d1fad9d1-ba73-4750-a57a-fe2c4e25764b"
       }
     },
     "plugins": [
@@ -52,6 +52,7 @@
         }
       ],
       "expo-font"
-    ]
+    ],
+    "owner": "117carloscode"
   }
 }

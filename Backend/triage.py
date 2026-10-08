@@ -15,6 +15,8 @@ def evaluate(session_id: str) -> dict:
             "datos_usados": {"vitales_ultimo_minuto": {
                 "spo2": v["bloodOxygen"], "fc": v["heartRate"],
                 "lecturas": max(v.get("counts", {}).values(), default=0),
+                "lecturas_pulso": v.get("counts", {}).get("heartRate", 0),
+                "spo2_origen": v.get("bloodOxygenSource"),
             } if v["bloodOxygen"] is not None or v["heartRate"] is not None else None,
                 "corazon": None, "pulmon": None},
             "reglas_version": RULES_VERSION,

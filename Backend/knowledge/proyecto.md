@@ -10,6 +10,7 @@ Prototipo de tamizaje cardiorrespiratorio con ESP32, MAX30102 e INMP441. El PDF 
 
 - El firmware actualizado obtiene señales roja e infrarroja del MAX30102 y estima pulso, con controles de contacto, calidad, estabilización y caducidad. Los paquetes v2 indican por separado la validez de pulso, SpO2, PRV y audio. En el formato original sin esos indicadores, el servidor admite pulso solo con contacto y varias lecturas estables; no valida SpO2 ni PRV por una cifra plausible.
 - La SpO2 puede mostrarse como **estimación del sensor sin calibrar** cuando el ESP32 la envía con validez explícita. El firmware usa el algoritmo de referencia Maxim, pero eso no valida ni calibra clínicamente el sistema óptico completo. Sin calibración real se excluye del triaje. Si falta una lectura válida, se indica que se espera señal; no se inventan valores ni se activa la calibración para omitir este requisito.
+- Como alternativa, en el paso Pulso se puede registrar manualmente la SpO2 de un oxímetro externo. Se guarda por paciente con fecha y origen `manual_external`, separada de la telemetría del ESP32. Durante 15 minutos tiene prioridad para la valoración; después se conserva como lectura anterior. Actualizarla o retirarla no calibra el MAX30102. El asistente y el informe reciben explícitamente su origen externo.
 - La variabilidad disponible es PRV (RMSSD de intervalos ópticos), no HRV medida por ECG. El estrés experimental es una heurística por PRV enviada por el firmware, no una medición clínica de estrés; queda fuera del triaje. Presión arterial, temperatura corporal y ECG no se presentan como mediciones válidas. Un nivel digital o relativo de micrófono no equivale a presión sonora ni diagnostica hallazgos acústicos.
 - El INMP441 graba sonido. El nivel digital en dBFS no es presión sonora en dB SPL.
 - La edad, síntomas, reposo, altitud y antecedentes provienen de respuestas explícitas del usuario. Un dato no contestado permanece desconocido.
@@ -44,7 +45,7 @@ Se combinan resultados acústicos, mediciones válidas y síntomas mediante regl
 
 La API, el semáforo, los informes y el chat comparten este motor. Las secciones clínicas del informe son fijas (reglas). El modelo de lenguaje local (Qwen3-Next) redacta el chat, un resumen en lenguaje sencillo del informe y el texto de las alertas a partir de estos datos; no decide hallazgos ni enfermedades, y un texto con cifras que no están en los datos se descarta.
 
-Semáforo: ROJO si hay un síntoma de alarma o SpO2 calibrada menor de 90 %. AMARILLO si hay hallazgos (SpO2 calibrada menor de 94 %, pulso fuera de 45 a 120 BPM en un adulto en reposo, sonido cardíaco o pulmonar anormal) o síntomas comunicados. GRIS si faltan datos. VERDE solo sin hallazgos ni datos faltantes; hoy no se alcanza porque no hay SpO2 calibrada.
+Semáforo: ROJO si hay un síntoma de alarma o SpO2 utilizable menor de 90 %. AMARILLO si hay hallazgos (SpO2 utilizable menor de 94 %, pulso fuera de 45 a 120 BPM en un adulto en reposo, sonido cardíaco o pulmonar anormal) o síntomas comunicados. SpO2 utilizable puede proceder de un sensor calibrado o de un oxímetro externo registrado manualmente y reciente. GRIS si faltan datos. VERDE solo sin hallazgos ni datos faltantes. Estas reglas experimentales no demuestran exactitud clínica.
 
 ## Uso
 

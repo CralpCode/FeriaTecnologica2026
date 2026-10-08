@@ -11,11 +11,12 @@ const STATUS_TONE = { urgent: 'danger', findings: 'warning', insufficient_data: 
 
 /**
  * Paso de la consulta donde se completa cada dato faltante (según el texto del servidor,
- * Backend/clinical_assessment.py). La SpO2 no tiene paso: requiere calibrar el sensor.
+ * Backend/clinical_assessment.py). La oximetría externa se registra en Pulso.
  */
 const MISSING_STEP: { re: RegExp; step: number; label: string }[] = [
   { re: /^(Completar preguntas|Edad|Confirmar medición en reposo|Altitud)/i, step: 1, label: 'Datos' },
   { re: /^Pulso real/i, step: 2, label: 'Pulso' },
+  { re: /^SpO2/i, step: 2, label: 'SpO2 externa' },
   { re: /^Auscultación cardíaca/i, step: 3, label: 'Corazón' },
   { re: /^Grabación pulmonar/i, step: 4, label: 'Pulmón' },
 ];

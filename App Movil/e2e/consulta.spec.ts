@@ -1,4 +1,5 @@
 import { APIRequestContext, expect, Page, test } from '@playwright/test';
+import { mockBluetooth, connectBluetoothAndWifi } from './bluetoothFixture';
 
 /**
  * Recorre una consulta completa como lo haría el médico, con el ESP32 simulado por la API.
@@ -67,6 +68,7 @@ async function sendPulse(api: APIRequestContext, seconds = 7) {
 const button = (page: Page, name: string | RegExp) => page.getByRole('button', { name }).first();
 
 test('consulta completa: paciente, datos, pulso, corazón, resultado, notas, informe e historial', async ({ page, request }, info) => {
+  await mockBluetooth(page);
   const code = `E2E${info.project.name === 'celular' ? 'CEL' : 'PC'}${Date.now() % 100000}`;
   const other = `e2eotro${info.project.name === 'celular' ? 'c' : 'p'}${Date.now() % 1000}`;
   page.on('popup', (p) => p.close().catch(() => {}));   // el PDF se abre en otra pestaña
@@ -85,8 +87,7 @@ test('consulta completa: paciente, datos, pulso, corazón, resultado, notas, inf
 
   // 3. Pulso (paquetes válidos del "ESP32")
   await expect(page.getByText('Dedo índice sobre el sensor', { exact: false })).toBeVisible();
-  const connect = page.getByRole('button', { name: 'Conectar ESP32' });
-  if (await connect.isVisible()) await connect.click();
+  await connectBluetoothAndWifi(page);
   await sendPulse(request);
   await expect(page.getByText('Lectura válida').first()).toBeVisible();
   await button(page, 'Continuar a corazón').click();

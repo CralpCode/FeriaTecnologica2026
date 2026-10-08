@@ -135,6 +135,13 @@ class NativeBleServiceImpl implements NativeBleService {
     }
     const cleanCmd = cmd.trim();
     const base64Val = asciiToBase64(cleanCmd);
+    // Configuration frames contain credentials. No logging or ambiguous retry.
+    if (cleanCmd.startsWith('WIFI_')) {
+      try {
+        await this.connectedDevice.writeCharacteristicWithResponseForService(SERVICE_UUID, CHAR_UUID, base64Val);
+        return true;
+      } catch { return false; }
+    }
     console.log(`[Native BLE] Despachando comando "${cleanCmd}" (Base64: ${base64Val})...`);
 
     // Intento 1: Con respuesta (GATT Write Request estándar con ACK a nivel de enlace)
@@ -269,7 +276,8 @@ class NativeBleServiceImpl implements NativeBleService {
                   try {
                     const text = base64ToUtf8(characteristic.value);
                     for (const packet of this.packetBuffer.push(text)) {
-                      if (packet.bpm !== undefined || (packet as any).heartRate !== undefined) {
+                      if ((packet as any).type === 'wifi_status') onData(packet);
+                      else if (packet.bpm !== undefined || (packet as any).heartRate !== undefined) {
                         receivedCustomData = true;
                         onData(packet);
                       }

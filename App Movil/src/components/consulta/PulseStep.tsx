@@ -13,6 +13,7 @@ import { Colors } from '../../theme/colors';
 import { color, font, radius, space, tabular, weight } from '../../theme/tokens';
 import { Banner, Button, Card, SectionHeader, StatusPill, useReducedMotion, VitalTile } from '../ui';
 import { useStepAction } from './stepAction';
+import { ExternalSpO2Card } from './ExternalSpO2Card';
 
 /** Paso 3: pulso validado y el resto de lecturas del dispositivo (con su estado real, sin rellenar). */
 export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
@@ -30,7 +31,7 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
   const audio = display.audio_rms;
   const stress = display.experimentalStressScore;
   const used = triage?.datos_usados?.vitales_ultimo_minuto;
-  const readings = Math.min(3, used?.lecturas ?? 0);
+  const readings = Math.min(3, used?.lecturas_pulso ?? used?.lecturas ?? 0);
   const pulseUsed = used?.fc ?? null;
   const connected = connectedType !== 'none';
   const bpm = pulse ? Math.round(pulse.value) : null;
@@ -90,6 +91,7 @@ export const PulseStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
       </Card>
 
       <View style={{ marginBottom: space.lg }}><BloodOxygenReading reading={oxygen} vitals={vitals} /></View>
+      <View style={{ marginBottom: space.lg }}><ExternalSpO2Card key={currentSessionId} sessionId={currentSessionId} /></View>
       <Text style={styles.sectionTitle}>Otras lecturas del dispositivo</Text>
       <View style={styles.grid}>
         <VitalTile icon="heart-flash" tint={Colors.pressure} label="Variabilidad de pulso (PRV)" unit="ms"

@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Modal, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import { Text } from './ui/Text';
 import { Ionicons } from '@expo/vector-icons';
 import { useModalLayout } from '../hooks/useLayout';
 import { useDeviceConnection } from '../context/VitalsContext';
 import { deviceBridge } from '../services/DeviceBridgeService';
+import { WifiStatus, wifiErrorMessage } from '../services/wifiProvisioning';
 import { DEFAULT_LOCAL_LAN } from '../config/api';
 import { patientLabel } from '../services/consulta';
 import { color, font, radius, space, touch, weight } from '../theme/tokens';
@@ -29,9 +30,32 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
     connectedType, device, connectDirectBluetooth, connectViaServer, disconnectAllDevices,
     isBackendOnline, backendUrl, updateBackendUrl, currentSessionId,
   } = useDeviceConnection();
-  const [busy, setBusy] = useState<'wifi' | 'ble' | null>(null);
+  const [busy, setBusy] = useState<'wifi' | 'ble' | 'config' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState(false);
+  const [ssid, setSsid] = useState('');
+  const [password, setPassword] = useState('');
+  const [wifi, setWifi] = useState<WifiStatus | null>(deviceBridge.wifi.status);
+  const [bluetooth, setBluetooth] = useState(deviceBridge.getBluetoothConnected());
+  useEffect(() => {
+    const status = deviceBridge.onStatus(() => setBluetooth(deviceBridge.getBluetoothConnected()));
+    const network = deviceBridge.wifi.subscribe(setWifi);
+    return () => { status(); network(); };
+  }, []);
+  useEffect(() => {
+    if (!visible) { setPassword(''); setError(null); }
+    if (visible && bluetooth) deviceBridge.wifi.query().catch(() => setError('No se pudo consultar el WiFi del ESP32.'));
+    if (!bluetooth) setWifi(null);
+  }, [visible, bluetooth]);
+  const configure = async (forget = false) => {
+    setError(null); setBusy('config');
+    try {
+      const result = forget ? await deviceBridge.wifi.forget() : await deviceBridge.wifi.configure(ssid, password);
+      setWifi(result); setPassword('');
+      if (forget && connectedType === 'wokwi_wifi') await connectDirectBluetooth();
+    } catch (e: any) { setError(e?.message || 'No se pudo configurar el WiFi.'); }
+    finally { setBusy(null); }
+  };
   const connected = connectedType !== 'none';
   const status = STATUS_TEXT[connectedType] || STATUS_TEXT.none;
   const bleAvailable = Platform.OS !== 'web' || deviceBridge.isWebBluetoothSupported();
@@ -41,7 +65,8 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
     setError(null); setBusy(kind);
     try {
       const res = kind === 'wifi' ? await connectViaServer() : await connectDirectBluetooth();
-      if (res.success) onClose();
+      if (res.success && kind === 'wifi') onClose();
+      else if (res.success) setBluetooth(deviceBridge.getBluetoothConnected());
       else setError(res.message);
     } catch (e: any) {
       setError(e?.message || 'No se pudo conectar.');
@@ -82,38 +107,52 @@ export const DeviceConnectionModal: React.FC<DeviceConnectionModalProps> = ({ vi
             <Text style={styles.section}>Conectar</Text>
             <Card>
               <View style={styles.row}>
-                <Ionicons name="wifi" size={22} color={color.primary} />
+                <Ionicons name="bluetooth" size={22} color={color.primary} />
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <View style={styles.titleRow}>
-                    <Text style={styles.cardTitle}>ESP32 por WiFi</Text>
-                    <StatusPill label="Recomendado" tone="primary" />
-                  </View>
-                  <Text style={styles.text}>El ESP32 envía pulso y audio al servidor. Funciona en cualquier celular o computadora con el navegador.</Text>
+                  <Text style={styles.cardTitle}>1. Conectar por Bluetooth</Text>
+                  <Text style={styles.text}>Enlaza primero el ESP32. Puedes recibir sus lecturas directamente y configurar el WiFi desde aquí.</Text>
                 </View>
               </View>
-              <Button label={connectedType === 'wokwi_wifi' ? 'Recibiendo datos' : 'Recibir datos en este paciente'} icon="wifi"
-                      onPress={() => run('wifi')} loading={busy === 'wifi'} disabled={connectedType === 'wokwi_wifi'}
+              <Button label={bluetooth ? 'Bluetooth conectado' : 'Buscar y enlazar'} variant="secondary" icon="bluetooth"
+                      onPress={() => run('ble')} loading={busy === 'ble'} disabled={bluetooth || !bleAvailable || !!busy}
                       style={{ marginTop: space.md }} />
+              {!bleAvailable && <Text style={styles.meta}>Usa la app Android o Chrome/Edge con Bluetooth y una dirección segura.</Text>}
+              {bluetooth && connectedType === 'wokwi_wifi' && <Button label="Recibir por Bluetooth" variant="secondary"
+                      disabled={!!busy} onPress={() => run('ble')} style={{ marginTop: space.sm }} />}
             </Card>
 
             <Card>
               <View style={styles.row}>
-                <Ionicons name="bluetooth" size={22} color={color.primary} />
+                <Ionicons name="wifi" size={22} color={color.primary} />
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={styles.cardTitle}>Bluetooth directo</Text>
-                  <Text style={styles.text}>
-                    Enlaza la banda directamente. En la app Android usa Bluetooth nativo; en el navegador solo funciona
-                    en Chrome o Edge con https o en este equipo. En la feria conviene WiFi.
-                  </Text>
+                  <Text style={styles.cardTitle}>2. WiFi opcional</Text>
+                  <Text style={styles.text}>Introduce una red de 2.4 GHz. El ESP32 guardará la contraseña cuando se conecte.</Text>
                 </View>
               </View>
-              {connectedType === 'direct_ble' ? (
-                <Button label="Desconectar Bluetooth" variant="secondary" icon="bluetooth" onPress={disconnectAllDevices} style={{ marginTop: space.md }} />
-              ) : (
-                <Button label="Buscar y enlazar" variant="secondary" icon="bluetooth" onPress={() => run('ble')}
-                        loading={busy === 'ble'} disabled={!bleAvailable} style={{ marginTop: space.md }} />
-              )}
-              {!bleAvailable && <Text style={styles.meta}>Este navegador no tiene Bluetooth web.</Text>}
+              {!bluetooth && <Text style={styles.meta}>Primero conecta por Bluetooth para habilitar estos campos.</Text>}
+              <TextInput accessibilityLabel="Nombre de la red WiFi" placeholder="Nombre de la red WiFi"
+                         accessibilityState={{ disabled: !bluetooth || !!busy }} aria-disabled={!bluetooth || !!busy}
+                         value={ssid} onChangeText={setSsid} autoCapitalize="none" autoCorrect={false} autoComplete="off"
+                         editable={bluetooth && !busy} style={styles.input} />
+              <TextInput accessibilityLabel="Contraseña del WiFi" placeholder="Contraseña (vacía para red abierta)"
+                         accessibilityState={{ disabled: !bluetooth || !!busy }} aria-disabled={!bluetooth || !!busy}
+                         value={password} onChangeText={setPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} autoComplete="off"
+                         editable={bluetooth && !busy} style={styles.input} />
+              <Button label="Guardar y conectar WiFi" icon="wifi" onPress={() => configure()}
+                      loading={busy === 'config'} disabled={!bluetooth || !!busy || !ssid.length}
+                      style={{ marginTop: space.md }} />
+              {wifi && <Text style={styles.meta}>
+                {wifi.error ? wifiErrorMessage(wifi.error) : wifi.state === 'connected'
+                  ? (wifi.saved ? 'WiFi conectado y guardado en el ESP32.' : 'WiFi conectado.')
+                  : wifi.state === 'connecting' ? 'El ESP32 está conectándose al WiFi…'
+                  : wifi.state === 'disabled' ? 'WiFi sin configurar. Bluetooth sigue disponible.' : 'WiFi sin conexión.'}
+              </Text>}
+              <Button label={connectedType === 'wokwi_wifi' ? 'Recibiendo datos' : 'Recibir datos en este paciente'} icon="cloud-outline"
+                      onPress={() => run('wifi')} loading={busy === 'wifi'}
+                      disabled={!bluetooth || wifi?.state !== 'connected' || !!wifi?.error || !!busy || connectedType === 'wokwi_wifi'}
+                      style={{ marginTop: space.md }} />
+              {bluetooth && wifi?.state === 'connected' && <Button label="Olvidar red WiFi" variant="secondary"
+                      disabled={!!busy} onPress={() => configure(true)} style={{ marginTop: space.sm }} />}
             </Card>
 
             <TouchableOpacity style={styles.advancedHead} onPress={() => setAdvanced((v) => !v)} accessibilityRole="button"
@@ -167,6 +206,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: space.md, alignItems: 'flex-start' },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, flexWrap: 'wrap', marginBottom: 2 },
   cardTitle: { fontSize: font.md, fontWeight: weight.heavy, color: color.text },
+  input: { borderWidth: 1, borderColor: color.border, borderRadius: radius.md, padding: space.md, marginTop: space.sm, color: color.text, backgroundColor: color.surface },
   text: { fontSize: font.sm, color: color.textSecondary, lineHeight: 20, marginTop: 2 },
   meta: { fontSize: font.xs, color: color.textMuted, marginTop: space.sm },
   section: { fontSize: font.xs, fontWeight: weight.heavy, color: color.textMuted, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: space.sm },

@@ -291,6 +291,20 @@ class ApiService {
     return this.request(`/api/reports/session/${encodeURIComponent(sessionId)}`, { method: 'POST' });
   }
 
+  getExternalSpO2(sessionId: string): Promise<{ reading: import('../types/vitals').ExternalSpO2Reading | null }> {
+    return this.request(`/api/clinical/external-spo2/${encodeURIComponent(sessionId)}`);
+  }
+
+  saveExternalSpO2(sessionId: string, value: number, deviceName: string): Promise<{ reading: import('../types/vitals').ExternalSpO2Reading | null }> {
+    return this.request(`/api/clinical/external-spo2/${encodeURIComponent(sessionId)}`, {
+      method: 'POST', body: JSON.stringify({ value, device_name: deviceName }),
+    });
+  }
+
+  removeExternalSpO2(sessionId: string): Promise<{ reading: null }> {
+    return this.request(`/api/clinical/external-spo2/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+  }
+
   getTriage(): Promise<TriageResult> {
     return this.request(`/api/triage/${encodeURIComponent(getSessionId())}`);
   }

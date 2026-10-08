@@ -4,16 +4,18 @@
 // ==============================================================================
 #pragma once
 
-// Red WiFi (2.4 GHz) a la que están conectados la Mac (servidor) y el ESP32.
-#define WIFI_SSID      "SpiroScan-Feria"
-#define WIFI_PASSWORD  "cambia-esta-clave"
+// Opcional: red inicial de 2.4 GHz. También se configura desde la app por BLE.
+// Las credenciales guardadas desde la app tienen prioridad sobre estos valores.
+// WiFi permanece apagado hasta la primera conexión BLE después de cada arranque.
+#define WIFI_SSID      ""
+#define WIFI_PASSWORD  ""
 
-// Dirección del servidor (la Mac):
+// Direccion del servidor:
 //   ""  (vacío)  -> el ESP32 busca la Mac solo, pero SOLO si están en el MISMO WiFi.
 //   "https://xxxx.trycloudflare.com"  -> envía por internet desde CUALQUIER red.
 //        Es el link público de la app (sin "/" al final). Si el link cambia, hay que
 //        actualizarlo aquí y volver a subir el firmware.
-#define SERVER_URL     ""
+#define SERVER_URL     "https://spiroscan.tail8e9fc2.ts.net"
 
 // Identificador del dispositivo (el backend lo asocia a la sesión que la app "armó").
 #define DEVICE_ID      "ESP32-BIO-01"

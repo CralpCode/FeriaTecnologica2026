@@ -17,6 +17,7 @@ const LEVEL: Record<string, { label: string; tone: 'danger' | 'warning' | 'succe
 
 const summary = (r: SessionOverview) => {
   const parts = [relativeTime(r.last_seen)];
+  if (r.external_readings) parts.push(`${r.external_readings} ${r.external_readings === 1 ? 'lectura externa' : 'lecturas externas'}`);
   if (r.recordings) parts.push(`${r.recordings} ${r.recordings === 1 ? 'grabación' : 'grabaciones'}${r.abnormal_recordings ? ` (${r.abnormal_recordings} anormal${r.abnormal_recordings === 1 ? '' : 'es'})` : ''}`);
   if (r.reports) parts.push(`${r.reports} ${r.reports === 1 ? 'informe' : 'informes'}`);
   return parts.filter(Boolean).join(' · ');
