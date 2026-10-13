@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Platform, StatusBar as RNStatusBar } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,6 +19,8 @@ import { AIAssistantScreen } from './src/screens/AIAssistantScreen';
 import { ConsultaScreen } from './src/screens/ConsultaScreen';
 import { AlertsScreen } from './src/screens/AlertsScreen';
 import { HistoryScreen } from './src/screens/HistoryScreen';
+import { LoadingScreen } from './src/components/brand/LoadingScreen';
+import { hideWebSplash } from './src/components/brand/splash';
 
 const MainAppContent: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<TabScreen>('consulta');
@@ -37,6 +39,9 @@ const MainAppContent: React.FC = () => {
     hasAlert: hasCriticalAlert,
     alertsCount: activeAlertsCount,
   };
+
+  // La app ya se dibujó: se quita la pantalla de carga de la web
+  useEffect(hideWebSplash, []);
 
   const paddingTop = Platform.OS === 'android' ? (RNStatusBar.currentHeight || 0) : (insets?.top || 0);
 
@@ -83,7 +88,7 @@ installWebStyles();
 export default function App() {
   // Inter va incluida en la app; si no carga, se sigue con la letra del sistema
   const [fontsLoaded, fontError] = useFonts(FONT_FILES);
-  if (!fontsLoaded && !fontError) return <View style={styles.root} />;
+  if (!fontsLoaded && !fontError) return <LoadingScreen />;
   return (
     <SafeAreaProvider>
       <VitalsProvider>

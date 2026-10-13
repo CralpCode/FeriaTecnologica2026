@@ -8,10 +8,12 @@ from xml.sax.saxutils import escape
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image
 
 REPORT_DIR = Path(os.getenv("SPIROSCAN_REPORT_DIR", Path(__file__).resolve().parent / "reports"))
 REPORT_DIR.mkdir(exist_ok=True)
+LOGO_PATH = Path(__file__).resolve().parent / "logo_spiroscan.png"
 
 DISCLAIMER = ("Prototipo universitario de TAMIZAJE. No diagnostica, no se ha validado en pacientes y no "
               "sustituye la evaluación médica ni el ecocardiograma.")
@@ -64,16 +66,27 @@ def build_session_pdf(report_id: int, session_id: str, content: dict, llm_genera
     ss = getSampleStyleSheet()
     body = ParagraphStyle("b", parent=ss["Normal"], fontSize=10, leading=14)
     small = ParagraphStyle("s", parent=body, fontSize=8, leading=10.5, textColor=colors.HexColor("#64748B"))
-    h1 = ParagraphStyle("h1", parent=ss["Title"], fontSize=17, textColor=colors.HexColor("#1E3A8A"), spaceAfter=2)
+    h1 = ParagraphStyle("h1", parent=ss["Title"], alignment=0, fontSize=17, textColor=colors.HexColor("#1E3A8A"), spaceAfter=2)
     h2 = ParagraphStyle("h2", parent=ss["Heading2"], fontSize=11.5, textColor=colors.HexColor("#1E3A8A"),
                         spaceBefore=10, spaceAfter=4)
 
     datos = content.get("datos", {})
     context = database.get_clinical_context(session_id) or {}
-    story = [
+    heading = [
         Paragraph("SpiroScan · Informe de evaluación", h1),
         Paragraph(f"Paciente <b>{escape(session_id)}</b> · {datetime.now():%d/%m/%Y %H:%M} · "
                   "Orientación de tamizaje; no reemplaza la valoración médica.", small),
+    ]
+    if LOGO_PATH.exists():
+        # Logo a la derecha del título (proporción del logo 676 x 454)
+        logo = Image(str(LOGO_PATH), width=0.95 * inch, height=0.95 * inch * 454 / 676)
+        head = Table([[heading, logo]], colWidths=[None, 1.05 * inch])
+        head.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                                  ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                                  ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
+        heading = [head]
+    story = [
+        *heading,
         HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#2563EB"), spaceBefore=4, spaceAfter=4),
         Paragraph("Resultado de la evaluación", h2),
     ]

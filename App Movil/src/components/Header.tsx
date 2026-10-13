@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text } from './ui/Text';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { useVitals } from '../context/VitalsContext';
 import { useLayout } from '../hooks/useLayout';
 import { patientLabel, isNamedPatient, relativeTime } from '../services/consulta';
@@ -11,6 +11,7 @@ import { DeviceConnectionModal } from './DeviceConnectionModal';
 import { ClinicalAudioModal } from './ClinicalAudioModal';
 import { AIExplainerModal } from './AIExplainerModal';
 import { NewPatientModal } from './NewPatientModal';
+import { BRAND, LogoMark } from './brand/Logo';
 
 interface HeaderProps {
   /** Se llama después de crear un paciente nuevo (p. ej. para ir a la consulta). */
@@ -47,11 +48,12 @@ export const Header: React.FC<HeaderProps> = ({ onNewPatient }) => {
     <>
       <View style={styles.bar}>
         <View style={styles.brand}>
-          <View style={styles.logo}>
-            <MaterialCommunityIcons name="heart-pulse" size={22} color={color.primary} />
-          </View>
+          <LogoMark size={40} />
           <View style={{ minWidth: 0, flexShrink: 1 }}>
-            <Text style={styles.title} numberOfLines={1}>SpiroScan</Text>
+            <Text style={styles.title} numberOfLines={1}>
+              <Text style={[styles.title, { color: BRAND.navy }]}>Spiro</Text>
+              <Text style={[styles.title, { color: BRAND.green }]}>Scan</Text>
+            </Text>
             <Text style={styles.patient} numberOfLines={1}>
               {named ? `Paciente ${patientLabel(currentSessionId)}` : 'Sin paciente identificado'}
             </Text>
@@ -130,7 +132,6 @@ const styles = StyleSheet.create({
     backgroundColor: color.surface, borderBottomWidth: 1, borderBottomColor: color.border,
   },
   brand: { flexDirection: 'row', alignItems: 'center', gap: space.sm, flex: 1, minWidth: 0 },
-  logo: { width: 38, height: 38, borderRadius: radius.md, backgroundColor: color.primarySoft, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: font.md, fontWeight: weight.heavy, color: color.text, letterSpacing: -0.3 },
   patient: { fontSize: font.xs, color: color.textSecondary, fontWeight: weight.medium },
   actions: { flexDirection: 'row', alignItems: 'center', gap: space.sm, flexShrink: 0 },
