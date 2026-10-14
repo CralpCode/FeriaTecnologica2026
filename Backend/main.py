@@ -28,6 +28,7 @@ import reports
 import triage
 import clinical_assessment
 import measurement_quality
+import spo2_calibration
 from ml import classifier, lung, lung_baseline
 
 app = FastAPI(
@@ -317,6 +318,8 @@ async def receive_telemetry(request: Request):
         data_dict.update({"spo2": None, "hrv": None, "stress": None})
     elif data_dict.get("source") is None:
         data_dict["source"] = "unknown"
+    # SpO2 corregido contra el oxímetro de referencia (models/spo2_calibracion.json); el crudo queda en spo2Raw
+    spo2_calibration.apply(data_dict)
     data_dict["device_connected"] = True
     saved = database.save_reading(data_dict)
     

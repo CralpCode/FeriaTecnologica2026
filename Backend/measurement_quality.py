@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 
 MAX_AGE_S = 15
 QUALITY_FIELDS = ("source", "heartRateValid", "bloodOxygenValid", "spo2Calibrated", "spo2Estimated",
-                  "signalQuality", "sampleAgeMs", "finger", "audioUnit", "audioValid", "device_connected", "validadoPor")
+                  "signalQuality", "sampleAgeMs", "finger", "audioUnit", "audioValid", "device_connected", "validadoPor",
+                  "spo2Raw")
 # Indicadores que solo envía el firmware nuevo; si no llega ninguno, el paquete es del formato original.
 NEW_FORMAT_KEYS = ("v", "valid", "source", "heartRateValid", "heart_rate_valid", "bloodOxygenValid", "spo2_valid",
                    "spo2Calibrated", "spo2_calibrated", "spo2Estimated", "signalQuality", "signal_quality",

@@ -1,0 +1,10 @@
+{
+  "activo": true,
+  "metodo": "desplazamiento",
+  "nota": "Pares tomados por el equipo el 2026-10-14: sensor del equipo (lo que mostraba la página) contra oxímetro de dedo comercial. Con pocos pares solo se corrige un desplazamiento fijo, no la pendiente.",
+  "pares": [
+    {"sensor": 100.0, "oximetro": 95.0},
+    {"sensor": 95.0, "oximetro": 92.0},
+    {"sensor": 97.5, "oximetro": 95.0, "nota": "la página marcaba entre 97 y 98"}
+  ]
+}
